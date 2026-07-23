@@ -1,8 +1,11 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 
+const appIconPath = path.resolve(import.meta.dirname, "../assets/icon.png");
+
 const createWindow = (): void => {
   const window = new BrowserWindow({
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -21,6 +24,10 @@ const createWindow = (): void => {
 };
 
 app.whenReady().then(() => {
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(appIconPath);
+  }
+
   createWindow();
 
   app.on("activate", () => {
