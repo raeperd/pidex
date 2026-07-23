@@ -1,7 +1,321 @@
+<script lang="ts">
+  import { onMount, tick } from "svelte";
+  import type { Bootstrap, ChatSnapshot, ExtensionDialog, RecentWorkspace, ServerEvent, SessionSummary, Workspace } from "@pidex/api";
+  import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
+  import { ChatConnection, type ConnectionState } from "./chat-connection";
+  import Icon from "./Icon.svelte";
+  import Markdown from "./Markdown.svelte";
+
+  let bootstrap: Bootstrap | undefined; let workspace: Workspace | undefined; let snapshot: ChatSnapshot | undefined;
+  let workspaceCache: Record<string, Workspace> = {}; let expandedProjectIds: string[] = [];
+  let projectPath = ""; let draft = ""; let search = ""; let connection: ConnectionState = "disconnected"; let error = ""; let drawerOpen = false; let projectLoading = false; let projectLoadingId = ""; let chatLoading = false;
+  let delivery: "normal" | "steer" | "follow-up" = "normal";
+  let transcript: HTMLElement; let searchInput: HTMLInputElement; let promptInput: HTMLTextAreaElement; let nearBottom = true; let dialogValue: string | boolean = ""; let dialogElement: HTMLDialogElement;
+  let renameDialogElement: HTMLDialogElement; let renameValue = ""; let compactDialogElement: HTMLDialogElement;
+  const api = new PidexApiClient();
+  const chatConnection = new ChatConnection({ onEvent: applyEvent, onStateChange: (state) => connection = state });
+
+  const active = () => snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error";
+  const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  const workspaceFor = (id: string) => workspaceCache[id] ?? (workspace?.id === id ? workspace : undefined);
+  const projectExpanded = (id: string) => expandedProjectIds.includes(id);
+  function sessionsFor(project: RecentWorkspace) { const loaded = workspaceFor(project.id); if (!loaded) return []; const query = search.trim().toLowerCase(); if (!query || `${loaded.name} ${loaded.path}`.toLowerCase().includes(query)) return loaded.sessions; return loaded.sessions.filter((session) => `${session.name ?? ""} ${session.firstMessage}`.toLowerCase().includes(query)); }
+  function visibleProjects() { const query = search.trim().toLowerCase(); return (bootstrap?.recentWorkspaces ?? []).filter((project) => { if (!query || `${projectName(project.path)} ${project.path}`.toLowerCase().includes(query)) return true; return sessionsFor(project).length > 0; }); }
+  function currentTitle() { if (snapshot?.sessionName) return snapshot.sessionName; const firstUser = snapshot?.items.find((item) => item.type === "user"); if (firstUser?.type === "user") return firstUser.text.split("\n")[0]?.slice(0, 64) || workspace?.name || "Pidex"; return workspace?.name ?? "Pidex"; }
+  const relativeTime = (value: string) => { const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000); const absolute = Math.abs(seconds); const [amount, unit] = absolute < 60 ? [seconds, "second"] : absolute < 3600 ? [Math.round(seconds / 60), "minute"] : absolute < 86_400 ? [Math.round(seconds / 3600), "hour"] : [Math.round(seconds / 86_400), "day"]; return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" }).format(amount, unit as Intl.RelativeTimeFormatUnit); };
+  async function loadBootstrap() { const loaded = await api.bootstrap(); bootstrap = loaded; const savedPath = projectPath || localStorage.getItem("pidex:last-project") || loaded.recentWorkspaces[0]?.path || ""; projectPath = savedPath; if (savedPath) await openProject(savedPath, { closeDrawer: false }); }
+  function rememberWorkspace(loaded: Workspace, moveToTop = true) { workspaceCache = { ...workspaceCache, [loaded.id]: loaded }; if (!expandedProjectIds.includes(loaded.id)) expandedProjectIds = [...expandedProjectIds, loaded.id]; if (bootstrap && moveToTop) bootstrap = { ...bootstrap, recentWorkspaces: [{ id: loaded.id, path: loaded.path }, ...bootstrap.recentWorkspaces.filter((project) => project.id !== loaded.id)] }; }
+  async function openProject(path = projectPath, options: { activate?: boolean; closeDrawer?: boolean; moveToTop?: boolean } = {}) { const activate = options.activate ?? true; const knownId = bootstrap?.recentWorkspaces.find((project) => project.path === path)?.id ?? path; try { error = ""; if (activate) projectLoading = true; projectLoadingId = knownId; const loaded = await api.openWorkspace(path); rememberWorkspace(loaded, options.moveToTop ?? activate); if (activate) { chatConnection.close(); workspace = loaded; projectPath = loaded.path; localStorage.setItem("pidex:last-project", loaded.path); snapshot = undefined; if (options.closeDrawer ?? true) drawerOpen = false; } return loaded; } catch (cause) { error = cause instanceof Error ? cause.message : "Could not open project"; return undefined; } finally { if (activate) projectLoading = false; projectLoadingId = ""; } }
+  async function toggleProject(project: RecentWorkspace) { if (projectExpanded(project.id)) { expandedProjectIds = expandedProjectIds.filter((id) => id !== project.id); return; } expandedProjectIds = [...expandedProjectIds, project.id]; if (!workspaceFor(project.id)) await openProject(project.path, { activate: false, moveToTop: false }); }
+  async function refreshSessions(workspaceId = workspace?.id) { if (!workspaceId) return; try { const current = workspaceFor(workspaceId); if (!current) return; const sessions = await api.listSessions(workspaceId); const loaded = { ...current, sessions }; workspaceCache = { ...workspaceCache, [workspaceId]: loaded }; if (workspace?.id === workspaceId) workspace = loaded; } catch { /* The live chat remains usable if metadata refresh fails. */ } }
+  async function newChat(target = workspace) { if (!target || chatLoading) return; try { error = ""; chatLoading = true; workspace = target; projectPath = target.path; rememberWorkspace(target); localStorage.setItem("pidex:last-project", target.path); snapshot = await api.createChat(target.id); await afterChat(); } catch (cause) { error = cause instanceof Error ? cause.message : "Could not create chat"; } finally { chatLoading = false; } }
+  async function newChatInProject(project: RecentWorkspace) { const target = workspaceFor(project.id) ?? await openProject(project.path, { activate: false, moveToTop: false }); if (target) await newChat(target); }
+  async function resume(session: SessionSummary, target: Workspace) { if (chatLoading) return; try { error = ""; chatLoading = true; workspace = target; projectPath = target.path; rememberWorkspace(target); localStorage.setItem("pidex:last-project", target.path); snapshot = await api.resumeChat(target.id, session.id); await afterChat(); } catch (cause) { error = cause instanceof Error ? cause.message : "Resume failed"; } finally { chatLoading = false; } }
+  async function afterChat() { drawerOpen = false; draft = localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) ?? ""; if (snapshot) chatConnection.connect(snapshot.chatId); await tick(); resizePrompt(); scrollLatest(); }
+  function replaceItem(item: ChatSnapshot["items"][number]) { if (!snapshot) return; const items = [...snapshot.items]; const index = items.findIndex((old) => old.id === item.id); if (index >= 0) items[index] = item; else items.push(item); snapshot = { ...snapshot, items }; }
+  function applyEvent(event: ServerEvent) { if (!snapshot) return; if (event.type === "snapshot") snapshot = event.snapshot; else if (event.type === "message" || event.type === "tool" || event.type === "notice") replaceItem(event.item); else if (event.type === "text_delta") snapshot = { ...snapshot, items: snapshot.items.map((item) => item.id === event.itemId && item.type === "assistant" ? { ...item, ...(event.channel === "text" ? { text: item.text + event.delta } : { thinking: (item.thinking ?? "") + event.delta }) } : item) }; else if (event.type === "run_status") { snapshot = { ...snapshot, runStatus: event.status }; if (event.status === "idle") void refreshSessions(); } else if (event.type === "queue") snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp }; else if (event.type === "session") { snapshot = { ...snapshot, ...(event.name ? { sessionName: event.name } : {}), stats: event.stats }; void refreshSessions(); } else if (event.type === "extension_dialog") { snapshot = { ...snapshot, ...(event.dialog ? { extensionDialog: event.dialog } : {}) }; if (event.dialog) { dialogValue = event.dialog.kind === "confirm" ? false : event.dialog.prefill ?? ""; void tick().then(() => dialogElement?.showModal()); } else dialogElement?.close(); } if (nearBottom) requestAnimationFrame(scrollLatest); }
+  async function send() { if (!snapshot || !draft.trim()) return; const text = draft.trim(); draft = ""; persistDraft(); void tick().then(resizePrompt); try { await api.sendMessage(snapshot.chatId, text, active() ? delivery : "normal"); } catch (cause) { draft = text; void tick().then(resizePrompt); error = cause instanceof Error ? cause.message : "Prompt rejected"; } }
+  async function stop() { if (snapshot) await api.abort(snapshot.chatId); }
+  async function clearQueue() { if (snapshot) await api.clearQueue(snapshot.chatId); }
+  async function configure(patch: Parameters<PidexApiClient["configure"]>[1]) { if (!snapshot) return; try { snapshot = await api.configure(snapshot.chatId, patch); } catch (cause) { error = cause instanceof Error ? cause.message : "Configuration failed"; } }
+  function openRename() { if (!snapshot) return; renameValue = snapshot.sessionName ?? currentTitle(); void tick().then(() => renameDialogElement?.showModal()); }
+  async function rename() { if (!snapshot || !renameValue.trim()) return; try { snapshot = await api.rename(snapshot.chatId, renameValue.trim()); renameDialogElement.close(); await refreshSessions(); } catch (cause) { error = cause instanceof Error ? cause.message : "Rename failed"; } }
+  function openCompact() { if (snapshot) void tick().then(() => compactDialogElement?.showModal()); }
+  async function compact() { if (!snapshot) return; try { snapshot = await api.compact(snapshot.chatId); compactDialogElement.close(); } catch (cause) { error = cause instanceof Error ? cause.message : "Compaction failed"; } }
+  async function answerDialog(dialog: ExtensionDialog, cancelled = false) { if (!snapshot) return; await api.answerDialog(snapshot.chatId, dialog.id, resolveDialogValue(dialog, dialogValue, cancelled)); dialogElement.close(); }
+  function persistDraft() { if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.sessionId}`, draft); }
+  function resizePrompt() { if (!promptInput) return; promptInput.style.height = "auto"; promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`; }
+  function draftInput() { persistDraft(); resizePrompt(); }
+  function keydown(event: KeyboardEvent) { if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) { event.preventDefault(); void send(); } }
+  function onScroll() { if (transcript) nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96; }
+  function scrollLatest() { if (transcript) { transcript.scrollTop = transcript.scrollHeight; nearBottom = true; } }
+  async function focusSearch() { if (matchMedia("(max-width: 900px)").matches) drawerOpen = true; await tick(); searchInput?.focus(); searchInput?.select(); }
+  function globalKeydown(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+      if (document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      void focusSearch();
+      return;
+    }
+    if (event.key !== "Escape") return;
+    if (drawerOpen) { drawerOpen = false; (document.querySelector(".menu-button") as HTMLElement)?.focus(); return; }
+    if (document.activeElement === searchInput) { if (search) search = ""; else promptInput?.focus(); }
+  }
+  function wentOffline() { chatConnection.disconnect(); }
+  function cameOnline() { if (snapshot) chatConnection.reconnect(); }
+  onMount(() => { projectPath = localStorage.getItem("pidex:last-project") ?? ""; void loadBootstrap(); window.addEventListener("keydown", globalKeydown); window.addEventListener("offline", wentOffline); window.addEventListener("online", cameOnline); return () => { window.removeEventListener("keydown", globalKeydown); window.removeEventListener("offline", wentOffline); window.removeEventListener("online", cameOnline); chatConnection.close(); }; });
+</script>
+
 <svelte:head>
-  <meta name="description" content="Pidex" />
+  <title>Pidex</title>
+  <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 
-<main>
-  <h1>Pidex</h1>
-</main>
+<div class:drawer-open={drawerOpen} class="shell">
+  <button class="scrim" aria-label="Close sessions" onclick={() => drawerOpen = false}></button>
+
+  <aside aria-label="Sessions">
+    <div class="sidebar-titlebar">
+      <div class="brand">
+        <div class="mark">π</div>
+        <strong>Pidex</strong>
+        <span>LOCAL</span>
+      </div>
+      <button class="square-button" onclick={() => newChat()} disabled={!workspace || chatLoading} aria-label="New chat" title="New chat">
+        <Icon name="compose" />
+      </button>
+    </div>
+
+    <label class="search">
+      <Icon name="search" />
+      <input bind:this={searchInput} bind:value={search} aria-label="Search projects and threads" aria-keyshortcuts="Meta+K Control+K" placeholder="Search projects and threads" />
+      <kbd aria-hidden="true">⌘K</kbd>
+    </label>
+
+    <section class="project-browser">
+      <div class="section-label"><span>PROJECTS</span><small>{bootstrap?.recentWorkspaces.length ?? 0}</small></div>
+      <div class="project-entry">
+        <Icon name="folder" />
+        <label class="sr-only" for="project">Project directory</label>
+        <input id="project" bind:value={projectPath} title={projectPath} placeholder="/Users/you/project" />
+        <button onclick={() => openProject()} aria-label="Open project" disabled={projectLoading}>
+          {projectLoading ? "…" : "Open"}
+        </button>
+      </div>
+      <nav class="project-tree" aria-label="Projects" aria-busy={chatLoading || projectLoading}>
+        {#if visibleProjects().length === 0}
+          <div class="sidebar-empty"><Icon name={search ? "search" : "folder"} size={18} /><p>{search ? "No matching projects or threads." : "Open a project to get started."}</p></div>
+        {:else}
+          {#each visibleProjects() as project (project.id)}
+            {@const loaded = workspaceCache[project.id] ?? (workspace?.id === project.id ? workspace : undefined)}
+            {@const expanded = expandedProjectIds.includes(project.id) || Boolean(search.trim() && loaded)}
+            {@const matchingSessions = sessionsFor(project)}
+            {@const shownSessions = expanded ? matchingSessions : matchingSessions.filter((session) => workspace?.id === project.id && snapshot?.sessionId === session.id)}
+            <div class:active-project-group={workspace?.id === project.id} class:expanded class="project-group">
+              <div class="project-row">
+                <button class="project-toggle" aria-expanded={expanded} aria-label={`${expanded ? "Collapse" : "Expand"} ${loaded?.name ?? projectName(project.path)}`} title={project.path} onclick={() => toggleProject(project)}>
+                  <span class="project-chevron"><Icon name="chevron" size={13} /></span>
+                  <Icon name="folder" size={15} />
+                  <strong>{loaded?.name ?? projectName(project.path)}</strong>
+                  {#if projectLoadingId === project.id}<span class="project-count loading">•••</span>{:else if loaded}<span class="project-count">{loaded.sessions.length}</span>{/if}
+                </button>
+                <button class="project-new" onclick={() => newChatInProject(project)} disabled={chatLoading || projectLoadingId === project.id} aria-label={`New thread in ${loaded?.name ?? projectName(project.path)}`} title="New thread">
+                  <Icon name="compose" size={14} />
+                </button>
+              </div>
+              {#if expanded || shownSessions.length > 0}
+                <div class="project-threads" id={`project-${project.id}`}>
+                  {#if projectLoadingId === project.id && !loaded}
+                    <p class="tree-empty">Loading threads…</p>
+                  {:else if loaded && shownSessions.length === 0}
+                    <p class="tree-empty">{search ? "No matching threads." : "No threads yet."}</p>
+                  {:else if loaded}
+                    {#each shownSessions as session}
+                      <button class:current={snapshot?.sessionId === session.id} class="thread-row" onclick={() => resume(session, loaded)} disabled={chatLoading} title={session.name ?? session.firstMessage}>
+                        <span class="thread-pip"></span>
+                        <strong>{session.name ?? (session.firstMessage || "Untitled session")}</strong>
+                        <time datetime={session.modifiedAt}>{relativeTime(session.modifiedAt)}</time>
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </nav>
+    </section>
+
+    <div class="sidebar-footer">
+      <Icon name="shield" size={15} />
+      <p><strong>Local & private</strong><span>Read-only limits tools, not the OS.</span></p>
+      <small>{bootstrap?.piVersion ?? "Pi"}</small>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <button class="menu-button" aria-label="Open sessions" aria-expanded={drawerOpen} onclick={() => drawerOpen = true}>
+        <Icon name="menu" size={19} />
+      </button>
+      <div class="title-block">
+        <strong>{currentTitle()}</strong>
+        <div class="title-meta">
+          <span>{workspace?.name ?? "No project"}</span>
+          <span class="meta-divider">/</span>
+          <span class:online={connection === "connected"} class="status-dot"></span>
+          <span>{snapshot ? connection : "local"}</span>
+        </div>
+      </div>
+      {#if snapshot}
+        <div class="header-actions">
+          <button onclick={openRename} disabled={active()} aria-label="Rename" title="Rename session"><Icon name="rename" /><span>Rename</span></button>
+          <button onclick={openCompact} disabled={active()} aria-label="Compact" title="Compact session"><Icon name="compact" /><span>Compact</span></button>
+        </div>
+      {/if}
+    </header>
+
+    {#if error}
+      <div class="alert error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onclick={() => error = ""}><Icon name="x" /></button></div>
+    {/if}
+    {#if workspace?.protectedResourcesSkipped}
+      <div class="alert warning" role="status">Project resources requiring trust were skipped. Open Pi locally to review and save a trust decision.</div>
+    {/if}
+    {#if workspace && workspace.models.length === 0}
+      <div class="alert warning">No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.</div>
+    {/if}
+
+    <section class="transcript" bind:this={transcript} onscroll={onScroll} aria-live="polite">
+      {#if !workspace}
+        <div class="empty">
+          <div class="hero-mark"><span>π</span></div>
+          <p class="eyebrow">YOUR PRIVATE PI WORKSPACE</p>
+          <h1>Bring Pi with you.</h1>
+          <p>Open a local project directory to create or resume a native Pi session.</p>
+        </div>
+      {:else if !snapshot}
+        <div class="empty workspace-empty">
+          <div class="hero-project">{workspace.name.slice(0, 1).toUpperCase()}</div>
+          <p class="eyebrow">{workspace.name}</p>
+          <h1>What should Pi work on?</h1>
+          <p>Start a fresh thread or pick up a native Pi session from the sidebar.</p>
+          <button class="hero-composer" onclick={() => newChat()} disabled={!workspace.models.length || chatLoading}>
+            <span>Start a new chat</span><span class="hero-send"><Icon name="send" /></span>
+          </button>
+        </div>
+      {:else}
+        <div class="messages">
+          {#each snapshot.items as item (item.id)}
+            {#if item.type === "user"}
+              <article class="message user">
+                <div class="bubble">{item.text}</div>
+              </article>
+            {:else if item.type === "assistant"}
+              <article class="message assistant">
+                <div class="assistant-label"><span class="pi-avatar">π</span><span>Pi</span>{#if !item.complete}<span class="streaming">streaming</span>{/if}</div>
+                {#if item.thinking}
+                  <details class="thinking">
+                    <summary><span class="thinking-dots"><i></i><i></i><i></i></span>Thinking</summary>
+                    <pre>{item.thinking}</pre>
+                  </details>
+                {/if}
+                <Markdown text={item.text} />
+              </article>
+            {:else if item.type === "tool"}
+              <details class="tool" open={item.state === "running"}>
+                <summary>
+                  <span class="tool-icon"><Icon name="tool" size={14} /></span>
+                  <strong>{item.name}</strong>
+                  <code>{item.argumentSummary}</code>
+                  <span class:failed={item.state === "error"} class="tool-state">{item.state === "success" ? "done" : item.state}</span>
+                  <Icon name="chevron" size={13} />
+                </summary>
+                {#if item.preview}<pre>{item.preview}</pre>{/if}
+              </details>
+            {:else if item.type === "notice"}
+              <div class:notice-error={item.level === "error"} class="notice"><Icon name="activity" size={14} /><span>{item.text}</span></div>
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    {#if !nearBottom && snapshot}<button class="jump" onclick={scrollLatest}>Jump to latest <span>↓</span></button>{/if}
+
+    {#if snapshot}
+      <footer class="composer-wrap">
+        {#if active()}
+          <div class="queue-row">
+            <span><span class="working-dot"></span>{snapshot.runStatus} · {snapshot.steeringQueue.length} steer · {snapshot.followUpQueue.length} follow-up</span>
+            {#if snapshot.steeringQueue.length + snapshot.followUpQueue.length > 0}<button onclick={clearQueue}>Clear queues</button>{/if}
+          </div>
+        {/if}
+        <div class="composer-frame">
+          <textarea bind:this={promptInput} bind:value={draft} oninput={draftInput} onkeydown={keydown} rows="2" placeholder={active() ? "Add guidance while Pi works…" : "Ask Pi to work on this project…"} aria-label="Prompt"></textarea>
+          <div class="composer-toolbar">
+            <div class="composer-controls">
+              <select aria-label="Model" value={snapshot.model} onchange={(e) => configure({ model: e.currentTarget.value })} disabled={active() || !(workspace?.models.length)}>
+                {#each workspace?.models ?? [] as model}<option value={model.id}>{model.name}</option>{/each}
+              </select>
+              <span class="control-divider"></span>
+              <select aria-label="Thinking level" value={snapshot.thinkingLevel} onchange={(e) => configure({ thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"] })} disabled={active()}>
+                {#each ["off","minimal","low","medium","high","xhigh","max"] as level}<option value={level}>{level} thinking</option>{/each}
+              </select>
+              <span class="control-divider"></span>
+              <select aria-label="Tool access" value={snapshot.toolMode} onchange={(e) => configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })} disabled={active()}>
+                <option value="read-only">Read only</option><option value="full">Full access</option>
+              </select>
+            </div>
+            <div class="composer-actions">
+              {#if active()}
+                <select bind:value={delivery} aria-label="Delivery mode"><option value="steer">Steer</option><option value="follow-up">Follow-up</option></select>
+                <button class="stop" onclick={stop} aria-label="Stop"><Icon name="stop" /></button>
+                <button class="send queue" onclick={send} disabled={!draft.trim()} aria-label="Queue">Queue</button>
+              {:else}
+                <button class="send" onclick={send} disabled={!draft.trim() || !(workspace?.models.length)} aria-label="Send"><Icon name="send" /></button>
+              {/if}
+            </div>
+          </div>
+        </div>
+        <div class="composer-meta">
+          <span>{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(4)}</span>
+          <span>{snapshot.activeTools.join(" · ")}</span>
+        </div>
+      </footer>
+    {/if}
+  </main>
+</div>
+
+<dialog bind:this={renameDialogElement} class="app-dialog" oncancel={(event) => { event.preventDefault(); renameDialogElement.close(); }}>
+  <form method="dialog" onsubmit={(event) => { event.preventDefault(); void rename(); }}>
+    <div class="dialog-heading"><div class="dialog-icon"><Icon name="rename" /></div><div><h2>Rename thread</h2><p>Give this Pi session a concise, memorable name.</p></div></div>
+    <label for="session-name">Session name</label>
+    <input id="session-name" bind:value={renameValue} autocomplete="off" />
+    <div class="dialog-actions"><button type="button" onclick={() => renameDialogElement.close()}>Cancel</button><button class="primary" type="submit" disabled={!renameValue.trim()}>Save name</button></div>
+  </form>
+</dialog>
+
+<dialog bind:this={compactDialogElement} class="app-dialog" oncancel={(event) => { event.preventDefault(); compactDialogElement.close(); }}>
+  <form method="dialog" onsubmit={(event) => { event.preventDefault(); void compact(); }}>
+    <div class="dialog-heading"><div class="dialog-icon"><Icon name="compact" /></div><div><h2>Compact this thread?</h2><p>Pi will summarize older context to free space in the active context window.</p></div></div>
+    <div class="dialog-actions"><button type="button" onclick={() => compactDialogElement.close()}>Cancel</button><button class="primary" type="submit">Compact thread</button></div>
+  </form>
+</dialog>
+
+{#if snapshot?.extensionDialog}
+  <dialog bind:this={dialogElement} class="app-dialog extension-dialog" oncancel={(event) => { event.preventDefault(); void answerDialog(snapshot!.extensionDialog!, true); }}>
+    <form method="dialog" onsubmit={(event) => { event.preventDefault(); void answerDialog(snapshot!.extensionDialog!); }}>
+      <div class="dialog-heading"><div class="dialog-icon"><Icon name="activity" /></div><div><h2>{snapshot.extensionDialog.title}</h2>{#if snapshot.extensionDialog.message}<p>{snapshot.extensionDialog.message}</p>{/if}</div></div>
+      {#if snapshot.extensionDialog.kind === "select"}
+        <select bind:value={dialogValue}>{#each snapshot.extensionDialog.options ?? [] as option}<option value={option}>{option}</option>{/each}</select>
+      {:else if snapshot.extensionDialog.kind === "confirm"}
+        <label class="confirm-row"><input type="checkbox" checked={Boolean(dialogValue)} onchange={(event) => dialogValue = event.currentTarget.checked} /> Confirm</label>
+      {:else if snapshot.extensionDialog.kind === "editor"}
+        <textarea bind:value={dialogValue} rows="8"></textarea>
+      {:else}
+        <input bind:value={dialogValue} placeholder={snapshot.extensionDialog.placeholder} />
+      {/if}
+      <div class="dialog-actions"><button type="button" onclick={() => answerDialog(snapshot!.extensionDialog!, true)}>Cancel</button><button class="primary" type="submit">Continue</button></div>
+    </form>
+  </dialog>
+{/if}

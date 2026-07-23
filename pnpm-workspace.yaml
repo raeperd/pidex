@@ -3,7 +3,10 @@ packages:
   - packages/*
 
 allowBuilds:
+  '@google/genai': false
   electron: true
+  esbuild: true
+  protobufjs: false
 
 catalog:
   "@types/node": 24.12.4
