@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import type { Bootstrap, ChatSnapshot, ExtensionDialog, RecentWorkspace, ServerEvent, SessionSummary, Workspace } from "@pidex/api";
+  import type { Bootstrap, ChatSnapshot, ExtensionDialog, RecentWorkspace, ServerEvent, SessionSummary, ToolItem, Workspace } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
   import { ChatConnection, type ConnectionState } from "./chat-connection";
   import Icon from "./Icon.svelte";
@@ -8,8 +8,11 @@
 
   let bootstrap: Bootstrap | undefined; let workspace: Workspace | undefined; let snapshot: ChatSnapshot | undefined;
   let workspaceCache: Record<string, Workspace> = {}; let expandedProjectIds: string[] = [];
-  let projectPath = ""; let draft = ""; let search = ""; let connection: ConnectionState = "disconnected"; let error = ""; let drawerOpen = false; let projectLoading = false; let projectLoadingId = ""; let chatLoading = false;
+  let projectPath = ""; let draft = ""; let search = ""; let connection: ConnectionState = "disconnected"; let error = ""; let bootstrapError = ""; let drawerOpen = false; let projectLoading = false; let projectLoadingId = ""; let chatLoading = false; let retryingConnection = false; let loadingEarlier = false;
   let delivery: "normal" | "steer" | "follow-up" = "normal";
+  let pendingPrompt: { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined;
+  let copyState: Record<string, "copied" | "failed"> = {};
+  let toolOutputs: Record<string, { text: string; nextOffset: number; total: number; complete: boolean; loading: boolean; sourceTruncated: boolean; error?: string }> = {};
   let transcript: HTMLElement; let searchInput: HTMLInputElement; let promptInput: HTMLTextAreaElement; let nearBottom = true; let dialogValue: string | boolean = ""; let dialogElement: HTMLDialogElement;
   let renameDialogElement: HTMLDialogElement; let renameValue = ""; let compactDialogElement: HTMLDialogElement;
   const api = new PidexApiClient();
@@ -23,26 +26,48 @@
   function visibleProjects() { const query = search.trim().toLowerCase(); return (bootstrap?.recentWorkspaces ?? []).filter((project) => { if (!query || `${projectName(project.path)} ${project.path}`.toLowerCase().includes(query)) return true; return sessionsFor(project).length > 0; }); }
   function currentTitle() { if (snapshot?.sessionName) return snapshot.sessionName; const firstUser = snapshot?.items.find((item) => item.type === "user"); if (firstUser?.type === "user") return firstUser.text.split("\n")[0]?.slice(0, 64) || workspace?.name || "Pidex"; return workspace?.name ?? "Pidex"; }
   const relativeTime = (value: string) => { const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000); const absolute = Math.abs(seconds); const [amount, unit] = absolute < 60 ? [seconds, "second"] : absolute < 3600 ? [Math.round(seconds / 60), "minute"] : absolute < 86_400 ? [Math.round(seconds / 3600), "hour"] : [Math.round(seconds / 86_400), "day"]; return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" }).format(amount, unit as Intl.RelativeTimeFormatUnit); };
-  async function loadBootstrap() { const loaded = await api.bootstrap(); bootstrap = loaded; const savedPath = projectPath || localStorage.getItem("pidex:last-project") || loaded.recentWorkspaces[0]?.path || ""; projectPath = savedPath; if (savedPath) await openProject(savedPath, { closeDrawer: false }); }
+  async function loadBootstrap() { try { bootstrapError = ""; const loaded = await api.bootstrap(); bootstrap = loaded; const savedPath = projectPath || localStorage.getItem("pidex:last-project") || loaded.recentWorkspaces[0]?.path || ""; projectPath = savedPath; if (savedPath) await openProject(savedPath, { closeDrawer: false }); } catch (cause) { bootstrapError = cause instanceof Error ? cause.message : "The Pidex host is unavailable"; } }
   function rememberWorkspace(loaded: Workspace, moveToTop = true) { workspaceCache = { ...workspaceCache, [loaded.id]: loaded }; if (!expandedProjectIds.includes(loaded.id)) expandedProjectIds = [...expandedProjectIds, loaded.id]; if (bootstrap && moveToTop) bootstrap = { ...bootstrap, recentWorkspaces: [{ id: loaded.id, path: loaded.path }, ...bootstrap.recentWorkspaces.filter((project) => project.id !== loaded.id)] }; }
   async function openProject(path = projectPath, options: { activate?: boolean; closeDrawer?: boolean; moveToTop?: boolean } = {}) { const activate = options.activate ?? true; const knownId = bootstrap?.recentWorkspaces.find((project) => project.path === path)?.id ?? path; try { error = ""; if (activate) projectLoading = true; projectLoadingId = knownId; const loaded = await api.openWorkspace(path); rememberWorkspace(loaded, options.moveToTop ?? activate); if (activate) { chatConnection.close(); workspace = loaded; projectPath = loaded.path; localStorage.setItem("pidex:last-project", loaded.path); snapshot = undefined; if (options.closeDrawer ?? true) drawerOpen = false; } return loaded; } catch (cause) { error = cause instanceof Error ? cause.message : "Could not open project"; return undefined; } finally { if (activate) projectLoading = false; projectLoadingId = ""; } }
+  async function browseProject() { try { const selected = await window.pidexDesktop?.pickProject(); if (selected) { projectPath = selected; await openProject(selected); } } catch (cause) { error = cause instanceof Error ? cause.message : "Could not open the folder picker"; } }
+  async function approveProjectTrust() { if (!workspace || !window.pidexDesktop || !window.confirm(`Trust project resources in ${workspace.path}?\n\nTrust controls Pi resource loading; it is not an OS sandbox.`)) return; try { const loaded = await api.setWorkspaceTrust(workspace.id, true); workspace = loaded; rememberWorkspace(loaded, false); } catch (cause) { error = cause instanceof Error ? cause.message : "Project trust could not be saved"; } }
   async function toggleProject(project: RecentWorkspace) { if (projectExpanded(project.id)) { expandedProjectIds = expandedProjectIds.filter((id) => id !== project.id); return; } expandedProjectIds = [...expandedProjectIds, project.id]; if (!workspaceFor(project.id)) await openProject(project.path, { activate: false, moveToTop: false }); }
   async function refreshSessions(workspaceId = workspace?.id) { if (!workspaceId) return; try { const current = workspaceFor(workspaceId); if (!current) return; const sessions = await api.listSessions(workspaceId); const loaded = { ...current, sessions }; workspaceCache = { ...workspaceCache, [workspaceId]: loaded }; if (workspace?.id === workspaceId) workspace = loaded; } catch { /* The live chat remains usable if metadata refresh fails. */ } }
   async function newChat(target = workspace) { if (!target || chatLoading) return; try { error = ""; chatLoading = true; workspace = target; projectPath = target.path; rememberWorkspace(target); localStorage.setItem("pidex:last-project", target.path); snapshot = await api.createChat(target.id); await afterChat(); } catch (cause) { error = cause instanceof Error ? cause.message : "Could not create chat"; } finally { chatLoading = false; } }
   async function newChatInProject(project: RecentWorkspace) { const target = workspaceFor(project.id) ?? await openProject(project.path, { activate: false, moveToTop: false }); if (target) await newChat(target); }
   async function resume(session: SessionSummary, target: Workspace) { if (chatLoading) return; try { error = ""; chatLoading = true; workspace = target; projectPath = target.path; rememberWorkspace(target); localStorage.setItem("pidex:last-project", target.path); snapshot = await api.resumeChat(target.id, session.id); await afterChat(); } catch (cause) { error = cause instanceof Error ? cause.message : "Resume failed"; } finally { chatLoading = false; } }
-  async function afterChat() { drawerOpen = false; draft = localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) ?? ""; if (snapshot) chatConnection.connect(snapshot.chatId); await tick(); resizePrompt(); scrollLatest(); }
+  async function afterChat() { drawerOpen = false; draft = localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) ?? ""; restorePendingPrompt(); if (snapshot) chatConnection.connect(snapshot.chatId); await tick(); resizePrompt(); scrollLatest(); }
   function replaceItem(item: ChatSnapshot["items"][number]) { if (!snapshot) return; const items = [...snapshot.items]; const index = items.findIndex((old) => old.id === item.id); if (index >= 0) items[index] = item; else items.push(item); snapshot = { ...snapshot, items }; }
-  function applyEvent(event: ServerEvent) { if (!snapshot) return; if (event.type === "snapshot") snapshot = event.snapshot; else if (event.type === "message" || event.type === "tool" || event.type === "notice") replaceItem(event.item); else if (event.type === "text_delta") snapshot = { ...snapshot, items: snapshot.items.map((item) => item.id === event.itemId && item.type === "assistant" ? { ...item, ...(event.channel === "text" ? { text: item.text + event.delta } : { thinking: (item.thinking ?? "") + event.delta }) } : item) }; else if (event.type === "run_status") { snapshot = { ...snapshot, runStatus: event.status }; if (event.status === "idle") void refreshSessions(); } else if (event.type === "queue") snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp }; else if (event.type === "session") { snapshot = { ...snapshot, ...(event.name ? { sessionName: event.name } : {}), stats: event.stats }; void refreshSessions(); } else if (event.type === "extension_dialog") { snapshot = { ...snapshot, ...(event.dialog ? { extensionDialog: event.dialog } : {}) }; if (event.dialog) { dialogValue = event.dialog.kind === "confirm" ? false : event.dialog.prefill ?? ""; void tick().then(() => dialogElement?.showModal()); } else dialogElement?.close(); } if (nearBottom) requestAnimationFrame(scrollLatest); }
-  async function send() { if (!snapshot || !draft.trim()) return; const text = draft.trim(); draft = ""; persistDraft(); void tick().then(resizePrompt); try { await api.sendMessage(snapshot.chatId, text, active() ? delivery : "normal"); } catch (cause) { draft = text; void tick().then(resizePrompt); error = cause instanceof Error ? cause.message : "Prompt rejected"; } }
-  async function stop() { if (snapshot) await api.abort(snapshot.chatId); }
-  async function clearQueue() { if (snapshot) await api.clearQueue(snapshot.chatId); }
-  async function configure(patch: Parameters<PidexApiClient["configure"]>[1]) { if (!snapshot) return; try { snapshot = await api.configure(snapshot.chatId, patch); } catch (cause) { error = cause instanceof Error ? cause.message : "Configuration failed"; } }
+  function applyEvent(event: ServerEvent) { if (!snapshot) return; if (event.type === "snapshot") { snapshot = event.snapshot; if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId) clearPendingPrompt(); } else if (event.type === "message" || event.type === "tool" || event.type === "notice") replaceItem(event.item); else if (event.type === "text_delta") snapshot = { ...snapshot, items: snapshot.items.map((item) => item.id === event.itemId && item.type === "assistant" ? { ...item, ...(event.channel === "text" ? { text: item.text + event.delta } : { thinking: (item.thinking ?? "") + event.delta }) } : item) }; else if (event.type === "run_status") { snapshot = { ...snapshot, runStatus: event.status, revision: event.revision, ...(event.run ? { run: event.run } : {}) }; if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt(); if (event.status === "idle") void refreshSessions(); } else if (event.type === "queue") snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp }; else if (event.type === "session") { snapshot = { ...snapshot, ...(event.name ? { sessionName: event.name } : {}), stats: event.stats }; void refreshSessions(); } else if (event.type === "extension_dialog") { snapshot = { ...snapshot, ...(event.dialog ? { extensionDialog: event.dialog } : {}) }; if (event.dialog) { dialogValue = event.dialog.kind === "confirm" ? false : event.dialog.prefill ?? ""; void tick().then(() => dialogElement?.showModal()); } else dialogElement?.close(); } if (nearBottom) requestAnimationFrame(scrollLatest); }
+  function pendingKey() { return snapshot ? `pidex:pending:${snapshot.sessionId}` : ""; }
+  function clearPendingPrompt() { if (snapshot) localStorage.removeItem(pendingKey()); pendingPrompt = undefined; }
+  function restorePendingPrompt() { if (!snapshot) return; try { const value = localStorage.getItem(pendingKey()); pendingPrompt = value ? JSON.parse(value) as typeof pendingPrompt : undefined; } catch { clearPendingPrompt(); } }
+  async function send() {
+    if (!snapshot || !draft.trim() || connection !== "connected") return;
+    const text = draft.trim(); const mode = active() ? delivery : "normal"; const matching = pendingPrompt?.text === text && pendingPrompt.delivery === mode ? pendingPrompt : undefined;
+    pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: mode }; localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
+    draft = ""; persistDraft(); void tick().then(resizePrompt);
+    try { const outcome = await api.sendMessage(snapshot.chatId, text, mode, snapshot.revision, active() ? snapshot.run?.runId : undefined, pendingPrompt.actionId); snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) }; clearPendingPrompt(); }
+    catch (cause) { draft = text; persistDraft(); void tick().then(resizePrompt); error = cause instanceof Error ? cause.message : "Prompt rejected"; }
+  }
+  async function stop() { if (!snapshot?.run || connection !== "connected") return; try { const outcome = await api.abort(snapshot.chatId, snapshot.run.runId, snapshot.revision); snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) }; } catch (cause) { error = cause instanceof Error ? cause.message : "Stop failed"; } }
+  async function clearQueue() { if (!snapshot) return; try { snapshot = await api.clearQueue(snapshot.chatId, snapshot.revision); } catch (cause) { error = cause instanceof Error ? cause.message : "Could not clear queued instructions"; } }
+  async function configure(patch: Parameters<PidexApiClient["configure"]>[1]) { if (!snapshot) return; try { snapshot = await api.configure(snapshot.chatId, patch, snapshot.revision); } catch (cause) { error = cause instanceof Error ? cause.message : "Configuration failed"; } }
   function openRename() { if (!snapshot) return; renameValue = snapshot.sessionName ?? currentTitle(); void tick().then(() => renameDialogElement?.showModal()); }
-  async function rename() { if (!snapshot || !renameValue.trim()) return; try { snapshot = await api.rename(snapshot.chatId, renameValue.trim()); renameDialogElement.close(); await refreshSessions(); } catch (cause) { error = cause instanceof Error ? cause.message : "Rename failed"; } }
+  async function rename() { if (!snapshot || !renameValue.trim()) return; try { snapshot = await api.rename(snapshot.chatId, renameValue.trim(), snapshot.revision); renameDialogElement.close(); await refreshSessions(); } catch (cause) { error = cause instanceof Error ? cause.message : "Rename failed"; } }
   function openCompact() { if (snapshot) void tick().then(() => compactDialogElement?.showModal()); }
-  async function compact() { if (!snapshot) return; try { snapshot = await api.compact(snapshot.chatId); compactDialogElement.close(); } catch (cause) { error = cause instanceof Error ? cause.message : "Compaction failed"; } }
-  async function answerDialog(dialog: ExtensionDialog, cancelled = false) { if (!snapshot) return; await api.answerDialog(snapshot.chatId, dialog.id, resolveDialogValue(dialog, dialogValue, cancelled)); dialogElement.close(); }
+  async function compact() { if (!snapshot) return; try { snapshot = await api.compact(snapshot.chatId, snapshot.revision); compactDialogElement.close(); } catch (cause) { error = cause instanceof Error ? cause.message : "Compaction failed"; } }
+  async function answerDialog(dialog: ExtensionDialog, cancelled = false) { if (!snapshot) return; try { await api.answerDialog(snapshot.chatId, dialog.id, resolveDialogValue(dialog, dialogValue, cancelled), snapshot.revision); dialogElement.close(); } catch (cause) { error = cause instanceof Error ? cause.message : "Extension response failed"; } }
+  async function acknowledgeInterrupted() { if (!snapshot?.run?.requiresAcknowledgement) return; try { const outcome = await api.acknowledgeInterrupted(snapshot.chatId, snapshot.revision); snapshot = { ...snapshot, revision: outcome.revision, run: { ...snapshot.run, requiresAcknowledgement: false } }; } catch (cause) { error = cause instanceof Error ? cause.message : "Could not acknowledge interrupted run"; } }
+  async function copyResponse(id: string, text: string) { try { await navigator.clipboard.writeText(text); copyState = { ...copyState, [id]: "copied" }; } catch { copyState = { ...copyState, [id]: "failed" }; } window.setTimeout(() => { const next = { ...copyState }; delete next[id]; copyState = next; }, 2200); }
+  async function loadToolOutput(item: ToolItem) {
+    if (!snapshot || !item.resourceId) return; const current = toolOutputs[item.resourceId]; if (current?.loading || current?.complete) return;
+    toolOutputs = { ...toolOutputs, [item.resourceId]: { text: current?.text ?? "", nextOffset: current?.nextOffset ?? 0, total: current?.total ?? item.outputSize ?? 0, complete: false, loading: true, sourceTruncated: current?.sourceTruncated ?? false } };
+    try { const chunk = await api.toolOutput(snapshot.chatId, item.resourceId, current?.nextOffset ?? 0); toolOutputs = { ...toolOutputs, [item.resourceId]: { text: `${current?.text ?? ""}${chunk.text}`, nextOffset: chunk.nextOffset, total: chunk.total, complete: chunk.complete, loading: false, sourceTruncated: chunk.sourceTruncated } }; }
+    catch (cause) { toolOutputs = { ...toolOutputs, [item.resourceId]: { ...(toolOutputs[item.resourceId]!), loading: false, error: cause instanceof Error ? cause.message : "Tool output could not be loaded" } }; }
+  }
+  async function loadEarlier() { if (!snapshot || snapshot.transcriptStart === 0 || loadingEarlier) return; loadingEarlier = true; try { const page = await api.transcript(snapshot.chatId, snapshot.transcriptStart); const seen = new Set(snapshot.items.map((item) => item.id)); snapshot = { ...snapshot, items: [...page.items.filter((item) => !seen.has(item.id)), ...snapshot.items], transcriptStart: page.start, transcriptTotal: page.total }; } catch (cause) { error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded"; } finally { loadingEarlier = false; } }
+  async function retryConnection() { retryingConnection = true; error = ""; try { if (snapshot) { snapshot = await api.getChat(snapshot.chatId); chatConnection.reconnect(); } else await loadBootstrap(); } catch (cause) { error = cause instanceof Error ? cause.message : "The Pidex host is still unavailable"; } finally { retryingConnection = false; } }
   function persistDraft() { if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.sessionId}`, draft); }
   function resizePrompt() { if (!promptInput) return; promptInput.style.height = "auto"; promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`; }
   function draftInput() { persistDraft(); resizePrompt(); }
@@ -98,6 +123,7 @@
         <Icon name="folder" />
         <label class="sr-only" for="project">Project directory</label>
         <input id="project" bind:value={projectPath} title={projectPath} placeholder="/Users/you/project" />
+        {#if window.pidexDesktop}<button onclick={browseProject} aria-label="Browse for project" disabled={projectLoading}>Browse</button>{/if}
         <button onclick={() => openProject()} aria-label="Open project" disabled={projectLoading}>
           {projectLoading ? "…" : "Open"}
         </button>
@@ -178,15 +204,32 @@
     {#if error}
       <div class="alert error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onclick={() => error = ""}><Icon name="x" /></button></div>
     {/if}
+    {#if snapshot && connection !== "connected"}
+      <div class="alert offline" role="status"><span><strong>Host unavailable.</strong> Your session remains on the desktop; drafts will not be submitted while disconnected.</span><button onclick={retryConnection} disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button></div>
+    {/if}
+    {#if snapshot?.run?.requiresAcknowledgement}
+      <div class="alert warning interrupted" role="alert"><span><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it stopped. Review the Pi transcript, then acknowledge before sending new work.</span><button onclick={acknowledgeInterrupted}>Acknowledge</button></div>
+    {/if}
     {#if workspace?.protectedResourcesSkipped}
-      <div class="alert warning" role="status">Project resources requiring trust were skipped. Open Pi locally to review and save a trust decision.</div>
+      <div class="alert warning" role="status"><span>Project resources requiring trust were skipped. {window.pidexDesktop ? "Review the project before loading them." : "Open Pidex Desktop or Pi locally to review trust."}</span>{#if window.pidexDesktop}<button onclick={approveProjectTrust}>Review & trust</button>{/if}</div>
+    {/if}
+    {#if workspace?.resourceDiagnostics.length}
+      <div class="alert warning resource-warning" role="status"><span><strong>Pi resource warning.</strong> {workspace.resourceDiagnostics[0]?.message}{#if workspace.resourceDiagnostics.length > 1} · {workspace.resourceDiagnostics.length - 1} more{/if}</span></div>
     {/if}
     {#if workspace && workspace.models.length === 0}
       <div class="alert warning">No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.</div>
     {/if}
 
     <section class="transcript" bind:this={transcript} onscroll={onScroll} aria-live="polite">
-      {#if !workspace}
+      {#if bootstrapError && !bootstrap}
+        <div class="empty offline-state" role="status">
+          <div class="hero-mark"><Icon name="activity" size={22} /></div>
+          <p class="eyebrow">HOST UNAVAILABLE</p>
+          <h1>Your projects are still on the desktop.</h1>
+          <p>Pidex could not reach its local host. Nothing was deleted and no draft will be submitted automatically.</p>
+          <button class="retry-button" onclick={retryConnection} disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry connection"}</button>
+        </div>
+      {:else if !workspace}
         <div class="empty">
           <div class="hero-mark"><span>π</span></div>
           <p class="eyebrow">YOUR PRIVATE PI WORKSPACE</p>
@@ -205,6 +248,7 @@
         </div>
       {:else}
         <div class="messages">
+          {#if snapshot.transcriptStart > 0}<button class="load-earlier" onclick={loadEarlier} disabled={loadingEarlier}>{loadingEarlier ? "Loading earlier messages…" : `Load earlier messages · ${snapshot.transcriptStart.toLocaleString()} remaining`}</button>{/if}
           {#each snapshot.items as item (item.id)}
             {#if item.type === "user"}
               <article class="message user">
@@ -212,7 +256,7 @@
               </article>
             {:else if item.type === "assistant"}
               <article class="message assistant">
-                <div class="assistant-label"><span class="pi-avatar">π</span><span>Pi</span>{#if !item.complete}<span class="streaming">streaming</span>{/if}</div>
+                <div class="assistant-label"><span class="pi-avatar">π</span><span>Pi</span>{#if !item.complete}<span class="streaming">streaming</span>{:else}<button class:copy-failed={copyState[item.id] === "failed"} class="copy-response" onclick={() => copyResponse(item.id, item.text)} aria-label="Copy response"><Icon name={copyState[item.id] === "copied" ? "check" : "copy"} size={13} />{copyState[item.id] === "copied" ? "Copied" : copyState[item.id] === "failed" ? "Copy failed" : "Copy"}</button>{/if}</div>
                 {#if item.thinking}
                   <details class="thinking">
                     <summary><span class="thinking-dots"><i></i><i></i><i></i></span>Thinking</summary>
@@ -222,7 +266,7 @@
                 <Markdown text={item.text} />
               </article>
             {:else if item.type === "tool"}
-              <details class="tool" open={item.state === "running"}>
+              <details class="tool">
                 <summary>
                   <span class="tool-icon"><Icon name="tool" size={14} /></span>
                   <strong>{item.name}</strong>
@@ -230,7 +274,12 @@
                   <span class:failed={item.state === "error"} class="tool-state">{item.state === "success" ? "done" : item.state}</span>
                   <Icon name="chevron" size={13} />
                 </summary>
-                {#if item.preview}<pre>{item.preview}</pre>{/if}
+                {#if item.resourceId && toolOutputs[item.resourceId]?.text}<pre>{toolOutputs[item.resourceId]?.text}</pre>{:else if item.preview}<pre>{item.preview}</pre>{/if}
+                {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
+                  <button class="tool-load" onclick={() => loadToolOutput(item)} disabled={toolOutputs[item.resourceId]?.loading}>{toolOutputs[item.resourceId]?.loading ? "Loading bounded chunk…" : toolOutputs[item.resourceId]?.text ? `Load more · ${toolOutputs[item.resourceId]?.nextOffset.toLocaleString()} / ${toolOutputs[item.resourceId]?.total.toLocaleString()}` : `Load complete output · ${(item.outputSize ?? 0).toLocaleString()} chars`}</button>
+                {/if}
+                {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p class="tool-note">The host bounded this output at its safety limit.</p>{/if}
+                {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p class="tool-note failed">{toolOutputs[item.resourceId]?.error}</p>{/if}
               </details>
             {:else if item.type === "notice"}
               <div class:notice-error={item.level === "error"} class="notice"><Icon name="activity" size={14} /><span>{item.text}</span></div>
@@ -251,7 +300,7 @@
           </div>
         {/if}
         <div class="composer-frame">
-          <textarea bind:this={promptInput} bind:value={draft} oninput={draftInput} onkeydown={keydown} rows="2" placeholder={active() ? "Add guidance while Pi works…" : "Ask Pi to work on this project…"} aria-label="Prompt"></textarea>
+          <textarea bind:this={promptInput} bind:value={draft} oninput={draftInput} onkeydown={keydown} rows="2" placeholder={connection !== "connected" ? "Draft locally while the host reconnects…" : active() ? "Add guidance while Pi works…" : "Ask Pi to work on this project…"} aria-label="Prompt"></textarea>
           <div class="composer-toolbar">
             <div class="composer-controls">
               <select aria-label="Model" value={snapshot.model} onchange={(e) => configure({ model: e.currentTarget.value })} disabled={active() || !(workspace?.models.length)}>
@@ -269,10 +318,10 @@
             <div class="composer-actions">
               {#if active()}
                 <select bind:value={delivery} aria-label="Delivery mode"><option value="steer">Steer</option><option value="follow-up">Follow-up</option></select>
-                <button class="stop" onclick={stop} aria-label="Stop"><Icon name="stop" /></button>
-                <button class="send queue" onclick={send} disabled={!draft.trim()} aria-label="Queue">Queue</button>
+                <button class="stop" onclick={stop} disabled={connection !== "connected"} aria-label="Stop"><Icon name="stop" /></button>
+                <button class="send queue" onclick={send} disabled={!draft.trim() || connection !== "connected"} aria-label="Queue">Queue</button>
               {:else}
-                <button class="send" onclick={send} disabled={!draft.trim() || !(workspace?.models.length)} aria-label="Send"><Icon name="send" /></button>
+                <button class="send" onclick={send} disabled={!draft.trim() || !(workspace?.models.length) || connection !== "connected" || snapshot.run?.requiresAcknowledgement} aria-label="Send"><Icon name="send" /></button>
               {/if}
             </div>
           </div>
