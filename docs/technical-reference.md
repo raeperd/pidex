@@ -6,23 +6,23 @@ This note fixes the implementation baseline for the Electron desktop app and the
 
 The comparison was made from fresh default-branch checkouts on July 23, 2026.
 
-| Repository | Ref | Commit | Relevant source |
-| --- | --- | --- | --- |
-| `pingdotgg/t3code` | `main` | `b41e89eba9cd232cc3257b400fc30972a9b53438` | `package.json`, `pnpm-workspace.yaml`, `apps/{desktop,web,server}`, `packages/{client-runtime,contracts,shared}`, `docs/architecture/{overview,connection-runtime}.md` |
-| `getpaseo/paseo` | `main` | `8cf70d10bf438c5f1fb032b7028bba5949ec07a7` | `package.json`, `packages/{app,desktop,server,client,protocol}`, `packages/desktop/src/{main,preload}.ts`, `packages/server/src/server/atomic-file.ts`, `docs/development.md` |
+| Repository         | Ref    | Commit                                     | Relevant source                                                                                                                                                               |
+| ------------------ | ------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pingdotgg/t3code` | `main` | `b41e89eba9cd232cc3257b400fc30972a9b53438` | `package.json`, `pnpm-workspace.yaml`, `apps/{desktop,web,server}`, `packages/{client-runtime,contracts,shared}`, `docs/architecture/{overview,connection-runtime}.md`        |
+| `getpaseo/paseo`   | `main` | `8cf70d10bf438c5f1fb032b7028bba5949ec07a7` | `package.json`, `packages/{app,desktop,server,client,protocol}`, `packages/desktop/src/{main,preload}.ts`, `packages/server/src/server/atomic-file.ts`, `docs/development.md` |
 
 These are design references, not source dependencies. Pidex will not import their packages, copy their protocols, or inherit their compatibility promises.
 
 ## Observed stacks and layouts
 
-| Concern | T3 Code snapshot | Paseo snapshot | Pidex consequence |
-| --- | --- | --- | --- |
-| Workspace | pnpm 11.10; `apps/desktop`, `apps/web`, `apps/server`, `apps/mobile`; shared `client-runtime`, `contracts`, and `shared` packages | npm workspaces; `packages/app`, `desktop`, `server`, `client`, and `protocol` | Use a small pnpm workspace with three apps and one shared API package; keep the other boundaries as internal modules initially. |
-| Desktop | Electron 41.5.0, electron-builder 26.15.6, context-isolated preload | Electron 41.2.0, electron-builder 26.8.1, context-isolated preload | Electron 41 is demonstrated by both; exact-pin a compatible patch and preserve the narrow preload boundary. |
-| Web UI | React/React DOM 19.2.6, Vite-based DOM app, Tailwind 4, TanStack Router, Zustand | React 19.1, Expo 54, React Native 0.81.5, React Native Web 0.21, Expo Router, Zustand | Keep the DOM/Vite/Tailwind lesson, but implement it with Svelte 5. Expo's value is native reuse, which Pidex does not need. |
-| Transport and contracts | Node HTTP/WebSocket host, Effect schemas and runtime, browser-safe contracts and connection runtime | Express, `ws`, Zod 4.4.3, separate protocol and client packages | Use built-in Node HTTP, `ws`, and Zod; keep reconnect and snapshot logic out of Svelte components. |
-| Persistence | SQLite, including a `node:sqlite` adapter, plus migrations | Atomic JSON replacement for several small stores | Pidex's durable prompt acceptance and revisions justify `node:sqlite`; retain atomic backups for migrations. |
-| Broader dependencies | Effect, Clerk, provider SDKs, SSH/Tailscale packages, Git/terminal/diff tooling, native Expo app | Expo/native modules, daemon/CLI/relay, multiple agent SDKs, ACP, Git/terminal/file tooling | Do not carry these dependency families into the Pi-only desktop/mobile-web scope. |
+| Concern                 | T3 Code snapshot                                                                                                                  | Paseo snapshot                                                                             | Pidex consequence                                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace               | pnpm 11.10; `apps/desktop`, `apps/web`, `apps/server`, `apps/mobile`; shared `client-runtime`, `contracts`, and `shared` packages | npm workspaces; `packages/app`, `desktop`, `server`, `client`, and `protocol`              | Use a small pnpm workspace with three apps and one shared API package; keep the other boundaries as internal modules initially. |
+| Desktop                 | Electron 41.5.0, electron-builder 26.15.6, context-isolated preload                                                               | Electron 41.2.0, electron-builder 26.8.1, context-isolated preload                         | Electron 41 is demonstrated by both; exact-pin a compatible patch and preserve the narrow preload boundary.                     |
+| Web UI                  | React/React DOM 19.2.6, Vite-based DOM app, Tailwind 4, TanStack Router, Zustand                                                  | React 19.1, Expo 54, React Native 0.81.5, React Native Web 0.21, Expo Router, Zustand      | Keep the DOM/Vite/Tailwind lesson, but implement it with Svelte 5. Expo's value is native reuse, which Pidex does not need.     |
+| Transport and contracts | Node HTTP/WebSocket host, Effect schemas and runtime, browser-safe contracts and connection runtime                               | Express, `ws`, Zod 4.4.3, separate protocol and client packages                            | Use built-in Node HTTP, `ws`, and Zod; keep reconnect and snapshot logic out of Svelte components.                              |
+| Persistence             | SQLite, including a `node:sqlite` adapter, plus migrations                                                                        | Atomic JSON replacement for several small stores                                           | Pidex's durable prompt acceptance and revisions justify `node:sqlite`; retain atomic backups for migrations.                    |
+| Broader dependencies    | Effect, Clerk, provider SDKs, SSH/Tailscale packages, Git/terminal/diff tooling, native Expo app                                  | Expo/native modules, daemon/CLI/relay, multiple agent SDKs, ACP, Git/terminal/file tooling | Do not carry these dependency families into the Pi-only desktop/mobile-web scope.                                               |
 
 ## What to reuse and what to leave behind
 
@@ -155,14 +155,14 @@ This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`
 
 The first scaffold should include only dependencies needed for the first vertical slice.
 
-| Workspace | Runtime dependencies |
-| --- | --- |
-| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts |
-| `apps/web` | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api` |
-| `apps/server` | exact-matched Pi SDK, `@pidex/api`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, SQLite, and process execution |
-| `packages/api` | `zod` |
+| Workspace      | Runtime dependencies                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts                                                      |
+| `apps/web`     | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api`                            |
+| `apps/server`  | exact-matched Pi SDK, `@pidex/api`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, SQLite, and process execution |
+| `packages/api` | `zod`                                                                                                                     |
 
-Build and test dependencies live at the narrowest workspace that uses them. `apps/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. Root tooling may coordinate TypeScript, Playwright, ESLint, and formatting, but production packages must not depend on test runners or Electron development tooling.
+Build and test dependencies live at the narrowest workspace that uses them. `apps/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. Root tooling may coordinate TypeScript, Playwright, Oxlint, and Oxfmt, but production packages must not depend on test runners or Electron development tooling.
 
 Defer `electron-updater`, richer syntax highlighting, virtualization, and component libraries beyond the named primitives until their corresponding delivery phase needs them. Do not add React, SvelteKit, Expo, React Native, Express, Effect, provider SDKs, hosted-auth SDKs, SSH libraries, relay clients, terminal libraries, Git libraries, or a second transcript database.
 

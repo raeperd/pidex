@@ -202,8 +202,8 @@ TAILSCALE
 
 Do not run Tailscale commands automatically. After localhost works, document:
 
-  tailscale serve --bg http://127.0.0.1:4783
-  tailscale serve status
+tailscale serve --bg http://127.0.0.1:4783
+tailscale serve status
 
 If `PORT` changed, substitute that value. Explain that Serve provides a private HTTPS tailnet URL, both devices must be in the intended tailnet, ACLs/grants should restrict access to the owner, and Funnel must not be used. Explain that `--bg` persists the Serve configuration across Tailscale restarts/reboots, but it does not start this Node app.
 
@@ -213,7 +213,7 @@ After the production app works, detect the host operating system and explain tha
 
 Do not install a background service without explicit confirmation. Ask once at the end:
 
-  “The dashboard currently runs when `npm start` is active. Do you want me to install an OS-native user service so it starts automatically and restarts after a crash?”
+“The dashboard currently runs when `npm start` is active. Do you want me to install an OS-native user service so it starts automatically and restarts after a crash?”
 
 If the user says yes, use the host’s native service manager rather than adding a global process-manager dependency:
 
