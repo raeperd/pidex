@@ -63,14 +63,14 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 
 - Pidex uses pnpm workspaces with one committed lockfile. Direct production dependencies are exact-pinned, including the Pi SDK version matched to the installed Pi CLI during implementation discovery.
 - The initial workspace contains `apps/desktop`, `apps/web`, `apps/server`, and one browser-safe `packages/api` package for shared Zod schemas and inferred protocol types.
-- `apps/desktop` imports and starts `apps/server` in-process. The server's Pi adapter and the web client's connection runtime remain internal modules until reuse or independent versioning justifies extracting them. There is no standalone host executable, daemon package, or native mobile workspace.
+- `apps/desktop` packages, spawns, and supervises the `apps/server` executable as a child process. The Pi adapter and web connection runtime remain internal modules until reuse justifies extracting them. There is no independently installed daemon or native mobile workspace.
 - The same Svelte/Vite production build runs in Electron and in mobile Chrome. Mobile web is not implemented with React, Expo, React Native, or React Native Web.
 - Zod validates protocol and persisted metadata boundaries, `ws` provides the server transport, and `node:sqlite` stores Pidex metadata while Pi JSONL remains the transcript source of truth.
 - Electron's renderer is sandboxed and context-isolated with Node integration disabled. The preload carries only one-time desktop bootstrap material and desktop-only capabilities; session traffic uses the authenticated host protocol.
 
 ### Application architecture
 
-- The Electron main process runs one in-process host and its HTTP/WebSocket server. Pidex does not install a daemon, sidecar, or separate server.
+- Electron main supervises one bundled child process that runs the host and its HTTP/WebSocket server. It passes private bootstrap data, waits for readiness, captures logs, restarts unexpected exits, and terminates the child on Quit. Pidex does not install an independently managed daemon or service.
 - The host binds an OS-assigned `127.0.0.1` port. Tailscale Serve is the only supported remote bridge to it.
 - Desktop and mobile load the same responsive web client and use the same typed host protocol. The renderer receives no direct filesystem, Pi, credential, or Tailscale API.
 - The host is the authority for Pi execution, project access, persistence, authentication, concurrency, and ordered state. Clients submit commands and render host state; they do not coordinate Pi work or resolve conflicts between themselves. Desktop authentication begins with a short-lived, one-time secret delivered through a context-isolated preload bridge; loopback alone is not trusted.

@@ -41,7 +41,7 @@ Not applicable to Pidex:
 
 - `apps/mobile` is a separate Expo/React Native application in addition to the responsive web client. Pidex needs the responsive-web pattern from `apps/web`, not this native workspace or its dependency tree.
 - Effect, Effect Atom, Vite+, Clerk, SSH, hosted access, relay, provider registries, orchestration, Git, terminal, preview, and checkpoint packages solve a broader product.
-- T3 Code may manage server processes and multiple execution environments. Pidex has one in-process host owned by Electron.
+- T3 Code may manage several server processes and execution environments. Pidex uses one Electron-supervised local server process.
 
 ### Paseo
 
@@ -57,7 +57,7 @@ Not applicable to Pidex:
 
 - Paseo shares one Expo/React Native application across web and native targets. Expo, Metro, React Native Web, native navigation, EAS, and native device modules are unnecessary for a browser-only mobile target.
 - Paseo's daemon, CLI, relay, multi-provider support, ACP, terminal, Git, file browser, schedules, and native mobile releases are outside Pidex's scope.
-- Pidex must not adopt a separately supervised daemon: its host lives in the Electron main process and stops on explicit Quit.
+- Pidex uses a bundled child process supervised by Electron, not an independently installed or user-managed daemon.
 
 ## Chosen stack
 
@@ -83,7 +83,7 @@ Pidex should copy the separation, not T3 Code's workspace count or extra orchest
 
 - Electron 41, exact-pinned to the latest compatible patch when scaffolding begins.
 - `electron-builder` for the macOS artifact and `electron-updater` only for the packaged update flow.
-- Electron main owns the in-process host, application lifecycle, folder picker, trust confirmation, Tailscale setup, pairing administration, and the narrow preload bridge.
+- Electron main owns child-process supervision, application lifecycle, native dialogs, and the narrow preload bridge. The server process owns the host, Pi, persistence, authentication, pairing, and Tailscale.
 - Node's built-in `http`, `crypto`, filesystem, and `node:sqlite` modules provide the HTTP server, credentials and digests, file operations, and transactional metadata store. This avoids Express and a native SQLite add-on.
 - `ws` provides the host WebSocket server. The browser uses the native `WebSocket` API.
 - `qrcode` creates pairing QR payloads. Pidex invokes the installed Tailscale CLI through Node child-process APIs; it does not add a Tailscale SDK.
@@ -118,7 +118,7 @@ pidex/
 │   ├── desktop/               # Electron main, preload, menu/window lifecycle, packaging
 │   ├── web/                   # Svelte/Vite UI used by Electron and mobile browsers
 │   │   └── src/lib/client/    # fetch/WebSocket, reconnect, snapshots, action IDs
-│   └── server/                # In-process HTTP/WS host, Pi adapter, SQLite, auth, Tailscale
+│   └── server/                # Child-process HTTP/WS host, Pi, SQLite, auth, Tailscale
 │       └── src/pi/            # Matched-SDK adapter and deterministic test fake
 ├── packages/
 │   └── api/                   # Browser-safe Zod schemas, DTOs, protocol version
@@ -133,14 +133,21 @@ pidex/
 └── tsconfig.base.json
 ```
 
-Dependency direction is one-way:
+Shared protocol dependencies are one-way:
 
 ```text
 apps/web ───────────────> packages/api
-apps/desktop ──> apps/server ──> packages/api
+apps/server ────────────> packages/api
+apps/desktop ───────────> packages/api
 ```
 
-`packages/api` must remain browser-safe and contains schemas and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. `apps/desktop` imports the server module, starts it in-process, and packages the `apps/web` production assets. `apps/server` is a workspace for code organization and testing, not a standalone binary or daemon. Its Pi adapter stays behind an internal interface, while the deterministic fake is test-only. The web connection runtime stays under `apps/web/src/lib/client`.
+Electron has a runtime supervision relationship, not a server-code import:
+
+```text
+apps/desktop ──spawns and supervises──> apps/server executable
+```
+
+`packages/api` must remain browser-safe and contain schemas and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Its Pi adapter stays behind an internal interface, while the deterministic fake is test-only. The web connection runtime stays under `apps/web/src/lib/client`.
 
 This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`, or persistence packages later only if they gain a second consumer or need independent testing, ownership, or versioning that cannot be maintained cleanly in their app.
 
@@ -150,7 +157,7 @@ The first scaffold should include only dependencies needed for the first vertica
 
 | Workspace | Runtime dependencies |
 | --- | --- |
-| `apps/desktop` | `electron`, `@pidex/server`; Electron packaging remains a development dependency |
+| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts |
 | `apps/web` | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api` |
 | `apps/server` | exact-matched Pi SDK, `@pidex/api`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, SQLite, and process execution |
 | `packages/api` | `zod` |
@@ -166,5 +173,5 @@ Before installing the scaffold dependencies:
 1. Resolve the installed Pi CLI and its exact matching SDK package/version, then verify that version's public exports, Node engine, and session APIs.
 2. Verify the selected Electron build exposes the required `node:sqlite` APIs from its embedded Node runtime. If it does not, select a compatible Electron patch before considering another SQLite package.
 3. Record exact third-party versions in the workspace catalog and lockfile; use `workspace:*` only for internal Pidex packages.
-4. Prove a minimal packaged Electron window can start the in-process loopback host, load the built web client, authenticate through the one-time preload bootstrap, and shut down cleanly.
+4. Prove a packaged Electron window can spawn the loopback server, pass private bootstrap data, wait for readiness, load the web client, and shut the child down cleanly.
 5. Prove the same build loads in mobile Chrome over a test HTTPS origin before adding the Pi adapter or broader UI.

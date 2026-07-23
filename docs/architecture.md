@@ -1,67 +1,64 @@
 # Pidex Architecture
 
-Status: proposed for the first implementation.
-
-## Summary
-
-Pidex is one Electron desktop application with an in-process local server. The server
-serves one responsive Svelte web client to both Electron and paired mobile browsers.
-Pi runs only on the desktop and remains the source of truth for agent sessions.
-
-## Workspace
+## Repository
 
 ```text
 apps/
-├── desktop/   # Electron main process, preload, lifecycle, and packaging
-├── web/       # Svelte, Vite, and Tailwind responsive client
-└── server/    # HTTP, WebSocket, Pi, SQLite, authentication, and Tailscale
+├── desktop/   # Electron shell and server process supervisor
+├── web/       # Responsive Svelte, Vite, and Tailwind client
+└── server/    # HTTP, WebSocket, Pi, SQLite, auth, and Tailscale
 
 packages/
-└── api/       # Browser-safe Zod schemas and inferred protocol types
+└── api/       # Browser-safe Zod schemas and inferred types
 ```
 
-The web connection code stays in `apps/web/src/lib/client`. The Pi adapter and its
-test fake stay in `apps/server/src/pi`. More packages are added only when a second
-consumer or independent ownership makes extraction useful.
+- Keep the web connection code inside `apps/web`.
+- Keep the Pi adapter and its test fake inside `apps/server`.
+- Add more packages only when there is a second consumer.
 
 ## Runtime
 
 ```text
-Electron main ──starts──> in-process server ──controls──> Pi SDK
-      │                         │
-      └──loads Svelte app───────┼──HTTP/WebSocket──> desktop renderer
-                                └──Tailscale HTTPS─> mobile browser
+Electron main ──spawns and supervises──> server child process ──> Pi SDK
+      │                                         │
+      │                                         ├──HTTP/WS──> Electron renderer
+      │                                         └──HTTPS/WS─> mobile browser
+      └──loads the shared Svelte web app
 ```
 
-- The server binds an operating-system-assigned `127.0.0.1` port.
-- Electron imports and starts `apps/server`; there is no daemon or sidecar.
-- Desktop and mobile use the same web build and Zod-validated protocol.
-- The preload exposes only desktop bootstrap and desktop-only actions.
-- Mobile cannot register projects, approve trust, or configure remote access.
+- Electron starts the packaged server executable as a child process.
+- Electron checks readiness and owns restart, logs, and shutdown.
+- The renderer never imports server code; it uses HTTP and WebSocket.
+- Mobile uses the same web build and API through Tailscale Serve.
+- Closing the window may keep Electron and the server running.
+- Explicit Quit stops the child process and remote access.
+
+## Dependencies
+
+```text
+apps/web ───────────────> packages/api <────────────── apps/server
+apps/desktop ───────────> packages/api
+
+apps/desktop ──spawns at runtime──> apps/server executable
+```
+
+- `packages/api` contains Zod schemas, DTOs, and protocol versions.
+- `packages/api` contains no Electron, browser, or Node implementation.
+- `apps/web` never imports from `apps/server` or `apps/desktop`.
+- `apps/server` runs independently from the Electron process.
 
 ## Storage
 
-- Pi JSONL stores conversation history and Pi session state.
-- `node:sqlite` stores Pidex projects, runs, action IDs, pairing, and settings.
-- Browser storage holds unsent drafts and harmless local UI preferences.
+```text
+Pi JSONL         conversation history and Pi session state
+Pidex SQLite     projects, runs, action IDs, pairing, and settings
+Browser storage  unsent drafts and local UI preferences
+```
 
 ## Stack
 
-- pnpm workspaces with one `pnpm-lock.yaml` file.
-- Strict TypeScript and native ESM.
-- Electron 41 for the macOS desktop application.
-- Svelte 5, Vite, and Tailwind CSS 4 for the responsive web client.
-- Zod 4 for shared HTTP, WebSocket, and persisted-data validation.
-- Node HTTP, `ws`, and `node:sqlite` in the in-process server.
-
-## Dependency Rules
-
-```text
-apps/web ───────────────> packages/api
-apps/desktop ──> apps/server ──> packages/api
-```
-
-- `packages/api` must remain browser-safe and contain no Node implementation.
-- `apps/web` must never import from `apps/server` or `apps/desktop`.
-- `apps/server` owns Pi, persistence, authentication, and remote access.
-- `apps/desktop` owns Electron APIs and starts or stops the server.
+- pnpm workspaces and one `pnpm-lock.yaml`.
+- Electron 41 with a supervised Node child process.
+- Svelte 5, Vite, and Tailwind CSS 4.
+- Zod 4 for API and persisted-data validation.
+- Node HTTP, `ws`, and `node:sqlite` in `apps/server`.
