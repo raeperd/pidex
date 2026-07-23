@@ -14,9 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Typecheck and build
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
 
     steps:
