@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  electron: true
+
+catalog:
+  "@types/node": 24.12.4
+  "@sveltejs/vite-plugin-svelte": 7.2.0
+  svelte: 5.56.7
+  typescript: 6.0.3
+  vite: 8.1.5
