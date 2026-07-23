@@ -29,6 +29,7 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
