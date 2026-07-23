@@ -5,14 +5,22 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "dev": "PIDEX_ADAPTER=fake pnpm --parallel --filter @pidex/server --filter @pidex/web dev",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
+    "start": "pnpm --filter @pidex/server start",
+    "start:desktop": "pnpm --filter @pidex/desktop start",
+    "smoke:real": "node scripts/real-pi-smoke.mjs",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "oxfmt": "0.60.0",
-    "oxlint": "1.75.0"
+    "oxlint": "1.75.0",
+    "vitest": "4.0.8"
   },
   "engines": {
     "node": "^24.13.1"
