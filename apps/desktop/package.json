@@ -1,5 +1,6 @@
 {
   "name": "@pidex/desktop",
+  "productName": "Pidex",
   "private": true,
   "type": "module",
   "main": "dist/main.js",
