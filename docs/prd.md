@@ -57,7 +57,16 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - A **project** is a desktop-registered directory, not necessarily a Git repository root. A Git worktree may be registered as its own project.
 - A **session** is one Pi session created and managed by Pidex and bound to one project. V1 does not attach to sessions started by the standalone Pi application.
 - A **run** is one accepted prompt and all Pi work it causes. It has a stable host-issued run ID. Pi may emit several lower-level turns during one Pidex run.
-- The first release targets macOS with TypeScript and Electron. Windows and Linux packaging are deferred; the PRD does not require a particular web UI framework.
+- The first release targets macOS with TypeScript, Electron, and a responsive Svelte/Vite DOM client. Windows and Linux packaging are deferred. The detailed stack, workspace boundaries, dependency policy, and T3 Code/Paseo comparison are fixed in [Desktop and Mobile-Web Technical Reference](technical-reference.md).
+
+### Technical baseline
+
+- Pidex uses pnpm workspaces with one committed lockfile. Direct production dependencies are exact-pinned, including the Pi SDK version matched to the installed Pi CLI during implementation discovery.
+- The initial workspace contains `apps/desktop`, `apps/web`, `apps/server`, and one browser-safe `packages/api` package for shared Zod schemas and inferred protocol types.
+- `apps/desktop` imports and starts `apps/server` in-process. The server's Pi adapter and the web client's connection runtime remain internal modules until reuse or independent versioning justifies extracting them. There is no standalone host executable, daemon package, or native mobile workspace.
+- The same Svelte/Vite production build runs in Electron and in mobile Chrome. Mobile web is not implemented with React, Expo, React Native, or React Native Web.
+- Zod validates protocol and persisted metadata boundaries, `ws` provides the server transport, and `node:sqlite` stores Pidex metadata while Pi JSONL remains the transcript source of truth.
+- Electron's renderer is sandboxed and context-isolated with Node integration disabled. The preload carries only one-time desktop bootstrap material and desktop-only capabilities; session traffic uses the authenticated host protocol.
 
 ### Application architecture
 
@@ -151,7 +160,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 
 ## Testing Decisions
 
-- Tests prove user-visible behavior through the highest public seam that can observe it. Shared session, authorization, and continuity behavior is tested through the host HTTP/WebSocket contract, including its public bootstrap endpoints; browser UX is tested through the production web client; Electron-only lifecycle behavior is tested through the packaged application. Tests do not assert React component state, private Pi SDK objects, implementation-specific call counts, or metadata layout.
+- Tests prove user-visible behavior through the highest public seam that can observe it. Shared session, authorization, and continuity behavior is tested through the host HTTP/WebSocket contract, including its public bootstrap endpoints; browser UX is tested through the production web client; Electron-only lifecycle behavior is tested through the packaged application. Tests do not assert Svelte component state, private Pi SDK objects, implementation-specific call counts, or metadata layout.
 - Because the repository has no implementation prior art yet, the first delivery phase establishes one reusable host contract harness. It starts a real isolated host, connects clients over real HTTP/WebSocket transports, and provides only public controls for time, network loss, runtime outcomes, and host restart.
 - Protocol tests use that host with a deterministic adapter at the documented Pi runtime boundary. The adapter produces valid public events for prompt acceptance, streaming text, tools, stop, model and thinking changes, and compaction, plus controlled malformed events, delayed outcomes, and runtime failures; it is a test double for Pi, not a second product runtime or a mock of host internals.
 - A small compatibility suite runs against the pinned Pi SDK with isolated Pidex application data. Non-inference scenarios run without external credentials where the SDK permits; inference-dependent coverage is an explicit opt-in real-provider smoke. Together they prove session creation, durable resume, prompt and event mapping, built-in tool mapping, stop, model and thinking changes, compaction, and recovery from Pi JSONL without depending on private SDK state.
