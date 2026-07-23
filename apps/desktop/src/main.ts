@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { healthSchema } from "@pidex/api";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
@@ -26,14 +26,21 @@ async function waitForServer() {
 }
 async function createWindow() {
   if (!process.env.PIDEX_WEB_URL) { if (!serverChild) spawnServer(); await waitForServer(); }
-  const window = new BrowserWindow({ icon: appIconPath, width: 1280, height: 820, minWidth: 320, minHeight: 560, backgroundColor: "#181b18", webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  const window = new BrowserWindow({ icon: appIconPath, width: 1280, height: 820, minWidth: 320, minHeight: 560, backgroundColor: "#181b18", webPreferences: { preload: path.join(import.meta.dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, url) => { if (!url.startsWith(localUrl)) event.preventDefault(); });
   await window.loadURL(process.env.PIDEX_WEB_URL ?? localUrl);
 }
 
 app.whenReady().then(() => {
   if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
-  void createWindow();
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
+  ipcMain.handle("pidex:pick-project", async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return null;
+    const result = await dialog.showOpenDialog(owner, { title: "Open a project in Pidex", properties: ["openDirectory", "createDirectory"] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  void createWindow(); app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 });
 app.on("before-quit", () => { quitting = true; serverChild?.kill("SIGTERM"); serverChild = undefined; });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

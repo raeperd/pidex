@@ -5,6 +5,7 @@
     | "chevron"
     | "compact"
     | "compose"
+    | "copy"
     | "folder"
     | "menu"
     | "rename"
@@ -38,6 +39,8 @@
     <path d="m8 3 4 4 4-4M8 21l4-4 4 4M4 12h16" />
   {:else if name === "compose"}
     <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+  {:else if name === "copy"}
+    <rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
   {:else if name === "folder"}
     <path d="M3 6.5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
   {:else if name === "menu"}

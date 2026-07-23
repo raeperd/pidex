@@ -249,6 +249,9 @@ main { position: relative; display: flex; min-width: 0; min-height: 0; flex-dire
 .alert button { display: grid; padding: 3px; border: 0; border-radius: 5px; background: transparent; color: inherit; }
 .error { border-color: color-mix(in srgb, var(--danger) 25%, transparent); background: color-mix(in srgb, var(--danger) 9%, var(--background)); color: var(--danger); }
 .warning { border-color: color-mix(in srgb, var(--warning) 25%, transparent); background: color-mix(in srgb, var(--warning) 9%, var(--background)); color: var(--warning); }
+.offline { border-color: color-mix(in srgb, var(--primary) 25%, transparent); background: color-mix(in srgb, var(--primary) 7%, var(--background)); color: var(--muted); }
+.offline span, .interrupted span { line-height: 1.45; }
+.offline button, .interrupted button { flex: 0 0 auto; padding: 6px 9px; border: 1px solid currentColor; font-size: 10.5px; font-weight: 600; }
 
 .transcript { min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .empty { display: flex; width: 100%; min-height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px 120px; text-align: center; }
@@ -259,16 +262,22 @@ main { position: relative; display: flex; min-width: 0; min-height: 0; flex-dire
 .eyebrow { margin: 0 0 10px !important; color: var(--faint) !important; font: 600 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
 .empty h1 { max-width: 700px; margin: 0; color: var(--foreground); font-size: clamp(27px, 3vw, 38px); font-weight: 430; letter-spacing: -.045em; line-height: 1.15; }
 .empty > p:not(.eyebrow) { max-width: 500px; margin: 12px 0 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.retry-button { margin-top: 22px; padding: 9px 14px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card); color: var(--foreground); font-size: 12px; font-weight: 600; box-shadow: var(--shadow); }
 .hero-composer { display: flex; width: min(560px, 100%); min-height: 68px; align-items: center; justify-content: space-between; margin-top: 30px; padding: 11px 13px 11px 20px; border: 1px solid var(--border-strong); border-radius: 20px; background: var(--card); color: var(--muted); font-size: 14px; text-align: left; box-shadow: var(--shadow); }
 .hero-composer:hover { border-color: color-mix(in srgb, var(--primary) 35%, var(--border-strong)); }
 .hero-send { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 50%; background: var(--primary); color: var(--primary-foreground); }
 
 .messages { width: 100%; max-width: 768px; margin: 0 auto; padding: 30px 20px 50px; }
+.load-earlier { display: block; margin: 0 auto 24px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--muted); font-size: 10.5px; }
+.load-earlier:hover { color: var(--foreground); }
 .message { margin-bottom: 20px; }
 .message.user { display: flex; flex-direction: column; align-items: flex-end; padding-top: 4px; }
 .bubble { max-width: 80%; padding: 10px 13px; border-radius: 16px; background: var(--secondary); color: var(--foreground); font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.assistant { min-width: 0; padding: 2px 4px 3px; }
 .assistant-label { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--faint); font-size: 10.5px; font-weight: 550; }
+.copy-response { display: inline-flex; min-height: 26px; align-items: center; gap: 5px; margin-left: auto; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); font-size: 10px; }
+.copy-response:hover { background: var(--secondary); color: var(--foreground); }
+.copy-response.copy-failed { color: var(--danger); }
 .pi-avatar { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 5px; background: var(--foreground); color: var(--background); font: 700 11px/1 Georgia, serif; }
 .streaming { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); }
 .streaming::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; animation: pulse 1.4s infinite; }
@@ -310,6 +319,9 @@ main { position: relative; display: flex; min-width: 0; min-height: 0; flex-dire
 .tool summary > svg:last-child { flex: 0 0 auto; opacity: .5; transition: transform .15s; }
 .tool[open] summary > svg:last-child { transform: rotate(90deg); }
 .tool pre { max-height: 300px; margin: 3px 0 8px 27px; padding: 10px 12px; white-space: pre-wrap; }
+.tool-load { margin: 0 0 8px 27px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--primary); font-size: 10px; font-weight: 600; }
+.tool-note { margin: 0 0 8px 27px; color: var(--faint); font-size: 10px; }
+.tool-note.failed { color: var(--danger); }
 .notice { display: flex; align-items: flex-start; gap: 8px; margin: 10px 4px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--secondary) 45%, transparent); color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .notice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--primary); }
 .notice-error { border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); color: var(--danger); }

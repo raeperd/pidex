@@ -1,6 +1,6 @@
 # Pidex
 
-Pidex is a local, private control surface for the installed Pi coding agent. The browser and Electron renderer are clients only: Pi’s SDK owns authentication, models, resources, tools, agent execution, and native JSONL conversation sessions. SQLite stores only Pidex metadata such as recent project IDs—never transcripts or credentials.
+Pidex is a local, private control surface for the installed Pi coding agent. The browser and Electron renderer are clients only: Pi’s SDK owns authentication, models, resources, tools, agent execution, and native JSONL conversation sessions. SQLite stores only Pidex metadata, durable client actions, run outcomes, and session revisions—never transcripts or credentials.
 
 ## Requirements and setup
 
@@ -45,17 +45,19 @@ apps/desktop ───────────> packages/api
 ```
 
 - `packages/api`: browser-safe Zod schemas and inferred protocol types.
-- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, native Pi adapter, deterministic fake, and SQLite metadata.
-- `apps/web`: responsive Svelte 5/Tailwind 4 client, WebSocket replay/reconnect, stable-item reconciliation, drafts, safe GFM, mobile drawer, and extension dialogs.
-- `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child.
+- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, deterministic fake, and SQLite metadata.
+- `apps/web`: responsive Svelte 5/Tailwind 4 client, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
+- `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
-The server issues an authoritative snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.
+The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.
+
+Authoritative snapshots and transcript pages are bounded. Older Pi JSONL items are loaded explicitly, and large tool results stay out of WebSocket events and are fetched in chunks of at most 16 KiB. Completed assistant responses have a one-action Copy control with visible clipboard-denial feedback. While disconnected, the composer remains a local draft only and the UI says that host data is unavailable rather than implying it was deleted.
 
 ## Pi state, trust, and safety
 
 Pidex resolves the Pi agent directory with `getAgentDir()`. Session placement follows `PI_CODING_AGENT_SESSION_DIR`, then Pi’s `sessionDir` setting, then the SDK default. It lists and opens only exact paths freshly returned by `SessionManager.list()`, and rebuilds resumed transcripts from `buildContextEntries()` so abandoned branches are not flattened.
 
-Project-local Pi resources are loaded only when Pi has a saved trust decision or global `defaultProjectTrust` is `always`. Otherwise protected resources are skipped and the UI shows a notice; Pidex never silently approves trust. Context files that Pi treats as unprotected continue to follow SDK behavior.
+Project-local Pi resources are loaded only when Pi has a saved trust decision or global `defaultProjectTrust` is `always`. Otherwise protected resources are skipped and the UI shows a notice; Pidex never silently approves trust. Pidex Desktop can save an explicit approval through Pi’s own trust store after confirmation. Context files that Pi treats as unprotected continue to follow SDK behavior, and bounded SDK resource diagnostics are visible in the workspace UI.
 
 **Pi has no built-in sandbox.** Read-only mode is a real model-tool allowlist (`read`, `grep`, `find`, `ls`), not an operating-system security boundary, and extensions still run with the host user’s permissions. Full mode exposes Pi’s configured tool registry. Use a VM, container, or OS sandbox for untrusted or unattended work.
 
@@ -93,7 +95,9 @@ Serve provides a private Tailnet HTTPS URL; both devices must be in the intended
 - Project rejected: add its canonical ancestor to `WORKSPACE_ROOTS`; symlink escapes and prefix lookalikes are intentionally blocked.
 - No models: authenticate in the local Pi TUI with `/login`.
 - Project resources skipped: review and save the trust decision in Pi locally.
+- Run interrupted: review the restored Pi transcript, then acknowledge the ambiguous run before sending another prompt; Pidex will never rerun it automatically.
+- Large tool output: expand the tool card and load additional bounded chunks. Output beyond the host safety ceiling is marked explicitly.
 - Reconnecting: confirm `pnpm start` is still active; the browser will replay or resnapshot automatically.
 - Electron cannot become ready: run `pnpm build` first and check for a port conflict.
 
-Intentionally omitted: public/LAN/Funnel hosting, automatic Tailscale setup, OS services, generic providers, profiles, voice, side agents, terminal/Git/file editors, worktrees, scheduling/orchestration, credential or trust editing, telemetry, and requirements found only in the PRD or technical reference.
+Intentionally omitted: public/LAN/Funnel hosting, automatic Tailscale setup, pairing/device authentication, OS services, generic providers, profiles, voice, side agents, terminal/Git/file editors, worktrees, scheduling/orchestration, provider credential editing, telemetry, and other non-coding-agent remote administration.

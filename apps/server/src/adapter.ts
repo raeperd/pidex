@@ -3,7 +3,7 @@ import type { ExtensionDialog, ModelInfo, SessionSummary, TextItem, ToolItem } f
 export type AdapterEvent =
   | { type: "message"; item: TextItem }
   | { type: "delta"; itemId: string; delta: string; channel: "text" | "thinking" }
-  | { type: "tool"; item: ToolItem }
+  | { type: "tool"; item: ToolItem; output?: { text: string; sourceTruncated: boolean } }
   | { type: "queue"; steering: string[]; followUp: string[] }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
   | { type: "settled" }
@@ -15,6 +15,7 @@ export interface AdapterWorkspaceInfo {
   sessions: AdapterSessionInfo[];
   trusted: boolean | null;
   protectedResourcesSkipped: boolean;
+  resourceDiagnostics: Array<{ level: "warning" | "error"; message: string }>;
   commands: Array<{ name: string; description?: string }>;
 }
 export interface AdapterSession {
@@ -44,9 +45,15 @@ export interface PiAdapter {
   inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo>;
   createSession(cwd: string, toolMode: "read-only" | "full"): Promise<AdapterSession>;
   resumeSession(cwd: string, nativePath: string): Promise<AdapterSession>;
+  setWorkspaceTrust(cwd: string, trusted: boolean): Promise<void>;
 }
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
   let text: string;
-  try { text = typeof value === "string" ? value : JSON.stringify(value, null, 2); } catch { text = "[unserializable output]"; }
+  try { text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value)); } catch { text = "[unserializable output]"; }
   return text.length <= max ? { text, truncated: false } : { text: `${text.slice(0, max)}\n… output truncated`, truncated: true };
+}
+
+export function boundedResource(value: unknown, max = 1_000_000): { text: string; sourceTruncated: boolean } {
+  const serialized = bounded(value, max);
+  return { text: serialized.text, sourceTruncated: serialized.truncated };
 }

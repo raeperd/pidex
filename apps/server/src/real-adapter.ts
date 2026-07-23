@@ -14,7 +14,7 @@ import {
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
-import { bounded, type AdapterEvent, type AdapterSession, type AdapterSessionInfo, type AdapterWorkspaceInfo, type PiAdapter } from "./adapter.js";
+import { bounded, boundedResource, type AdapterEvent, type AdapterSession, type AdapterSessionInfo, type AdapterWorkspaceInfo, type PiAdapter } from "./adapter.js";
 
 const readOnly = ["read", "grep", "find", "ls"];
 const textOf = (content: unknown): string => {
@@ -80,9 +80,11 @@ class RealSession implements AdapterSession {
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800); this.emit({ type: "tool", item: { type: "tool", id: event.toolCallId, name: event.toolName, argumentSummary: args.text, state: "running", preview: "", truncated: args.truncated } });
     } else if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
-      const value = event.type === "tool_execution_update" ? event.partialResult : event.result; const output = bounded(value);
-      const item: ToolItem = { type: "tool", id: event.toolCallId, name: event.toolName, argumentSummary: event.type === "tool_execution_update" ? bounded(event.args, 800).text : "", state: event.type === "tool_execution_update" ? "running" : event.isError ? "error" : "success", preview: output.text, truncated: output.truncated };
-      this.emit({ type: "tool", item });
+      const value = event.type === "tool_execution_update" ? event.partialResult : event.result;
+      const output = boundedResource(value);
+      const preview = bounded(output.text);
+      const item: ToolItem = { type: "tool", id: event.toolCallId, name: event.toolName, argumentSummary: event.type === "tool_execution_update" ? bounded(event.args, 800).text : "", state: event.type === "tool_execution_update" ? "running" : event.isError ? "error" : "success", preview: preview.text, truncated: preview.truncated || output.sourceTruncated };
+      this.emit({ type: "tool", item, output });
     } else if (event.type === "queue_update") this.emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
     else if (event.type === "agent_settled") this.emit({ type: "settled" });
     else if (event.type === "compaction_start") this.emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
@@ -142,7 +144,13 @@ export class RealPiAdapter implements PiAdapter {
   async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
     const { trust, loader, modelRuntime, sessionDir } = await this.services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
-    return { models: (await modelRuntime.getAvailable()).map((model) => ({ id: `${model.provider}/${model.id}`, provider: model.provider, name: model.name, reasoning: model.reasoning })), sessions: sessions.map((entry): AdapterSessionInfo => ({ id: entry.id, nativeId: entry.id, nativePath: entry.path, ...(entry.name ? { name: entry.name } : {}), firstMessage: entry.firstMessage.slice(0, 500), createdAt: entry.created.toISOString(), modifiedAt: entry.modified.toISOString(), messageCount: entry.messageCount })), trusted: trust.trusted, protectedResourcesSkipped: trust.skipped, commands: loader.getPrompts().prompts.map((prompt) => ({ name: prompt.name, ...(prompt.description ? { description: prompt.description } : {}) })) };
+    const diagnostics = [
+      ...loader.getSkills().diagnostics.map((entry) => ({ level: entry.type === "error" ? "error" as const : "warning" as const, message: entry.message.slice(0, 1000) })),
+      ...loader.getPrompts().diagnostics.map((entry) => ({ level: entry.type === "error" ? "error" as const : "warning" as const, message: entry.message.slice(0, 1000) })),
+      ...loader.getThemes().diagnostics.map((entry) => ({ level: entry.type === "error" ? "error" as const : "warning" as const, message: entry.message.slice(0, 1000) })),
+      ...loader.getExtensions().errors.map((entry) => ({ level: "error" as const, message: `Extension ${path.basename(entry.path)}: ${entry.error}`.slice(0, 1000) })),
+    ].slice(0, 50);
+    return { models: (await modelRuntime.getAvailable()).map((model) => ({ id: `${model.provider}/${model.id}`, provider: model.provider, name: model.name, reasoning: model.reasoning })), sessions: sessions.map((entry): AdapterSessionInfo => ({ id: entry.id, nativeId: entry.id, nativePath: entry.path, ...(entry.name ? { name: entry.name } : {}), firstMessage: entry.firstMessage.slice(0, 500), createdAt: entry.created.toISOString(), modifiedAt: entry.modified.toISOString(), messageCount: entry.messageCount })), trusted: trust.trusted, protectedResourcesSkipped: trust.skipped, resourceDiagnostics: diagnostics, commands: loader.getPrompts().prompts.map((prompt) => ({ name: prompt.name, ...(prompt.description ? { description: prompt.description } : {}) })) };
   }
   private async open(cwd: string, manager: SessionManager, toolMode: "read-only" | "full") {
     const { agentDir, settings, loader, modelRuntime } = await this.services(cwd);
@@ -151,4 +159,5 @@ export class RealPiAdapter implements PiAdapter {
   }
   async createSession(cwd: string, toolMode: "read-only" | "full") { const { sessionDir } = await this.services(cwd); return this.open(cwd, SessionManager.create(cwd, sessionDir), toolMode); }
   async resumeSession(cwd: string, nativePath: string) { const { sessionDir } = await this.services(cwd); return this.open(cwd, SessionManager.open(nativePath, sessionDir, cwd), "read-only"); }
+  async setWorkspaceTrust(cwd: string, trusted: boolean) { new ProjectTrustStore(getAgentDir()).set(cwd, trusted); }
 }

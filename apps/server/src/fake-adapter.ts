@@ -45,7 +45,7 @@ class FakeSession implements AdapterSession {
     }
     if (text === "RETRY") this.emit({ type: "notice", level: "warning", text: "Retry 1/2: deterministic transient failure" });
     const assistant: TextItem = { type: "assistant", id: `a-${now}`, text: "", thinking: "", complete: false, timestamp: new Date().toISOString() };
-    this.messages.push(assistant); this.emit({ type: "message", item: assistant });
+    this.messages.push(assistant); this.emit({ type: "message", item: { ...assistant } });
     const chunks = text.startsWith("MARKDOWN:") ? [text.slice("MARKDOWN:".length)] : text === "stop this" ? Array.from({ length: 20 }, () => "working ") : ["I’ll inspect the project safely. ", "The deterministic Pi adapter is streaming this response. "];
     for (const chunk of chunks) {
       if (this.stopped) break;
@@ -55,10 +55,12 @@ class FakeSession implements AdapterSession {
     if (!this.stopped) {
       const tool = { type: "tool" as const, id: `tool-${now}`, name: "read", argumentSummary: "README.md", state: "running" as const, preview: "", truncated: false };
       this.emit({ type: "tool", item: tool }); await delay(100);
-      this.emit({ type: "tool", item: { ...tool, state: "success", preview: "# Pidex\nLocal Pi dashboard" } });
+      const fullOutput = text === "LARGE_TOOL" ? `${"bounded tool output line\n".repeat(1_200)}end of complete output` : "# Pidex\nLocal Pi dashboard";
+      const truncated = fullOutput.length > 12_000;
+      this.emit({ type: "tool", item: { ...tool, state: "success", preview: truncated ? `${fullOutput.slice(0, 12_000)}\n… output truncated` : fullOutput, truncated }, output: { text: fullOutput, sourceTruncated: false } });
       assistant.text += "Ready for the next instruction."; this.emit({ type: "delta", itemId: assistant.id, delta: "Ready for the next instruction.", channel: "text" });
     } else { assistant.text += "Stopped."; this.emit({ type: "delta", itemId: assistant.id, delta: "Stopped.", channel: "text" }); }
-    assistant.complete = true; transcripts.set(this.nativeId, [...this.messages]);
+    assistant.complete = true; this.emit({ type: "message", item: { ...assistant } }); transcripts.set(this.nativeId, [...this.messages]);
     const record = saved.get(this.cwd)?.find((entry) => entry.nativeId === this.nativeId);
     if (record) { record.firstMessage = this.messages.find((m) => m.type === "user")?.text.slice(0, 500) ?? "New session"; record.messageCount = this.messages.length; record.modifiedAt = new Date().toISOString(); }
     this.steering = []; this.followUps = []; this.isIdle = true; this.emit({ type: "queue", steering: [], followUp: [] }); this.emit({ type: "settled" });
@@ -77,7 +79,8 @@ class FakeSession implements AdapterSession {
 
 export class FakePiAdapter implements PiAdapter {
   readonly name = "fake" as const;
-  async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> { return { models: [{ id: "fake/deterministic", provider: "fake", name: "Deterministic (no model spend)", reasoning: true }], sessions: [...(saved.get(cwd) ?? [])], trusted: true, protectedResourcesSkipped: false, commands: [{ name: "review", description: "Fake prompt template" }] }; }
+  async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> { return { models: [{ id: "fake/deterministic", provider: "fake", name: "Deterministic (no model spend)", reasoning: true }], sessions: [...(saved.get(cwd) ?? [])], trusted: true, protectedResourcesSkipped: false, resourceDiagnostics: [], commands: [{ name: "review", description: "Fake prompt template" }] }; }
   async createSession(cwd: string) { return new FakeSession(cwd); }
   async resumeSession(cwd: string, nativePath: string) { const id = nativePath.replace("fake://", ""); const info = saved.get(cwd)?.find((entry) => entry.nativeId === id); if (!info) throw new Error("Session no longer exists"); return new FakeSession(cwd, info); }
+  async setWorkspaceTrust() {}
 }
