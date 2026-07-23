@@ -1,0 +1,5 @@
+{
+  "name": "@pidex/api",
+  "private": true,
+  "type": "module"
+}
