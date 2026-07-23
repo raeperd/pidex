@@ -4,7 +4,15 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r --if-present build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
     "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "oxfmt": "0.60.0",
+    "oxlint": "1.75.0"
   },
   "engines": {
     "node": "^24.13.1"
