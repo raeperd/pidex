@@ -176,7 +176,7 @@ test("new, stream, tool, stop, reconnect, and resume", async ({ page, context },
   await expect(page.locator("article.message.assistant")).toHaveCount(before);
   await page.getByLabel("Prompt").fill("stop this");
   await page.getByRole("button", { name: /^Send/ }).click();
-  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
   await page.getByLabel("Prompt").fill("change direction");
   await page.getByLabel("Delivery mode").selectOption("steer");
   await page.getByRole("button", { name: "Queue", exact: true }).click();
