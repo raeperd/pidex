@@ -15,12 +15,21 @@ function sourceFiles(directory: string): string[] {
 function importsIn(directory: string): Array<{ file: string; specifier: string }> {
   return sourceFiles(directory).flatMap((file) => {
     const source = readFileSync(file, "utf8");
-    return [...source.matchAll(/(?:from\s+|import\s*\(|import\s+)["']([^"']+)["']/g)].map((match) => ({ file: path.relative(repositoryRoot, file), specifier: match[1]! }));
+    return [...source.matchAll(/(?:from\s+|import\s*\(|import\s+)["']([^"']+)["']/g)].map(
+      (match) => ({ file: path.relative(repositoryRoot, file), specifier: match[1]! }),
+    );
   });
 }
 
 function crossAppImports(app: "web" | "server" | "desktop", targets: string[]) {
-  return importsIn(path.join(repositoryRoot, "apps", app)).filter(({ specifier }) => targets.some((target) => specifier.startsWith(`@pidex/${target}`) || specifier.includes(`apps/${target}`) || new RegExp(`(?:\\.\\./)+${target}/`).test(specifier)));
+  return importsIn(path.join(repositoryRoot, "apps", app)).filter(({ specifier }) =>
+    targets.some(
+      (target) =>
+        specifier.startsWith(`@pidex/${target}`) ||
+        specifier.includes(`apps/${target}`) ||
+        new RegExp(`(?:\\.\\./)+${target}/`).test(specifier),
+    ),
+  );
 }
 
 describe("documented architecture boundaries", () => {
@@ -37,7 +46,10 @@ describe("documented architecture boundaries", () => {
   });
 
   it("keeps the shared API package implementation-neutral", () => {
-    const forbidden = importsIn(path.join(repositoryRoot, "packages", "api", "src")).filter(({ specifier }) => specifier.startsWith("node:") || ["electron", "svelte", "ws"].includes(specifier));
+    const forbidden = importsIn(path.join(repositoryRoot, "packages", "api", "src")).filter(
+      ({ specifier }) =>
+        specifier.startsWith("node:") || ["electron", "svelte", "ws"].includes(specifier),
+    );
     expect(forbidden).toEqual([]);
   });
 });

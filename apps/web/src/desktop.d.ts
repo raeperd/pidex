@@ -1,9 +1,9 @@
-export {};
+export interface PidexDesktopBridge {
+  pickProject(): Promise<string | null>;
+}
 
 declare global {
   interface Window {
-    pidexDesktop?: {
-      pickProject(): Promise<string | null>;
-    };
+    pidexDesktop?: PidexDesktopBridge;
   }
 }

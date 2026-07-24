@@ -1,4 +1,30 @@
 import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
-export default defineConfig({ testDir: "./e2e", timeout: 30_000, retries: 0, workers: 1, use: { baseURL: "http://127.0.0.1:4783", trace: "retain-on-failure" }, projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }, { name: "mobile", use: { ...devices["Pixel 7"] } }], webServer: { command: "pnpm build && pnpm start", url: "http://127.0.0.1:4783/api/health", reuseExistingServer: false, timeout: 120_000, env: { PIDEX_ADAPTER: "fake", WORKSPACE_ROOTS: process.cwd(), PIDEX_STATE_DIR: path.join(os.tmpdir(), `pidex-e2e-${process.pid}`) } } });
+const e2ePort = Number(process.env.PIDEX_E2E_PORT ?? "4784");
+const e2eOrigin = `http://127.0.0.1:${e2ePort}`;
+export default defineConfig({
+  testDir: "./e2e",
+  timeout: 40_000,
+  retries: 0,
+  workers: 1,
+  use: { baseURL: e2eOrigin, trace: "retain-on-failure" },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile", use: { ...devices["Pixel 7"] } },
+  ],
+  webServer: {
+    command: "pnpm build && pnpm start",
+    url: `${e2eOrigin}/api/health`,
+    reuseExistingServer: false,
+    timeout: 120_000,
+    env: {
+      PORT: String(e2ePort),
+      PIDEX_ADAPTER: "fake",
+      PIDEX_FAKE_SEED_SESSIONS: "12",
+      PIDEX_PROJECT_ROOTS: process.cwd(),
+      WORKSPACE_ROOTS: process.cwd(),
+      PIDEX_STATE_DIR: path.join(os.tmpdir(), `pidex-e2e-${process.pid}`),
+    },
+  },
+});

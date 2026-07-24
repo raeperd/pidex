@@ -1,11 +1,29 @@
 import { randomUUID } from "node:crypto";
-import type { ActionOutcome, ChatSnapshot, RunOutcome, ServerEvent, ToolOutputChunk, TranscriptItem, TranscriptPage, ToolItem, Workspace } from "@pidex/api";
+import type {
+  ActionOutcome,
+  ChatSnapshot,
+  RunOutcome,
+  ServerEvent,
+  ToolOutputChunk,
+  TranscriptItem,
+  TranscriptPage,
+  ToolItem,
+  Workspace,
+} from "@pidex/api";
 import type { WebSocket } from "ws";
 import type { AdapterEvent, AdapterSession, AdapterSessionInfo, PiAdapter } from "./adapter.js";
 import type { MetadataStore } from "./metadata.js";
 
-interface WorkspaceRecord { id: string; path: string; info: Awaited<ReturnType<PiAdapter["inspectWorkspace"]>> }
-interface ToolResource { id: string; text: string; sourceTruncated: boolean }
+interface WorkspaceRecord {
+  id: string;
+  path: string;
+  info: Awaited<ReturnType<PiAdapter["inspectWorkspace"]>>;
+}
+interface ToolResource {
+  id: string;
+  text: string;
+  sourceTruncated: boolean;
+}
 interface ChatRecord {
   id: string;
   workspaceId: string;
@@ -27,15 +45,25 @@ interface ChatRecord {
   abortRequested: boolean;
   unsubscribe: () => void;
 }
-type EventPayload = ServerEvent extends infer Event ? Event extends ServerEvent ? Omit<Event, "eventId" | "chatId"> : never : never;
+type EventPayload = ServerEvent extends infer Event
+  ? Event extends ServerEvent
+    ? Omit<Event, "eventId" | "chatId">
+    : never
+  : never;
 
 export class ChatManager {
   private workspaces = new Map<string, WorkspaceRecord>();
-  private sessions = new Map<string, { opaque: string; info: AdapterSessionInfo; workspaceId: string }>();
+  private sessions = new Map<
+    string,
+    { opaque: string; info: AdapterSessionInfo; workspaceId: string }
+  >();
   private chats = new Map<string, ChatRecord>();
   private owners = new Map<string, string>();
 
-  constructor(readonly adapter: PiAdapter, private readonly metadata: MetadataStore) {}
+  constructor(
+    readonly adapter: PiAdapter,
+    private readonly metadata: MetadataStore,
+  ) {}
 
   async openWorkspace(id: string, canonicalPath: string): Promise<Workspace> {
     const info = await this.adapter.inspectWorkspace(canonicalPath);
@@ -43,14 +71,27 @@ export class ChatManager {
     this.workspaces.set(id, record);
     const sessions = info.sessions.map((session) => {
       const key = session.nativePath ?? session.nativeId;
-      let mapped = [...this.sessions.values()].find((entry) => (entry.info.nativePath ?? entry.info.nativeId) === key && entry.workspaceId === id);
+      let mapped = [...this.sessions.values()].find(
+        (entry) =>
+          (entry.info.nativePath ?? entry.info.nativeId) === key && entry.workspaceId === id,
+      );
       if (!mapped) {
         mapped = { opaque: randomUUID().replaceAll("-", ""), info: session, workspaceId: id };
         this.sessions.set(mapped.opaque, mapped);
       } else mapped.info = session;
       return { ...session, id: mapped.opaque };
     });
-    return { id, path: canonicalPath, name: canonicalPath.split(/[\\/]/).filter(Boolean).at(-1) ?? canonicalPath, trusted: info.trusted, protectedResourcesSkipped: info.protectedResourcesSkipped, resourceDiagnostics: info.resourceDiagnostics, models: info.models, sessions, commands: info.commands };
+    return {
+      id,
+      path: canonicalPath,
+      name: canonicalPath.split(/[\\/]/).filter(Boolean).at(-1) ?? canonicalPath,
+      trusted: info.trusted,
+      protectedResourcesSkipped: info.protectedResourcesSkipped,
+      resourceDiagnostics: info.resourceDiagnostics,
+      models: info.models,
+      sessions,
+      commands: info.commands,
+    };
   }
 
   workspace(id: string) {
@@ -94,7 +135,9 @@ export class ChatManager {
       unsubscribe: () => {},
     };
     const generation = chat.generation;
-    chat.unsubscribe = session.subscribe((event) => { if (chat.generation === generation) this.handle(chat, event); });
+    chat.unsubscribe = session.subscribe((event) => {
+      if (chat.generation === generation) this.handle(chat, event);
+    });
     this.chats.set(id, chat);
     this.owners.set(sessionKey, id);
     return chat;
@@ -110,12 +153,20 @@ export class ChatManager {
     const fresh = await this.adapter.inspectWorkspace(ws.path);
     ws.info = fresh;
     const mapped = this.sessions.get(opaque);
-    if (!mapped || mapped.workspaceId !== workspaceId) throw new Error("Session ID is invalid or stale");
-    const listed = fresh.sessions.find((entry) => (entry.nativePath ?? entry.nativeId) === (mapped.info.nativePath ?? mapped.info.nativeId));
+    if (!mapped || mapped.workspaceId !== workspaceId)
+      throw new Error("Session ID is invalid or stale");
+    const listed = fresh.sessions.find(
+      (entry) =>
+        (entry.nativePath ?? entry.nativeId) === (mapped.info.nativePath ?? mapped.info.nativeId),
+    );
     if (!listed?.nativePath) throw new Error("Session no longer exists");
     const owner = this.owners.get(listed.nativePath);
     if (owner) return this.chat(owner);
-    return this.attach(workspaceId, await this.adapter.resumeSession(ws.path, listed.nativePath), opaque);
+    return this.attach(
+      workspaceId,
+      await this.adapter.resumeSession(ws.path, listed.nativePath),
+      opaque,
+    );
   }
 
   chat(id: string) {
@@ -156,11 +207,21 @@ export class ChatManager {
   }
 
   private broadcastRun(chat: ChatRecord) {
-    this.broadcast(chat, { type: "run_status", status: chat.runStatus, revision: chat.revision, ...(chat.run ? { run: chat.run } : {}) });
+    this.broadcast(chat, {
+      type: "run_status",
+      status: chat.runStatus,
+      revision: chat.revision,
+      ...(chat.run ? { run: chat.run } : {}),
+    });
   }
 
   sendSnapshot(chat: ChatRecord, socket: WebSocket) {
-    const event = { type: "snapshot", eventId: ++chat.eventId, chatId: chat.id, snapshot: this.snapshot(chat) } as ServerEvent;
+    const event = {
+      type: "snapshot",
+      eventId: ++chat.eventId,
+      chatId: chat.id,
+      snapshot: this.snapshot(chat),
+    } as ServerEvent;
     chat.events.push(event);
     socket.send(JSON.stringify(event));
   }
@@ -168,8 +229,14 @@ export class ChatManager {
   connect(chat: ChatRecord, socket: WebSocket, lastEventId?: number) {
     chat.sockets.add(socket);
     const first = chat.events[0]?.eventId;
-    if (lastEventId !== undefined && first !== undefined && lastEventId >= first - 1 && lastEventId <= chat.eventId) {
-      for (const event of chat.events) if (event.eventId > lastEventId) socket.send(JSON.stringify(event));
+    if (
+      lastEventId !== undefined &&
+      first !== undefined &&
+      lastEventId >= first - 1 &&
+      lastEventId <= chat.eventId
+    ) {
+      for (const event of chat.events)
+        if (event.eventId > lastEventId) socket.send(JSON.stringify(event));
     } else this.sendSnapshot(chat, socket);
     socket.once("close", () => chat.sockets.delete(socket));
   }
@@ -190,13 +257,27 @@ export class ChatManager {
         if (event.channel === "text") item.text += event.delta;
         else item.thinking = `${item.thinking ?? ""}${event.delta}`;
       }
-      this.broadcast(chat, { type: "text_delta", itemId: event.itemId, delta: event.delta, channel: event.channel });
+      this.broadcast(chat, {
+        type: "text_delta",
+        itemId: event.itemId,
+        delta: event.delta,
+        channel: event.channel,
+      });
     } else if (event.type === "tool") {
-      const previous = chat.items.find((entry): entry is ToolItem => entry.type === "tool" && entry.id === event.item.id);
-      let item = event.item.argumentSummary || !previous ? event.item : { ...event.item, argumentSummary: previous.argumentSummary };
+      const previous = chat.items.find(
+        (entry): entry is ToolItem => entry.type === "tool" && entry.id === event.item.id,
+      );
+      let item =
+        event.item.argumentSummary || !previous
+          ? event.item
+          : { ...event.item, argumentSummary: previous.argumentSummary };
       if (event.output && (item.truncated || event.output.sourceTruncated)) {
         const resourceId = previous?.resourceId ?? randomUUID().replaceAll("-", "");
-        chat.resources.set(resourceId, { id: resourceId, text: event.output.text, sourceTruncated: event.output.sourceTruncated });
+        chat.resources.set(resourceId, {
+          id: resourceId,
+          text: event.output.text,
+          sourceTruncated: event.output.sourceTruncated,
+        });
         item = { ...item, resourceId, outputSize: event.output.text.length, truncated: true };
       }
       this.upsert(chat, item);
@@ -206,11 +287,19 @@ export class ChatManager {
       chat.followUp = event.followUp;
       this.broadcast(chat, { type: "queue", steering: event.steering, followUp: event.followUp });
     } else if (event.type === "notice") {
-      const item = { type: "notice" as const, id: randomUUID().replaceAll("-", ""), level: event.level, text: event.text };
+      const item = {
+        type: "notice" as const,
+        id: randomUUID().replaceAll("-", ""),
+        level: event.level,
+        text: event.text,
+      };
       chat.items.push(item);
       this.broadcast(chat, { type: "notice", item });
     } else if (event.type === "dialog") {
-      this.broadcast(chat, { type: "extension_dialog", ...(event.dialog ? { dialog: event.dialog } : {}) });
+      this.broadcast(chat, {
+        type: "extension_dialog",
+        ...(event.dialog ? { dialog: event.dialog } : {}),
+      });
     } else if (event.type === "settled") {
       const outcome = chat.abortRequested ? "cancelled" : "completed";
       if (chat.run) {
@@ -220,7 +309,11 @@ export class ChatManager {
       chat.abortRequested = false;
       chat.runStatus = "idle";
       this.broadcastRun(chat);
-      this.broadcast(chat, { type: "session", ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}), stats: chat.session.getStats() });
+      this.broadcast(chat, {
+        type: "session",
+        ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}),
+        stats: chat.session.getStats(),
+      });
     }
   }
 
@@ -228,20 +321,39 @@ export class ChatManager {
     chat.revision = Math.max(chat.revision, outcome.revision);
     if (outcome.replayed) return;
     if (!chat.session.isIdle) throw new Error("A run is already active");
-    chat.run = { runId: outcome.runId, actionId: outcome.actionId, status: "running", requiresAcknowledgement: false };
+    chat.run = {
+      runId: outcome.runId,
+      actionId: outcome.actionId,
+      status: "running",
+      requiresAcknowledgement: false,
+    };
     chat.runStatus = "running";
     this.metadata.markPromptStatus(chat.sessionKey, outcome.runId, "running");
     this.broadcastRun(chat);
     void chat.session.prompt(text).catch((error) => {
       this.metadata.markPromptStatus(chat.sessionKey, outcome.runId, "failed");
-      chat.run = { runId: outcome.runId, actionId: outcome.actionId, status: "failed", requiresAcknowledgement: false };
+      chat.run = {
+        runId: outcome.runId,
+        actionId: outcome.actionId,
+        status: "failed",
+        requiresAcknowledgement: false,
+      };
       chat.runStatus = "error";
-      this.handle(chat, { type: "notice", level: "error", text: error instanceof Error ? error.message : "Prompt failed" });
+      this.handle(chat, {
+        type: "notice",
+        level: "error",
+        text: error instanceof Error ? error.message : "Prompt failed",
+      });
       this.broadcastRun(chat);
     });
   }
 
-  async deliverDuringRun(chat: ChatRecord, text: string, delivery: "steer" | "follow-up", outcome: ActionOutcome): Promise<ActionOutcome> {
+  async deliverDuringRun(
+    chat: ChatRecord,
+    text: string,
+    delivery: "steer" | "follow-up",
+    outcome: ActionOutcome,
+  ): Promise<ActionOutcome> {
     chat.revision = Math.max(chat.revision, outcome.revision);
     if (outcome.replayed) return outcome;
     try {
@@ -259,7 +371,8 @@ export class ChatManager {
   async abort(chat: ChatRecord, outcome: ActionOutcome): Promise<ActionOutcome> {
     chat.revision = Math.max(chat.revision, outcome.revision);
     if (outcome.replayed) return outcome;
-    if (!chat.run || chat.run.runId !== outcome.runId) throw new Error("Stop no longer targets the active run");
+    if (!chat.run || chat.run.runId !== outcome.runId)
+      throw new Error("Stop no longer targets the active run");
     chat.abortRequested = true;
     chat.runStatus = "stopping";
     this.broadcastRun(chat);
@@ -279,17 +392,35 @@ export class ChatManager {
     this.broadcastRun(chat);
   }
 
-  toolOutput(chat: ChatRecord, resourceId: string, offset: number, requestedLimit: number): ToolOutputChunk {
+  toolOutput(
+    chat: ChatRecord,
+    resourceId: string,
+    offset: number,
+    requestedLimit: number,
+  ): ToolOutputChunk {
     const resource = chat.resources.get(resourceId);
-    if (!resource) throw new Error("Tool output is no longer available; rerun the tool to regenerate it");
+    if (!resource)
+      throw new Error("Tool output is no longer available; rerun the tool to regenerate it");
     const limit = Math.min(Math.max(requestedLimit, 1), 16_384);
     const safeOffset = Math.min(offset, resource.text.length);
     const text = resource.text.slice(safeOffset, safeOffset + limit);
     const nextOffset = safeOffset + text.length;
-    return { resourceId, offset: safeOffset, nextOffset, total: resource.text.length, text, complete: nextOffset >= resource.text.length, sourceTruncated: resource.sourceTruncated };
+    return {
+      resourceId,
+      offset: safeOffset,
+      nextOffset,
+      total: resource.text.length,
+      text,
+      complete: nextOffset >= resource.text.length,
+      sourceTruncated: resource.sourceTruncated,
+    };
   }
 
-  transcriptPage(chat: ChatRecord, requestedBefore: number, requestedLimit: number): TranscriptPage {
+  transcriptPage(
+    chat: ChatRecord,
+    requestedBefore: number,
+    requestedLimit: number,
+  ): TranscriptPage {
     const before = Math.min(Math.max(requestedBefore, 0), chat.items.length);
     const limit = Math.min(Math.max(requestedLimit, 1), 200);
     let start = before;
@@ -297,22 +428,70 @@ export class ChatManager {
     while (start > 0 && before - start < limit) {
       const nextSize = JSON.stringify(chat.items[start - 1]).length;
       if (size > 0 && size + nextSize > 512_000) break;
-      size += nextSize; start--;
+      size += nextSize;
+      start--;
     }
     return { items: chat.items.slice(start, before), start, total: chat.items.length };
   }
 
-  async performMutation<T>(chat: ChatRecord, outcome: ActionOutcome, work: () => T | Promise<T>): Promise<T | undefined> {
+  async performMutation<T>(
+    chat: ChatRecord,
+    outcome: ActionOutcome,
+    work: () => T | Promise<T>,
+  ): Promise<T | undefined> {
     chat.revision = Math.max(chat.revision, outcome.revision);
     if (outcome.replayed) return undefined;
-    try { const value = await work(); this.metadata.markActionStatus(outcome.actionId, "completed"); this.broadcastRun(chat); return value; }
-    catch (error) { this.metadata.markActionStatus(outcome.actionId, "failed"); this.broadcastRun(chat); throw error; }
+    try {
+      const value = await work();
+      this.metadata.markActionStatus(outcome.actionId, "completed");
+      this.broadcastRun(chat);
+      return value;
+    } catch (error) {
+      this.metadata.markActionStatus(outcome.actionId, "failed");
+      this.broadcastRun(chat);
+      throw error;
+    }
   }
 
-  clear(chat: ChatRecord) { chat.session.clearQueue(); }
-  async configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) { await chat.session.configure(input); if (input.toolMode) chat.toolMode = input.toolMode; this.broadcast(chat, { type: "session", ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}), stats: chat.session.getStats() }); }
-  rename(chat: ChatRecord, name: string) { chat.session.rename(name); this.broadcast(chat, { type: "session", name, stats: chat.session.getStats() }); }
-  async compact(chat: ChatRecord, instructions?: string) { chat.runStatus = "compacting"; this.broadcastRun(chat); try { await chat.session.compact(instructions); } finally { chat.runStatus = "idle"; this.broadcastRun(chat); } }
-  dispose(chat: ChatRecord) { chat.generation++; chat.unsubscribe(); chat.session.dispose(); this.owners.delete(chat.sessionKey); this.chats.delete(chat.id); for (const socket of chat.sockets) socket.close(1001, "Chat disposed"); }
-  shutdown() { for (const chat of [...this.chats.values()]) { if (chat.run && (chat.run.status === "accepted" || chat.run.status === "running")) this.metadata.markPromptStatus(chat.sessionKey, chat.run.runId, "interrupted"); this.dispose(chat); } }
+  clear(chat: ChatRecord) {
+    chat.session.clearQueue();
+  }
+  async configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) {
+    await chat.session.configure(input);
+    if (input.toolMode) chat.toolMode = input.toolMode;
+    this.broadcast(chat, {
+      type: "session",
+      ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}),
+      stats: chat.session.getStats(),
+    });
+  }
+  rename(chat: ChatRecord, name: string) {
+    chat.session.rename(name);
+    this.broadcast(chat, { type: "session", name, stats: chat.session.getStats() });
+  }
+  async compact(chat: ChatRecord, instructions?: string) {
+    chat.runStatus = "compacting";
+    this.broadcastRun(chat);
+    try {
+      await chat.session.compact(instructions);
+    } finally {
+      chat.runStatus = "idle";
+      this.broadcastRun(chat);
+    }
+  }
+  dispose(chat: ChatRecord) {
+    chat.generation++;
+    chat.unsubscribe();
+    chat.session.dispose();
+    this.owners.delete(chat.sessionKey);
+    this.chats.delete(chat.id);
+    for (const socket of chat.sockets) socket.close(1001, "Chat disposed");
+  }
+  shutdown() {
+    for (const chat of this.chats.values()) {
+      if (chat.run && (chat.run.status === "accepted" || chat.run.status === "running"))
+        this.metadata.markPromptStatus(chat.sessionKey, chat.run.runId, "interrupted");
+      this.dispose(chat);
+    }
+  }
 }
