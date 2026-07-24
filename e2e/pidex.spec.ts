@@ -19,6 +19,7 @@ test("serves the Pi host and branded assets", async ({ request }) => {
 
 test("keeps search and new-chat setup in the pre-chat experience", async ({ page, request }) => {
   const startRequests: Array<{ kind: "create" | "configure" | "prompt"; body: unknown }> = [];
+  let createdSnapshot: Record<string, unknown> | undefined;
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
     if (browserRequest.method() === "POST" && path === "/api/chats")
@@ -27,6 +28,34 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
       startRequests.push({ kind: "configure", body: browserRequest.postDataJSON() });
     else if (browserRequest.method() === "POST" && /^\/api\/chats\/[^/]+\/messages$/.test(path))
       startRequests.push({ kind: "prompt", body: browserRequest.postDataJSON() });
+  });
+  await page.route("**/api/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const workspace = (await response.json()) as Record<string, unknown> & {
+      models: unknown[];
+    };
+    await route.fulfill({
+      response,
+      json: {
+        ...workspace,
+        models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+      },
+    });
+  });
+  await page.route("**/api/chats", async (route) => {
+    const response = await route.fetch();
+    createdSnapshot = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({ response, json: createdSnapshot });
+  });
+  await page.route("**/api/chats/*/config", async (route) => {
+    if (!createdSnapshot) throw new Error("Expected chat creation before configuration");
+    const configuration = route.request().postDataJSON() as Record<string, unknown>;
+    createdSnapshot = {
+      ...createdSnapshot,
+      ...configuration,
+      revision: Number(createdSnapshot.revision) + 1,
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", json: createdSnapshot });
   });
   await page.route("**/api/chats/*/messages", (route) => route.abort("blockedbyclient"));
 
@@ -76,7 +105,7 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
 
   expect(startRequests.map(({ kind }) => kind)).toEqual(["create", "configure", "prompt"]);
   expect(startRequests[1]?.body).toEqual(
-    expect.objectContaining({ thinkingLevel: "high", toolMode: "full" }),
+    expect.objectContaining({ model: "e2e/model", thinkingLevel: "high", toolMode: "full" }),
   );
 });
 
