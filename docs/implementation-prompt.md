@@ -66,7 +66,7 @@ apps/desktop ──spawns and supervises──> apps/server executable
 Rules:
 
 - Keep web transport, snapshots, replay, reconnect, and draft logic inside `apps/web`.
-- Keep the real Pi adapter and deterministic test fake inside `apps/server`.
+- Keep the real Pi adapter inside `apps/server`.
 - Keep `packages/api` free of Electron, Node, browser, and server implementations.
 - Never import server implementation code into the web app or Electron main process.
 - Use HTTP and WebSocket for ordinary renderer traffic rather than Electron IPC.
@@ -138,9 +138,9 @@ Electron must spawn and supervise the compiled server child process, wait for re
 ## Build Order
 
 1. Complete environment discovery and version matching.
-2. Define the shared Zod protocol and Pi adapter interface, then implement a deterministic fake adapter.
-3. Complete one end-to-end vertical slice with the fake: open project, create session, send, stream through WebSocket, settle, reconnect, restart, and resume.
-4. Add the matched real Pi adapter and the remaining session controls.
+2. Define the shared Zod protocol and Pi adapter interface, then connect the matched real Pi SDK.
+3. Complete one end-to-end vertical slice: open project, create session, send, stream through WebSocket, settle, reconnect, restart, and resume.
+4. Add the remaining real Pi session controls.
 5. Add local security, responsive polish, production serving, Electron supervision, tests, and documentation.
 6. Run the full suite after every material fix and finish without TODO replacements for required behavior.
 
@@ -287,7 +287,7 @@ Do not implement automatic Serve setup, pairing, device credentials, revocation,
 
 ## Tests Without Model Spend
 
-Build a deterministic fake Pi adapter and use it for all default tests. Cover:
+Use the real Pi SDK for integration checks. Default automated checks should cover non-inference behavior where possible, including:
 
 - project-root containment, symlink escape, and path-prefix traps;
 - opaque session validation and single live ownership;
@@ -302,7 +302,7 @@ Build a deterministic fake Pi adapter and use it for all default tests. Cover:
 - desktop new/send/stream/tool/stop and resume flows;
 - mobile drawer, composer, stream, reconnect recovery, and keyboard focus.
 
-Install only Playwright Chromium for browser tests. Default tests must never send a paid model request or require Tailscale. Add a clearly opt-in real-Pi smoke script or checklist that is excluded from normal test commands.
+Install only Playwright Chromium for browser tests. Default tests must never send a paid model request or require Tailscale. Keep prompt-dependent verification in a clearly opt-in real-Pi smoke script excluded from normal test commands.
 
 ## Out of Scope for This Proof of Concept
 
@@ -324,7 +324,7 @@ Do not hand off until:
 2. `pnpm start` serves the compiled application on `127.0.0.1:4783` by default, prints the URL, rejects invalid ports, fails clearly when occupied, and answers `/api/health`;
 3. Electron supervises the server and loads the same production Svelte client used by a mobile browser;
 4. native Pi sessions can be listed, created, resumed, and recovered after server restart;
-5. prompt, streaming text and thinking, tools, steer, follow-up, queue clearing, Stop, retry, compaction, settled state, and supported extension dialogs work with the fake adapter;
+5. prompt, streaming text and thinking, tools, steer, follow-up, queue clearing, Stop, retry, compaction, settled state, and supported extension dialogs work through the real Pi adapter;
 6. the matched real Pi adapter supports a documented opt-in smoke path without exposing credentials;
 7. reconnect creates no duplicate content and the server never opens two live writers for one session file;
 8. desktop and mobile layouts are manually checked at representative sizes;

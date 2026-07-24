@@ -73,13 +73,13 @@ export const projectCandidateSchema = z.object({
 });
 export const healthSchema = z.object({
   ok: z.literal(true),
-  adapter: z.enum(["real", "fake"]),
+  adapter: z.literal("real"),
   protocolVersion: z.literal(PROTOCOL_VERSION),
 });
 export const bootstrapSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   csrfToken: z.string().min(32),
-  adapter: z.enum(["real", "fake"]),
+  adapter: z.literal("real"),
   piVersion: z.string().max(100),
   recentWorkspaces: z.array(recentWorkspaceSchema),
   projectCandidates: z.array(projectCandidateSchema).max(200),

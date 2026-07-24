@@ -13,7 +13,7 @@ packages/
 ```
 
 - Keep the web connection code inside `apps/web`.
-- Keep the Pi adapter and its test fake inside `apps/server`.
+- Keep the Pi adapter inside `apps/server`.
 - Add more packages only when there is a second consumer.
 
 ## Runtime

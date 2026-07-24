@@ -23,7 +23,6 @@ import {
 import type { Bootstrap, ExtensionDialog, Health } from "@pidex/api";
 import type { ZodType } from "zod";
 import { ChatManager } from "./chat-manager.js";
-import { FakePiAdapter } from "./fake-adapter.js";
 import { ActionProtocolError, MetadataStore, requestDigest } from "./metadata.js";
 import { discoverProjectCandidates } from "./project-catalog.js";
 import { RealPiAdapter } from "./real-adapter.js";
@@ -112,7 +111,7 @@ export async function createPidexServer() {
   const csrf = randomBytes(32).toString("base64url");
   const roots = await allowedRoots();
   const metadata = new MetadataStore();
-  const adapter = process.env.PIDEX_ADAPTER === "fake" ? new FakePiAdapter() : new RealPiAdapter();
+  const adapter = new RealPiAdapter();
   const manager = new ChatManager(adapter, metadata);
   const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
@@ -134,7 +133,7 @@ export async function createPidexServer() {
           protocolVersion: PROTOCOL_VERSION,
           csrfToken: csrf,
           adapter: adapter.name,
-          piVersion: adapter.name === "real" ? "0.80.10" : "fake",
+          piVersion: "0.80.10",
           recentWorkspaces: metadata.recent(),
           projectCandidates: await discoverProjectCandidates(roots),
           warning: "Pi runs with your host user permissions and has no built-in sandbox.",

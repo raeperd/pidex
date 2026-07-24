@@ -18,7 +18,7 @@ The SDK is exact-pinned and the dependency tree is committed in `pnpm-lock.yaml`
 ## Commands
 
 ```sh
-pnpm dev          # fake Pi server + Vite client for safe development
+pnpm dev          # real Pi SDK server + Vite client
 pnpm typecheck
 pnpm test         # deterministic; never calls a paid model
 pnpm test:e2e     # deterministic Playwright Chromium suite
@@ -45,7 +45,7 @@ apps/desktop ───────────> packages/api
 ```
 
 - `packages/api`: browser-safe Zod schemas and inferred protocol types.
-- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, deterministic fake, and SQLite metadata.
+- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, and SQLite metadata.
 - `apps/web`: responsive Svelte 5/Tailwind 4 client, name-first project picker, bounded nested task previews, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
@@ -65,7 +65,7 @@ Completed assistant Markdown is parsed as GFM with raw HTML escaped, remote imag
 
 ## Optional real-Pi smoke check
 
-The default suite uses the fake adapter. This inspection sends no model request:
+This inspection uses the real Pi SDK but sends no model request:
 
 ```sh
 pnpm build

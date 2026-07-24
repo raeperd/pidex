@@ -48,7 +48,7 @@ export interface AdapterSession {
   dispose(): void;
 }
 export interface PiAdapter {
-  readonly name: "fake" | "real";
+  readonly name: "real";
   inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo>;
   createSession(cwd: string, toolMode: "read-only" | "full"): Promise<AdapterSession>;
   resumeSession(cwd: string, nativePath: string): Promise<AdapterSession>;
