@@ -779,18 +779,28 @@
   <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 
-<div class:drawer-open={drawerOpen} class="shell">
-  <button class="scrim" aria-label="Close sessions" onclick={() => (drawerOpen = false)}></button>
+<div
+  class="grid h-dvh w-full grid-cols-[304px_minmax(0,1fr)] overflow-hidden max-[900px]:grid-cols-1"
+>
+  <button
+    class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
+    aria-label="Close sessions"
+    onclick={() => (drawerOpen = false)}
+  ></button>
 
-  <aside aria-label="Sessions">
-    <div class="sidebar-titlebar">
-      <div class="brand">
-        <strong>Pidex</strong>
-        <span>LOCAL</span>
+  <aside
+    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    aria-label="Sessions"
+  >
+    <div class="flex min-h-14 items-center gap-2 px-1 pt-2 pr-1 pb-1.5 pl-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <strong class="text-[15px] font-semibold tracking-tight">Pidex</strong>
+        <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
+          >LOCAL</span
+        >
       </div>
       <button
-        class:active={searchOpen}
-        class="square-button"
+        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
         onclick={toggleSearch}
         aria-label={searchOpen ? "Close search" : "Search projects and threads"}
         aria-expanded={searchOpen}
@@ -800,7 +810,7 @@
         <Icon name={searchOpen ? "x" : "search"} />
       </button>
       <button
-        class="square-button"
+        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         onclick={() => prepareNewChat()}
         disabled={!workspace || chatLoading}
         aria-label="New chat"
@@ -811,9 +821,12 @@
     </div>
 
     {#if searchOpen}
-      <label class="search">
+      <label
+        class="mx-0.5 mb-3 flex h-8.5 items-center gap-2 rounded-lg px-2 text-faint transition-colors hover:bg-sidebar-hover hover:text-muted focus-within:bg-sidebar-hover focus-within:text-muted"
+      >
         <Icon name="search" />
         <input
+          class="w-full min-w-0 border-0 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
           bind:this={searchInput}
           bind:value={search}
           aria-label="Search projects and threads"
@@ -822,22 +835,37 @@
       </label>
     {/if}
 
-    <section class="project-browser">
-      <div class="section-label">
-        <span>PROJECTS <small>{bootstrap?.recentWorkspaces.length ?? 0}</small></span>
+    <section class="flex min-h-0 flex-1 flex-col px-0.5 pb-2">
+      <div
+        class="flex min-h-7 items-center justify-between px-2 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint"
+      >
+        <span class="inline-flex items-center gap-2"
+          >PROJECTS <small class="text-[9px] font-medium tracking-normal opacity-75"
+            >{bootstrap?.recentWorkspaces.length ?? 0}</small
+          ></span
+        >
         <button
-          class="section-add"
+          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground"
           onclick={openProjectPicker}
           aria-label="Add project"
           title="Add project"><Icon name="folder-plus" size={15} /></button
         >
       </div>
-      <nav class="project-tree" aria-label="Projects" aria-busy={chatLoading || projectLoading}>
+      <nav
+        class="min-h-0 flex-1 overflow-y-auto pt-px pb-2 [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
+        aria-label="Projects"
+        aria-busy={chatLoading || projectLoading}
+      >
         {#if visibleProjects().length === 0}
-          <div class="sidebar-empty">
+          <div class="flex flex-col items-center gap-2 px-4.5 py-7 text-center text-faint">
             <Icon name={search ? "search" : "folder"} size={18} />
-            <p>{search ? "No matching projects or tasks." : "Add a project to get started."}</p>
-            {#if !search}<button onclick={openProjectPicker}>Add project</button>{/if}
+            <p class="m-0 max-w-45 text-[11.5px] leading-relaxed">
+              {search ? "No matching projects or tasks." : "Add a project to get started."}
+            </p>
+            {#if !search}<button
+                class="min-h-7 rounded-lg border border-border bg-transparent px-2.5 text-[11px] text-muted hover:border-border-strong hover:text-foreground"
+                onclick={openProjectPicker}>Add project</button
+              >{/if}
           </div>
         {:else}
           {#each visibleProjects() as project (project.id)}
@@ -857,28 +885,37 @@
             {@const hiddenSessions = expanded
               ? Math.max(0, matchingSessions.length - shownSessions.length)
               : 0}
-            <div
-              class:active-project-group={workspace?.id === project.id}
-              class:expanded
-              class="project-group"
-            >
-              <div class="project-row">
+            <div class="mb-0.5">
+              <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class="project-toggle"
+                  class={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground ${workspace?.id === project.id ? "text-foreground" : ""}`}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
                   title={projectLabel(project)}
                   onclick={() => toggleProject(project)}
                 >
-                  <span class="project-chevron"><Icon name="chevron" size={13} /></span>
-                  <span class="project-icon"><Icon name="folder" size={15} /></span>
-                  <strong>{projectLabel(project)}</strong>
-                  {#if projectLoadingId === project.id}<span class="project-count loading">•••</span
-                    >{:else if loaded}<span class="project-count">{loaded.sessions.length}</span
+                  <span
+                    class={`grid flex-none text-faint transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+                    ><Icon name="chevron" size={13} /></span
+                  >
+                  <span
+                    class={`grid size-5 flex-none place-items-center rounded text-muted ${workspace?.id === project.id ? "bg-primary/15 text-primary" : ""}`}
+                    ><Icon name="folder" size={15} /></span
+                  >
+                  <strong
+                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium text-inherit"
+                    >{projectLabel(project)}</strong
+                  >
+                  {#if projectLoadingId === project.id}<span
+                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint"
+                      >•••</span
+                    >{:else if loaded}<span
+                      class="flex-none font-mono text-[9.5px] leading-none text-faint"
+                      >{loaded.sessions.length}</span
                     >{/if}
                 </button>
                 <button
-                  class="project-new"
+                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={() => newChatInProject(project)}
                   disabled={chatLoading || projectLoadingId === project.id}
                   aria-label={`New thread in ${projectLabel(project)}`}
@@ -888,37 +925,50 @@
                 </button>
               </div>
               {#if expanded || shownSessions.length > 0}
-                <div class="project-threads" id={`project-${project.id}`}>
+                <div
+                  class="mb-1 ml-5.5 border-l border-border-strong/60 pl-2"
+                  id={`project-${project.id}`}
+                >
                   {#if projectLoadingId === project.id && !loaded}
-                    <p class="tree-empty">Loading threads…</p>
+                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">Loading threads…</p>
                   {:else if loaded && shownSessions.length === 0}
-                    <p class="tree-empty">{search ? "No matching threads." : "No threads yet."}</p>
+                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">
+                      {search ? "No matching threads." : "No threads yet."}
+                    </p>
                   {:else if loaded}
                     {#each shownSessions as session}
+                      {@const current = snapshot?.sessionId === session.id}
                       <button
-                        class:current={snapshot?.sessionId === session.id}
-                        class="thread-row"
+                        class={`group/thread mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => resume(session, loaded)}
                         disabled={chatLoading}
                         title={session.name ?? session.firstMessage}
                       >
-                        <span class="thread-pip"></span>
+                        <span
+                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
+                        ></span>
                         <strong
+                          class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{session.name ?? (session.firstMessage || "Untitled session")}</strong
                         >
-                        {#if snapshot?.sessionId === session.id && active()}<span
-                            class="thread-status"><i></i>Working</span
-                          >{:else}<time datetime={session.modifiedAt}
-                            >{relativeTime(session.modifiedAt)}</time
+                        {#if current && active()}<span
+                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
+                            ><i
+                              class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
+                            ></i>Working</span
+                          >{:else}<time
+                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
+                            datetime={session.modifiedAt}>{relativeTime(session.modifiedAt)}</time
                           >{/if}
                       </button>
                     {/each}
                     {#if hiddenSessions > 0}
                       <button
-                        class="show-more"
+                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground"
                         onclick={() =>
                           (threadLimits = { ...threadLimits, [project.id]: sessionLimit + 10 })}
-                        >Show more <span>{hiddenSessions} hidden</span></button
+                        >Show more <span class="ml-1 opacity-65">{hiddenSessions} hidden</span
+                        ></button
                       >
                     {/if}
                   {/if}
@@ -930,86 +980,129 @@
       </nav>
     </section>
 
-    <div class="sidebar-footer">
-      <Icon name="shield" size={15} />
-      <p><strong>Local & private</strong><span>Read-only limits tools, not the OS.</span></p>
-      <small>{bootstrap?.piVersion ?? "Pi"}</small>
+    <div
+      class="mx-0.5 flex min-h-14.5 items-center gap-2 border-t border-border px-2 py-2 text-faint"
+    >
+      <span class="flex-none"><Icon name="shield" size={15} /></span>
+      <p class="m-0 min-w-0 flex-1">
+        <strong class="block text-[10.5px] font-semibold text-muted">Local & private</strong><span
+          class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px]"
+          >Read-only limits tools, not the OS.</span
+        >
+      </p>
+      <small class="font-mono text-[9px] leading-none">{bootstrap?.piVersion ?? "Pi"}</small>
     </div>
   </aside>
 
-  <main>
-    <header class="topbar">
+  <main class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+    <header
+      class="z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13"
+    >
       <button
-        class="menu-button"
+        class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
         aria-label="Open sessions"
         aria-expanded={drawerOpen}
         onclick={() => (drawerOpen = true)}
       >
         <Icon name="menu" size={19} />
       </button>
-      <div class="title-block">
-        <strong>{currentTitle()}</strong>
-        <div class="title-meta">
-          <span>{workspace?.name ?? "No project"}</span>
-          <span class="meta-divider">/</span>
-          <span class:online={connection === "connected"} class="status-dot"></span>
+      <div class="min-w-0 flex-1">
+        <strong
+          class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
+          >{currentTitle()}</strong
+        >
+        <div class="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-faint capitalize">
+          <span class="max-[560px]:hidden">{workspace?.name ?? "No project"}</span>
+          <span class="opacity-45 max-[560px]:hidden">/</span>
+          <span
+            class={`size-1.5 rounded-full ${connection === "connected" ? "bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-faint"}`}
+          ></span>
           <span>{snapshot ? connection : "local"}</span>
         </div>
       </div>
       {#if snapshot}
-        <div class="header-actions">
+        <div class="flex gap-1">
           <button
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
             onclick={openRename}
             disabled={active()}
             aria-label="Rename"
-            title="Rename session"><Icon name="rename" /><span>Rename</span></button
+            title="Rename session"
+            ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
           >
           <button
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
             onclick={openCompact}
             disabled={active()}
             aria-label="Compact"
-            title="Compact session"><Icon name="compact" /><span>Compact</span></button
+            title="Compact session"
+            ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
           >
         </div>
       {/if}
     </header>
 
     {#if error}
-      <div class="alert error" role="alert">
-        <span>{error}</span><button aria-label="Dismiss error" onclick={() => (error = "")}
-          ><Icon name="x" /></button
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger"
+        role="alert"
+      >
+        <span>{error}</span><button
+          class="grid rounded p-1 text-inherit"
+          aria-label="Dismiss error"
+          onclick={() => (error = "")}><Icon name="x" /></button
         >
       </div>
     {/if}
     {#if snapshot && connection !== "connected"}
-      <div class="alert offline" role="status">
-        <span
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs text-muted"
+        role="status"
+      >
+        <span class="leading-relaxed"
           ><strong>Host unavailable.</strong> Your session remains on the desktop; drafts will not be
           submitted while disconnected.</span
-        ><button onclick={retryConnection} disabled={retryingConnection}
-          >{retryingConnection ? "Retrying…" : "Retry"}</button
+        ><button
+          class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold disabled:opacity-40"
+          onclick={retryConnection}
+          disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
       </div>
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
-      <div class="alert warning interrupted" role="alert">
-        <span
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        role="alert"
+      >
+        <span class="leading-relaxed"
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
-        ><button onclick={acknowledgeInterrupted}>Acknowledge</button>
+        ><button
+          class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold"
+          onclick={acknowledgeInterrupted}>Acknowledge</button
+        >
       </div>
     {/if}
     {#if workspace?.protectedResourcesSkipped}
-      <div class="alert warning" role="status">
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        role="status"
+      >
         <span
           >Project resources requiring trust were skipped. {window.pidexDesktop
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
-        >{#if window.pidexDesktop}<button onclick={approveProjectTrust}>Review & trust</button>{/if}
+        >{#if window.pidexDesktop}<button
+            class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold"
+            onclick={approveProjectTrust}>Review & trust</button
+          >{/if}
       </div>
     {/if}
     {#if workspace?.resourceDiagnostics.length}
-      <div class="alert warning resource-warning" role="status">
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        role="status"
+      >
         <span
           ><strong>Pi resource warning.</strong>
           {workspace.resourceDiagnostics[0]?.message}{#if workspace.resourceDiagnostics.length > 1}
@@ -1018,41 +1111,94 @@
       </div>
     {/if}
     {#if workspace && workspace.models.length === 0}
-      <div class="alert warning">
+      <div
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+      >
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
     {/if}
 
-    <section class="transcript" bind:this={transcript} onscroll={onScroll} aria-live="polite">
+    <section
+      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+      bind:this={transcript}
+      onscroll={onScroll}
+      aria-live="polite"
+    >
       {#if bootstrapError && !bootstrap}
-        <div class="empty offline-state" role="status">
-          <div class="hero-mark"><Icon name="activity" size={22} /></div>
-          <p class="eyebrow">HOST UNAVAILABLE</p>
-          <h1>Your projects are still on the desktop.</h1>
-          <p>
+        <div
+          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+          role="status"
+        >
+          <div
+            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
+          >
+            <Icon name="activity" size={22} />
+          </div>
+          <p
+            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+          >
+            HOST UNAVAILABLE
+          </p>
+          <h1
+            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
+          >
+            Your projects are still on the desktop.
+          </h1>
+          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
             Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
             automatically.
           </p>
-          <button class="retry-button" onclick={retryConnection} disabled={retryingConnection}
+          <button
+            class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
+            onclick={retryConnection}
+            disabled={retryingConnection}
             >{retryingConnection ? "Retrying…" : "Retry connection"}</button
           >
         </div>
       {:else if !workspace}
-        <div class="empty">
-          <div class="hero-mark"><span>π</span></div>
-          <p class="eyebrow">YOUR PRIVATE PI WORKSPACE</p>
-          <h1>Bring Pi with you.</h1>
-          <p>Choose a project to create or resume a native Pi session.</p>
-          <button class="retry-button hero-add" onclick={openProjectPicker}>Add a project</button>
+        <div
+          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+        >
+          <div
+            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
+          >
+            <span class="font-serif text-[26px] leading-none font-bold">π</span>
+          </div>
+          <p
+            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+          >
+            YOUR PRIVATE PI WORKSPACE
+          </p>
+          <h1
+            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
+          >
+            Bring Pi with you.
+          </h1>
+          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+            Choose a project to create or resume a native Pi session.
+          </p>
+          <button
+            class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
+            onclick={openProjectPicker}>Add a project</button
+          >
         </div>
       {:else if !snapshot}
-        <div class="workspace-start">
-          <div class="workspace-start-content">
-            <h1>What should we build in <strong>{workspace.name}</strong>?</h1>
+        <div
+          class="grid min-h-full w-full grid-cols-[minmax(0,1fr)] grid-rows-[1fr_auto] px-6 pt-12 pb-6 max-[900px]:px-4.5 max-[900px]:pt-9 max-[900px]:pb-4.5 max-[560px]:px-3 max-[560px]:pt-7 max-[560px]:pb-3"
+        >
+          <div class="w-[min(780px,100%)] place-self-center pb-6 text-center max-[560px]:pb-4.5">
+            <h1
+              class="m-0 text-[clamp(24px,2.4vw,32px)] font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
+            >
+              What should we build in <strong class="font-medium">{workspace.name}</strong>?
+            </h1>
           </div>
-          <div class="start-composer-wrap">
-            <div class="composer-frame">
+          <div class="w-full self-end">
+            <div
+              class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
+            >
               <textarea
+                class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
                 bind:this={promptInput}
                 bind:value={draft}
                 oninput={draftInput}
@@ -1060,9 +1206,14 @@
                 rows="2"
                 placeholder={`Ask Pi to work on ${workspace.name}…`}
                 aria-label="Prompt"></textarea>
-              <div class="composer-toolbar">
-                <div class="composer-controls">
+              <div
+                class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
+              >
+                <div
+                  class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
+                >
                   <select
+                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
                     aria-label="Model"
                     value={selectedNewChatModel()}
                     onchange={(event) => (newChatModel = event.currentTarget.value)}
@@ -1071,8 +1222,9 @@
                     {#each workspace.models as model}<option value={model.id}>{model.name}</option
                       >{/each}
                   </select>
-                  <span class="control-divider"></span>
+                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
                   <select
+                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
                     aria-label="Thinking level"
                     bind:value={newChatThinkingLevel}
                     disabled={chatLoading}
@@ -1081,8 +1233,9 @@
                         value={level}>{level} thinking</option
                       >{/each}
                   </select>
-                  <span class="control-divider"></span>
+                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
                   <select
+                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
                     aria-label="Tool access"
                     bind:value={newChatToolMode}
                     disabled={chatLoading}
@@ -1092,9 +1245,9 @@
                     >
                   </select>
                 </div>
-                <div class="composer-actions">
+                <div class="flex min-w-0 flex-none items-center gap-1">
                   <button
-                    class="send"
+                    class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                     onclick={startChat}
                     disabled={!draft.trim() || !workspace.models.length || chatLoading}
                     aria-label="Send"><Icon name="send" /></button
@@ -1105,9 +1258,9 @@
           </div>
         </div>
       {:else}
-        <div class="messages">
+        <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-12.5 max-[900px]:px-4 max-[350px]:px-3">
           {#if snapshot.transcriptStart > 0}<button
-              class="load-earlier"
+              class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-[10.5px] text-muted hover:text-foreground disabled:opacity-40"
               onclick={loadEarlier}
               disabled={loadingEarlier}
               >{loadingEarlier
@@ -1116,17 +1269,24 @@
             >{/if}
           {#each snapshot.items as item (item.id)}
             {#if item.type === "user"}
-              <article class="message user">
-                <div class="bubble">{item.text}</div>
+              <article class="mb-5 flex flex-col items-end pt-1">
+                <div
+                  class="max-w-4/5 rounded-2xl bg-secondary px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] max-[560px]:max-w-9/10"
+                >
+                  {item.text}
+                </div>
               </article>
             {:else if item.type === "assistant"}
-              <article class="message assistant">
-                <div class="assistant-label">
-                  <span class="pi-avatar">π</span><span>Pi</span>{#if !item.complete}<span
-                      class="streaming">streaming</span
+              <article class="mb-5 min-w-0 px-1 pt-0.5 pb-1">
+                <div class="mb-2 flex items-center gap-1.5 text-[10.5px] font-medium text-faint">
+                  <span
+                    class="grid size-4.5 place-items-center rounded bg-foreground font-serif text-[11px] leading-none font-bold text-background"
+                    >π</span
+                  ><span>Pi</span>{#if !item.complete}<span
+                      class="inline-flex items-center gap-1 text-primary before:size-1.5 before:animate-pulse before:rounded-full before:bg-current before:content-['']"
+                      >streaming</span
                     >{:else}<button
-                      class:copy-failed={copyState[item.id] === "failed"}
-                      class="copy-response"
+                      class={`ml-auto inline-flex min-h-6.5 items-center gap-1 rounded-md border-0 bg-transparent px-2 text-[10px] text-faint hover:bg-secondary hover:text-foreground ${copyState[item.id] === "failed" ? "text-danger" : ""}`}
                       onclick={() => copyResponse(item.id, item.text)}
                       aria-label="Copy response"
                       ><Icon
@@ -1140,32 +1300,53 @@
                     >{/if}
                 </div>
                 {#if item.thinking}
-                  <details class="thinking">
+                  <details class="mb-2.5 border-b border-border/70">
                     <summary
-                      ><span class="thinking-dots"><i></i><i></i><i></i></span>Thinking</summary
+                      class="flex w-max cursor-pointer items-center gap-2 pt-1 pb-2 text-[11px] text-faint [list-style:none]"
+                      ><span class="inline-flex gap-0.5"
+                        ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
+                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
+                        ></i><i
+                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
+                        ></i></span
+                      >Thinking</summary
                     >
-                    <pre>{item.thinking}</pre>
+                    <pre
+                      class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{item.thinking}</pre>
                   </details>
                 {/if}
                 <Markdown text={item.text} />
               </article>
             {:else if item.type === "tool"}
-              <details class="tool">
-                <summary>
-                  <span class="tool-icon"><Icon name="tool" size={14} /></span>
-                  <strong>{item.name}</strong>
-                  <code>{item.argumentSummary}</code>
-                  <span class:failed={item.state === "error"} class="tool-state"
+              <details class="group/tool mx-1 mt-1 mb-2 text-[11.5px]">
+                <summary
+                  class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-muted [list-style:none] hover:bg-secondary/55"
+                >
+                  <span class="grid size-5 flex-none place-items-center text-faint"
+                    ><Icon name="tool" size={14} /></span
+                  >
+                  <strong class="font-medium text-foreground/80">{item.name}</strong>
+                  <code
+                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] leading-snug text-faint"
+                    >{item.argumentSummary}</code
+                  >
+                  <span
+                    class={`text-[10px] lowercase ${item.state === "error" ? "text-danger" : "text-success"}`}
                     >{item.state === "success" ? "done" : item.state}</span
                   >
-                  <Icon name="chevron" size={13} />
+                  <span
+                    class="flex-none opacity-50 transition-transform duration-150 group-open/tool:rotate-90"
+                    ><Icon name="chevron" size={13} /></span
+                  >
                 </summary>
-                {#if item.resourceId && toolOutputs[item.resourceId]?.text}<pre>{toolOutputs[
+                {#if item.resourceId && toolOutputs[item.resourceId]?.text}<pre
+                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{toolOutputs[
                       item.resourceId
-                    ]?.text}</pre>{:else if item.preview}<pre>{item.preview}</pre>{/if}
+                    ]?.text}</pre>{:else if item.preview}<pre
+                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{item.preview}</pre>{/if}
                 {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
                   <button
-                    class="tool-load"
+                    class="mr-0 mb-2 ml-7 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
                     onclick={() => loadToolOutput(item)}
                     disabled={toolOutputs[item.resourceId]?.loading}
                     >{toolOutputs[item.resourceId]?.loading
@@ -1176,19 +1357,22 @@
                   >
                 {/if}
                 {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-                    class="tool-note"
+                    class="mr-0 mb-2 ml-7 text-[10px] text-faint"
                   >
                     The host bounded this output at its safety limit.
                   </p>{/if}
                 {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-                    class="tool-note failed"
+                    class="mr-0 mb-2 ml-7 text-[10px] text-danger"
                   >
                     {toolOutputs[item.resourceId]?.error}
                   </p>{/if}
               </details>
             {:else if item.type === "notice"}
-              <div class:notice-error={item.level === "error"} class="notice">
-                <Icon name="activity" size={14} /><span>{item.text}</span>
+              <div
+                class={`mx-1 my-2.5 flex items-start gap-2 rounded-lg border bg-secondary/45 px-3 py-2 text-[11.5px] leading-relaxed ${item.level === "error" ? "border-danger/25 text-danger" : "border-border text-muted"}`}
+              >
+                <span class="mt-px flex-none text-primary"><Icon name="activity" size={14} /></span
+                ><span>{item.text}</span>
               </div>
             {/if}
           {/each}
@@ -1196,25 +1380,35 @@
       {/if}
     </section>
 
-    {#if !nearBottom && snapshot}<button class="jump" onclick={scrollLatest}
-        >Jump to latest <span>↓</span></button
+    {#if !nearBottom && snapshot}<button
+        class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10.5px] text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
+        onclick={scrollLatest}>Jump to latest <span>↓</span></button
       >{/if}
 
     {#if snapshot}
-      <footer class="composer-wrap">
+      <footer
+        class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
+      >
         {#if active()}
-          <div class="queue-row">
-            <span
-              ><span class="working-dot"></span>{snapshot.runStatus} · {snapshot.steeringQueue
-                .length} steer · {snapshot.followUpQueue.length} follow-up</span
+          <div
+            class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-[10.5px] text-faint"
+          >
+            <span class="flex items-center gap-1.5"
+              ><span class="size-1.5 animate-pulse rounded-full bg-primary"
+              ></span>{snapshot.runStatus} · {snapshot.steeringQueue.length} steer · {snapshot
+                .followUpQueue.length} follow-up</span
             >
             {#if snapshot.steeringQueue.length + snapshot.followUpQueue.length > 0}<button
+                class="border-0 bg-transparent p-0 text-[10.5px] text-primary"
                 onclick={clearQueue}>Clear queues</button
               >{/if}
           </div>
         {/if}
-        <div class="composer-frame">
+        <div
+          class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
+        >
           <textarea
+            class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
             bind:this={promptInput}
             bind:value={draft}
             oninput={draftInput}
@@ -1226,9 +1420,14 @@
                 ? "Add guidance while Pi works…"
                 : "Ask Pi to work on this project…"}
             aria-label="Prompt"></textarea>
-          <div class="composer-toolbar">
-            <div class="composer-controls">
+          <div
+            class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
+          >
+            <div
+              class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
+            >
               <select
+                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
                 aria-label="Model"
                 value={snapshot.model}
                 onchange={(e) => configure({ model: e.currentTarget.value })}
@@ -1238,8 +1437,9 @@
                     >{model.name}</option
                   >{/each}
               </select>
-              <span class="control-divider"></span>
+              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
               <select
+                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
                 aria-label="Thinking level"
                 value={snapshot.thinkingLevel}
                 onchange={(e) =>
@@ -1252,8 +1452,9 @@
                     value={level}>{level} thinking</option
                   >{/each}
               </select>
-              <span class="control-divider"></span>
+              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
               <select
+                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
                 aria-label="Tool access"
                 value={snapshot.toolMode}
                 onchange={(e) =>
@@ -1264,27 +1465,30 @@
                 >
               </select>
             </div>
-            <div class="composer-actions">
+            <div class="flex min-w-0 flex-none items-center gap-1">
               {#if active()}
-                <select bind:value={delivery} aria-label="Delivery mode"
+                <select
+                  class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"
+                  bind:value={delivery}
+                  aria-label="Delivery mode"
                   ><option value="steer">Steer</option><option value="follow-up">Follow-up</option
                   ></select
                 >
                 <button
-                  class="stop"
+                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 disabled:opacity-40"
                   onclick={stop}
                   disabled={connection !== "connected"}
                   aria-label="Stop"><Icon name="stop" /></button
                 >
                 <button
-                  class="send queue"
+                  class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
                   onclick={send}
                   disabled={!draft.trim() || connection !== "connected"}
                   aria-label="Queue">Queue</button
                 >
               {:else}
                 <button
-                  class="send"
+                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={send}
                   disabled={!draft.trim() ||
                     !workspace?.models.length ||
@@ -1296,13 +1500,18 @@
             </div>
           </div>
         </div>
-        <div class="composer-meta">
-          <span
+        <div
+          class="mx-auto flex w-full max-w-3xl justify-between gap-3 px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
+        >
+          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
             >{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(
               4,
             )}</span
           >
-          <span>{snapshot.activeTools.join(" · ")}</span>
+          <span
+            class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-right max-[560px]:hidden"
+            >{snapshot.activeTools.join(" · ")}</span
+          >
         </div>
       </footer>
     {/if}
@@ -1311,78 +1520,105 @@
 
 <dialog
   bind:this={projectDialogElement}
-  class="app-dialog project-dialog"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
     if (!projectBatchLoading) projectDialogElement.close();
   }}
 >
-  <form method="dialog" onsubmit={(event) => event.preventDefault()}>
-    <div class="dialog-heading">
-      <div class="dialog-icon"><Icon name="folder-plus" /></div>
+  <form class="p-5 pb-3.5" method="dialog" onsubmit={(event) => event.preventDefault()}>
+    <div class="mb-4.5 flex items-start gap-3">
+      <div
+        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+      >
+        <Icon name="folder-plus" />
+      </div>
       <div>
-        <h2 id="project-dialog-title">Add a project</h2>
-        <p>Choose by project name. Folder paths stay out of the main workspace UI.</p>
+        <h2 class="m-0 text-[15px] font-semibold" id="project-dialog-title">Add a project</h2>
+        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+          Choose by project name. Folder paths stay out of the main workspace UI.
+        </p>
       </div>
     </div>
-    <label class="picker-search">
+    <label
+      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary/55 focus-within:text-muted"
+    >
       <Icon name="search" size={15} />
       <input
+        class="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none"
         bind:value={projectQuery}
         aria-label="Filter available projects"
         placeholder="Filter projects"
         autocomplete="off"
       />
     </label>
-    <div class="picker-summary">
-      <span
-        ><strong>Projects</strong><small>{availableProjects().length} folders discovered</small
+    <div class="flex min-h-12 items-center justify-between gap-3 px-0.5 pt-2.5 pb-2">
+      <span class="grid gap-0.5"
+        ><strong class="text-[11.5px] font-semibold text-foreground">Projects</strong><small
+          class="text-[10px] text-faint">{availableProjects().length} folders discovered</small
         ></span
       >
       {#if (bootstrap?.projectCandidates ?? []).some((candidate) => !projectAdded(candidate))}
-        <button type="button" onclick={addAllProjects} disabled={projectBatchLoading}
+        <button
+          class="min-h-7 rounded-lg border border-border bg-transparent px-2 text-[10.5px] font-semibold text-muted hover:border-border-strong hover:text-foreground disabled:opacity-40"
+          type="button"
+          onclick={addAllProjects}
+          disabled={projectBatchLoading}
           >{projectBatchLoading ? `Adding ${projectBatchProgress + 1}…` : "Add all"}</button
         >
       {/if}
     </div>
-    <div class="project-candidates">
+    <div
+      class="max-h-[min(430px,52vh)] overflow-y-auto rounded-xl border border-border bg-background/70 p-1 [scrollbar-width:thin]"
+    >
       {#if availableProjects().length === 0}
-        <div class="candidate-empty">
+        <div
+          class="flex min-h-33 flex-col items-center justify-center gap-2 text-[11.5px] text-faint"
+        >
           <Icon name="folder" size={18} /><span
             >{projectQuery ? "No matching projects" : "No project folders were found"}</span
           >
         </div>
       {:else}
-        {#each availableProjects() as candidate (candidate.path)}
+        {#each availableProjects() as candidate, candidateIndex (candidate.path)}
           <button
             type="button"
-            class:added={projectAdded(candidate)}
-            class="candidate-row"
+            class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
             onclick={() => addProject(candidate)}
             disabled={projectBatchLoading || projectLoading}
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
-            <span class="candidate-avatar">{candidate.name.slice(0, 1).toUpperCase()}</span>
-            <span class="candidate-copy"
-              ><strong>{candidate.name}</strong><small
+            <span
+              class={`grid size-8 flex-none place-items-center rounded-lg border text-[11px] font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
+              >{candidate.name.slice(0, 1).toUpperCase()}</span
+            >
+            <span class="grid min-w-0 flex-1 gap-1"
+              ><strong
+                class="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium"
+                >{candidate.name}</strong
+              ><small class="text-[10px] text-faint"
                 >{projectAdded(candidate) ? "Added to Pidex" : "Local project"}</small
               ></span
             >
-            <span class="candidate-action">{projectAdded(candidate) ? "Open" : "Add"}</span>
+            <span
+              class={`min-w-10 text-right text-[10.5px] font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
+              >{projectAdded(candidate) ? "Open" : "Add"}</span
+            >
           </button>
         {/each}
       {/if}
     </div>
-    <div class="dialog-actions project-dialog-actions">
+    <div class="mt-3 flex items-center justify-end gap-2">
       {#if window.pidexDesktop}<button
           type="button"
-          class="browse-other"
+          class="mr-auto inline-flex min-h-8.5 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
           onclick={browseProject}
           disabled={projectBatchLoading}
           ><Icon name="folder" size={14} /> Browse another folder</button
         >{/if}
       <button
+        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
         type="button"
         onclick={() => projectDialogElement.close()}
         disabled={projectBatchLoading}>Done</button
@@ -1393,31 +1629,49 @@
 
 <dialog
   bind:this={renameDialogElement}
-  class="app-dialog"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
   oncancel={(event) => {
     event.preventDefault();
     renameDialogElement.close();
   }}
 >
   <form
+    class="p-5"
     method="dialog"
     onsubmit={(event) => {
       event.preventDefault();
       void rename();
     }}
   >
-    <div class="dialog-heading">
-      <div class="dialog-icon"><Icon name="rename" /></div>
+    <div class="mb-4.5 flex items-start gap-3">
+      <div
+        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+      >
+        <Icon name="rename" />
+      </div>
       <div>
-        <h2>Rename thread</h2>
-        <p>Give this Pi session a concise, memorable name.</p>
+        <h2 class="m-0 text-[15px] font-semibold">Rename thread</h2>
+        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+          Give this Pi session a concise, memorable name.
+        </p>
       </div>
     </div>
-    <label for="session-name">Session name</label>
-    <input id="session-name" bind:value={renameValue} autocomplete="off" />
-    <div class="dialog-actions">
-      <button type="button" onclick={() => renameDialogElement.close()}>Cancel</button><button
-        class="primary"
+    <label class="mb-1.5 block text-[11px] font-medium text-muted" for="session-name"
+      >Session name</label
+    >
+    <input
+      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+      id="session-name"
+      bind:value={renameValue}
+      autocomplete="off"
+    />
+    <div class="mt-5 flex justify-end gap-2">
+      <button
+        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
+        type="button"
+        onclick={() => renameDialogElement.close()}>Cancel</button
+      ><button
+        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
         type="submit"
         disabled={!renameValue.trim()}>Save name</button
       >
@@ -1427,29 +1681,40 @@
 
 <dialog
   bind:this={compactDialogElement}
-  class="app-dialog"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
   oncancel={(event) => {
     event.preventDefault();
     compactDialogElement.close();
   }}
 >
   <form
+    class="p-5"
     method="dialog"
     onsubmit={(event) => {
       event.preventDefault();
       void compact();
     }}
   >
-    <div class="dialog-heading">
-      <div class="dialog-icon"><Icon name="compact" /></div>
+    <div class="mb-4.5 flex items-start gap-3">
+      <div
+        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+      >
+        <Icon name="compact" />
+      </div>
       <div>
-        <h2>Compact this thread?</h2>
-        <p>Pi will summarize older context to free space in the active context window.</p>
+        <h2 class="m-0 text-[15px] font-semibold">Compact this thread?</h2>
+        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+          Pi will summarize older context to free space in the active context window.
+        </p>
       </div>
     </div>
-    <div class="dialog-actions">
-      <button type="button" onclick={() => compactDialogElement.close()}>Cancel</button><button
-        class="primary"
+    <div class="mt-5 flex justify-end gap-2">
+      <button
+        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
+        type="button"
+        onclick={() => compactDialogElement.close()}>Cancel</button
+      ><button
+        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
         type="submit">Compact thread</button
       >
     </div>
@@ -1459,34 +1724,45 @@
 {#if snapshot?.extensionDialog}
   <dialog
     bind:this={dialogElement}
-    class="app-dialog extension-dialog"
+    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
     oncancel={(event) => {
       event.preventDefault();
       void answerDialog(snapshot!.extensionDialog!, true);
     }}
   >
     <form
+      class="p-5"
       method="dialog"
       onsubmit={(event) => {
         event.preventDefault();
         void answerDialog(snapshot!.extensionDialog!);
       }}
     >
-      <div class="dialog-heading">
-        <div class="dialog-icon"><Icon name="activity" /></div>
+      <div class="mb-4.5 flex items-start gap-3">
+        <div
+          class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+        >
+          <Icon name="activity" />
+        </div>
         <div>
-          <h2>{snapshot.extensionDialog.title}</h2>
-          {#if snapshot.extensionDialog.message}<p>{snapshot.extensionDialog.message}</p>{/if}
+          <h2 class="m-0 text-[15px] font-semibold">{snapshot.extensionDialog.title}</h2>
+          {#if snapshot.extensionDialog.message}<p
+              class="mt-1 mb-0 text-xs leading-relaxed text-muted"
+            >
+              {snapshot.extensionDialog.message}
+            </p>{/if}
         </div>
       </div>
       {#if snapshot.extensionDialog.kind === "select"}
-        <select bind:value={dialogValue}
+        <select
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          bind:value={dialogValue}
           >{#each snapshot.extensionDialog.options ?? [] as option}<option value={option}
               >{option}</option
             >{/each}</select
         >
       {:else if snapshot.extensionDialog.kind === "confirm"}
-        <label class="confirm-row"
+        <label class="flex items-center gap-2 text-[13px] text-foreground"
           ><input
             type="checkbox"
             checked={Boolean(dialogValue)}
@@ -1494,14 +1770,26 @@
           /> Confirm</label
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
-        <textarea bind:value={dialogValue} rows="8"></textarea>
+        <textarea
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          bind:value={dialogValue}
+          rows="8"></textarea>
       {:else}
-        <input bind:value={dialogValue} placeholder={snapshot.extensionDialog.placeholder} />
+        <input
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          bind:value={dialogValue}
+          placeholder={snapshot.extensionDialog.placeholder}
+        />
       {/if}
-      <div class="dialog-actions">
-        <button type="button" onclick={() => answerDialog(snapshot!.extensionDialog!, true)}
-          >Cancel</button
-        ><button class="primary" type="submit">Continue</button>
+      <div class="mt-5 flex justify-end gap-2">
+        <button
+          class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
+          type="button"
+          onclick={() => answerDialog(snapshot!.extensionDialog!, true)}>Cancel</button
+        ><button
+          class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
+          type="submit">Continue</button
+        >
       </div>
     </form>
   </dialog>
