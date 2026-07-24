@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 test("serves the Pi host and branded assets", async ({ request }) => {
   const health = await request.get("/api/health");
@@ -16,3 +16,55 @@ test("serves the Pi host and branded assets", async ({ request }) => {
   expect(icon.status()).toBe(200);
   expect(icon.headers()["content-type"]).toBe("image/x-icon");
 });
+
+test("keeps search and new-chat setup in the pre-chat experience", async ({ page, request }) => {
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "What should we build in pidex?" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Thinking level")).toBeVisible();
+  await expect(page.getByLabel("Tool access")).toBeVisible();
+
+  await openSessions(page);
+  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Search projects and threads" }).click();
+  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toBeFocused();
+  await page.getByRole("button", { name: "Close search" }).click();
+  await page.keyboard.press("Control+K");
+  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toHaveCount(0);
+
+  await page.getByLabel("Prompt").fill("This draft belongs to pidex");
+  await page.getByRole("button", { name: "Add project", exact: true }).click();
+  await page.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
+  await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toHaveValue("");
+
+  await openSessions(page);
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.waitForTimeout(250);
+  await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+
+  await openSessions(page);
+  await page.getByRole("button", { name: "New thread in apps" }).click();
+  await page.waitForTimeout(250);
+  await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+});
+
+async function rememberWorkspace(request: APIRequestContext, workspacePath: string) {
+  const bootstrap = await request.get("/api/bootstrap");
+  expect(bootstrap.ok()).toBe(true);
+  const { csrfToken } = (await bootstrap.json()) as { csrfToken: string };
+  const opened = await request.post("/api/workspaces/open", {
+    headers: { "X-Pidex-CSRF": csrfToken },
+    data: { path: workspacePath },
+  });
+  expect(opened.ok()).toBe(true);
+}
+
+async function openSessions(page: Page) {
+  const button = page.getByRole("button", { name: "Open sessions" });
+  if (await button.isVisible()) await button.click();
+}

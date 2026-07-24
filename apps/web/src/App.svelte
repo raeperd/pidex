@@ -214,6 +214,7 @@
         projectPath = loaded.path;
         localStorage.setItem("pidex:last-project", loaded.path);
         snapshot = undefined;
+        draft = "";
         if (options.closeDrawer ?? true) drawerOpen = false;
       }
       return loaded;
@@ -319,12 +320,26 @@
     if (workspace?.models.some((model) => model.id === newChatModel)) return newChatModel;
     return workspace?.models[0]?.id ?? "";
   }
+  function prepareNewChat(target = workspace) {
+    if (!target || chatLoading) return;
+    persistDraft();
+    chatConnection.close();
+    workspace = target;
+    projectPath = target.path;
+    rememberWorkspace(target);
+    localStorage.setItem("pidex:last-project", target.path);
+    snapshot = undefined;
+    draft = "";
+    drawerOpen = false;
+    void tick().then(() => promptInput?.focus());
+  }
   async function newChat(
     target = workspace,
     initialDraft = "",
     configuration: Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">> = {},
   ) {
     if (!target || chatLoading) return false;
+    let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
@@ -332,13 +347,18 @@
       projectPath = target.path;
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
-      snapshot = await api.createChat(target.id);
+      created = await api.createChat(target.id);
+      snapshot = created;
       if (configuration.model || configuration.thinkingLevel || configuration.toolMode)
         snapshot = await api.configure(snapshot.chatId, configuration, snapshot.revision);
       await afterChat(initialDraft, true);
       return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not create chat";
+      if (created) {
+        snapshot = created;
+        await afterChat(initialDraft, true);
+      }
       return false;
     } finally {
       chatLoading = false;
@@ -348,7 +368,7 @@
     const target =
       workspaceFor(project.id) ??
       (await openProject(project.path, { activate: false, moveToTop: false }));
-    if (target) await newChat(target);
+    if (target) prepareNewChat(target);
   }
   async function resume(session: SessionSummary, target: Workspace) {
     if (chatLoading) return;
@@ -781,7 +801,7 @@
       </button>
       <button
         class="square-button"
-        onclick={() => newChat()}
+        onclick={() => prepareNewChat()}
         disabled={!workspace || chatLoading}
         aria-label="New chat"
         title="New chat"
