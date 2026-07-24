@@ -340,12 +340,19 @@
       chatLoading = false;
     }
   }
+  function initializeDialogValue(dialog: ExtensionDialog) {
+    dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
+  }
   async function afterChat() {
     drawerOpen = false;
     draft = localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) ?? "";
     restorePendingPrompt();
     if (snapshot) chatConnection.connect(snapshot.chatId);
     await tick();
+    if (snapshot?.extensionDialog) {
+      initializeDialogValue(snapshot.extensionDialog);
+      if (!dialogElement.open) dialogElement.showModal();
+    }
     resizePrompt();
     scrollLatest();
   }
@@ -400,7 +407,7 @@
     } else if (event.type === "extension_dialog") {
       snapshot = { ...snapshot, ...(event.dialog ? { extensionDialog: event.dialog } : {}) };
       if (event.dialog) {
-        dialogValue = event.dialog.kind === "confirm" ? false : (event.dialog.prefill ?? "");
+        initializeDialogValue(event.dialog);
         void tick().then(() => dialogElement?.showModal());
       } else dialogElement?.close();
     }
@@ -631,6 +638,7 @@
     resizePrompt();
   }
   function keydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
       void send();

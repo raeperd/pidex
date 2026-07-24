@@ -2,9 +2,44 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
-import type { ActionOutcome, ChatSnapshot, ToolItem, ToolOutputChunk } from "@pidex/api";
+import { serverEventSchema } from "@pidex/api";
+import type {
+  ActionOutcome,
+  ChatSnapshot,
+  ServerEvent,
+  ToolItem,
+  ToolOutputChunk,
+} from "@pidex/api";
+import WebSocket from "ws";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
+
+function nextServerEvent(
+  socket: WebSocket,
+  predicate: (event: ServerEvent) => boolean,
+): Promise<ServerEvent> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (data: WebSocket.RawData) => {
+      let value: unknown;
+      try {
+        value = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      const parsed = serverEventSchema.safeParse(value);
+      if (!parsed.success || !predicate(parsed.data)) return;
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+      resolve(parsed.data);
+    };
+    const onError = (error: Error) => {
+      socket.off("message", onMessage);
+      reject(error);
+    };
+    socket.on("message", onMessage);
+    socket.once("error", onError);
+  });
+}
 
 describe("HTTP control surface", () => {
   let app: Awaited<ReturnType<typeof createPidexServer>>;
@@ -38,6 +73,15 @@ describe("HTTP control surface", () => {
       body: JSON.stringify(body),
     });
 
+  const openSocket = async () => {
+    const socket = new WebSocket(origin.replace("http:", "ws:") + "/api/ws", { origin });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    return socket;
+  };
+
   it("discovers name-first project candidates inside allowed roots", async () => {
     const bootstrap = (await (await fetch(`${origin}/api/bootstrap`)).json()) as {
       projectCandidates: Array<{ name: string; path: string }>;
@@ -49,6 +93,30 @@ describe("HTTP control surface", () => {
     expect(bootstrap.projectCandidates.some((candidate) => candidate.name === "node_modules")).toBe(
       false,
     );
+  });
+
+  it("rejects ordinary files as project directories", async () => {
+    const response = await mutate("/api/workspaces/open", {
+      path: path.join(process.cwd(), "package.json"),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "workspace_not_directory" },
+    });
+  });
+
+  it("opens an unremembered project without adding it to recent projects", async () => {
+    const response = await mutate("/api/workspaces/open", {
+      path: path.join(process.cwd(), "apps"),
+      remember: false,
+    });
+    expect(response.status).toBe(200);
+
+    const bootstrap = (await (await fetch(`${origin}/api/bootstrap`)).json()) as {
+      recentWorkspaces: Array<{ path: string }>;
+    };
+    expect(bootstrap.recentWorkspaces).toEqual([]);
   });
 
   async function createChat() {
@@ -70,6 +138,29 @@ describe("HTTP control surface", () => {
     }
     throw new Error("Fake run did not settle");
   }
+
+  it("keeps a new chat associated with its sidebar session after refresh", async () => {
+    const chat = await createChat();
+
+    const sessions = (await (
+      await fetch(`${origin}/api/workspaces/${chat.workspaceId}/sessions`)
+    ).json()) as { sessions: Array<{ id: string }> };
+
+    expect(sessions.sessions).toContainEqual(expect.objectContaining({ id: chat.sessionId }));
+  });
+
+  it("keeps native session identifiers out of browser responses", async () => {
+    const chat = await createChat();
+
+    const sessions = (await (
+      await fetch(`${origin}/api/workspaces/${chat.workspaceId}/sessions`)
+    ).json()) as { sessions: Array<Record<string, unknown>> };
+    const created = sessions.sessions.find((session) => session.id === chat.sessionId);
+
+    expect(created).toBeDefined();
+    expect(created).not.toHaveProperty("nativeId");
+    expect(created).not.toHaveProperty("nativePath");
+  });
 
   it("enforces Host, CSRF, request limits, and completes the fake flow", async () => {
     const badHostStatus = await new Promise<number>((resolve, reject) => {
@@ -108,6 +199,237 @@ describe("HTTP control surface", () => {
     });
     expect(sent.status).toBe(202);
     await waitForIdle(chat.chatId);
+  });
+
+  it("rejects a loopback Origin from a different port", async () => {
+    const response = await fetch(`${origin}/api/workspaces/open`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://127.0.0.1:1",
+        "X-Pidex-CSRF": csrf,
+      },
+      body: JSON.stringify({ path: process.cwd() }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "bad_origin" } });
+  });
+
+  it("rejects malformed WebSocket messages without taking the host down", async () => {
+    const socket = await openSocket();
+
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+    socket.send("{");
+
+    await expect(closed).resolves.toEqual({ code: 1008, reason: "Invalid protocol message" });
+    await expect(fetch(`${origin}/api/health`)).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("requires a WebSocket hello before acknowledgements or heartbeats", async () => {
+    const socket = await openSocket();
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+
+    socket.send(JSON.stringify({ type: "pong" }));
+
+    await expect(closed).resolves.toEqual({ code: 1008, reason: "Hello required" });
+  });
+
+  it("restores a pending extension dialog in a reconnect snapshot", async () => {
+    const chat = await createChat();
+    const first = await openSocket();
+    const initialSnapshot = nextServerEvent(first, (event) => event.type === "snapshot");
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    await initialSnapshot;
+
+    const pendingDialog = nextServerEvent(
+      first,
+      (event) => event.type === "extension_dialog" && Boolean(event.dialog),
+    );
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actiondialog01",
+      expectedRevision: chat.revision,
+      text: "DIALOG",
+      delivery: "normal",
+    });
+    expect(sent.status).toBe(202);
+    const dialogEvent = await pendingDialog;
+    expect(dialogEvent).toMatchObject({ type: "extension_dialog" });
+    if (dialogEvent.type !== "extension_dialog" || !dialogEvent.dialog)
+      throw new Error("Expected a pending extension dialog");
+
+    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
+    first.close();
+    await firstClosed;
+
+    const second = await openSocket();
+    const replacement = nextServerEvent(second, (event) => event.type === "snapshot");
+    second.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    const snapshotEvent = await replacement;
+    if (snapshotEvent.type !== "snapshot") throw new Error("Expected a replacement snapshot");
+    expect(snapshotEvent.snapshot.extensionDialog).toEqual(dialogEvent.dialog);
+
+    const answered = await mutate(`/api/chats/${chat.chatId}/dialog`, {
+      clientId,
+      actionId: "answerdialog01",
+      expectedRevision: snapshotEvent.snapshot.revision,
+      requestId: dialogEvent.dialog.id,
+      value: true,
+    });
+    expect(answered.status).toBe(200);
+    await waitForIdle(chat.chatId);
+    second.close();
+  });
+
+  it("replays a known WebSocket cursor and resnapshots an impossible cursor", async () => {
+    const chat = await createChat();
+    const first = await openSocket();
+    const initialPromise = nextServerEvent(first, (event) => event.type === "snapshot");
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    const initial = await initialPromise;
+    if (initial.type !== "snapshot") throw new Error("Expected an initial snapshot");
+    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
+    first.close();
+    await firstClosed;
+
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionreplaycursor",
+      expectedRevision: chat.revision,
+      text: "MARKDOWN:cursor replay",
+      delivery: "normal",
+    });
+    expect(sent.status).toBe(202);
+    await waitForIdle(chat.chatId);
+
+    const replaySocket = await openSocket();
+    const replayPromise = nextServerEvent(replaySocket, () => true);
+    replaySocket.send(
+      JSON.stringify({
+        type: "hello",
+        protocolVersion: 2,
+        chatId: chat.chatId,
+        lastEventId: initial.eventId,
+      }),
+    );
+    const replayed = await replayPromise;
+    expect(replayed.eventId).toBe(initial.eventId + 1);
+    expect(replayed.type).not.toBe("snapshot");
+    replaySocket.close();
+
+    const replacementSocket = await openSocket();
+    const replacementPromise = nextServerEvent(
+      replacementSocket,
+      (event) => event.type === "snapshot",
+    );
+    replacementSocket.send(
+      JSON.stringify({
+        type: "hello",
+        protocolVersion: 2,
+        chatId: chat.chatId,
+        lastEventId: 999_999,
+      }),
+    );
+    const replacement = await replacementPromise;
+    expect(replacement.type).toBe("snapshot");
+    replacementSocket.close();
+  });
+
+  it("accepts an extension response only for the pending dialog ID", async () => {
+    const chat = await createChat();
+    const socket = await openSocket();
+    const initialSnapshot = nextServerEvent(socket, (event) => event.type === "snapshot");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    await initialSnapshot;
+
+    const pendingDialog = nextServerEvent(
+      socket,
+      (event) => event.type === "extension_dialog" && Boolean(event.dialog),
+    );
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actiondialog02",
+      expectedRevision: chat.revision,
+      text: "DIALOG",
+      delivery: "normal",
+    });
+    const accepted = (await sent.json()) as ActionOutcome;
+    const dialogEvent = await pendingDialog;
+    if (dialogEvent.type !== "extension_dialog" || !dialogEvent.dialog)
+      throw new Error("Expected a pending extension dialog");
+
+    const wrong = await mutate(`/api/chats/${chat.chatId}/dialog`, {
+      clientId,
+      actionId: "answerdialog02wrong",
+      expectedRevision: accepted.revision,
+      requestId: "wrongdialogid",
+      value: true,
+    });
+    expect(wrong.status).toBe(409);
+    await expect(wrong.json()).resolves.toMatchObject({ error: { code: "dialog_mismatch" } });
+
+    const answered = await mutate(`/api/chats/${chat.chatId}/dialog`, {
+      clientId,
+      actionId: "answerdialog02right",
+      expectedRevision: accepted.revision,
+      requestId: dialogEvent.dialog.id,
+      value: true,
+    });
+    expect(answered.status).toBe(200);
+    await waitForIdle(chat.chatId);
+    socket.close();
+  });
+
+  it("validates an extension response against the pending dialog kind", async () => {
+    const chat = await createChat();
+    const socket = await openSocket();
+    const initialSnapshot = nextServerEvent(socket, (event) => event.type === "snapshot");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    await initialSnapshot;
+
+    const pendingDialog = nextServerEvent(
+      socket,
+      (event) => event.type === "extension_dialog" && Boolean(event.dialog),
+    );
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actiondialog03",
+      expectedRevision: chat.revision,
+      text: "DIALOG",
+      delivery: "normal",
+    });
+    const accepted = (await sent.json()) as ActionOutcome;
+    const dialogEvent = await pendingDialog;
+    if (dialogEvent.type !== "extension_dialog" || !dialogEvent.dialog)
+      throw new Error("Expected a pending extension dialog");
+
+    const wrongType = await mutate(`/api/chats/${chat.chatId}/dialog`, {
+      clientId,
+      actionId: "answerdialog03wrong",
+      expectedRevision: accepted.revision,
+      requestId: dialogEvent.dialog.id,
+      value: "true",
+    });
+    expect(wrongType.status).toBe(400);
+    await expect(wrongType.json()).resolves.toMatchObject({
+      error: { code: "dialog_value_invalid" },
+    });
+
+    const answered = await mutate(`/api/chats/${chat.chatId}/dialog`, {
+      clientId,
+      actionId: "answerdialog03right",
+      expectedRevision: accepted.revision,
+      requestId: dialogEvent.dialog.id,
+      value: true,
+    });
+    expect(answered.status).toBe(200);
+    await waitForIdle(chat.chatId);
+    socket.close();
   });
 
   it("accepts a prompt once, replays its outcome, rejects conflicts, and stops only the exact run", async () => {
@@ -176,6 +498,239 @@ describe("HTTP control surface", () => {
       status: "cancelled",
       requiresAcknowledgement: false,
     });
+  });
+
+  it("rejects a whitespace-only prompt without consuming a revision", async () => {
+    const chat = await createChat();
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionblankprompt",
+      expectedRevision: chat.revision,
+      text: " \n\t ",
+      delivery: "normal",
+    });
+
+    expect(sent.status).toBe(400);
+    await expect(sent.json()).resolves.toMatchObject({ error: { code: "validation" } });
+    const unchanged = (await (
+      await fetch(`${origin}/api/chats/${chat.chatId}`)
+    ).json()) as ChatSnapshot;
+    expect(unchanged).toMatchObject({ revision: chat.revision, items: [] });
+  });
+
+  it("redacts provider secrets from browser-visible runtime errors", async () => {
+    const chat = await createChat();
+    const socket = await openSocket();
+    const initialSnapshot = nextServerEvent(socket, (event) => event.type === "snapshot");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 2, chatId: chat.chatId }));
+    await initialSnapshot;
+
+    const errorNotice = nextServerEvent(
+      socket,
+      (event) => event.type === "notice" && event.item.level === "error",
+    );
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionsecreterror",
+      expectedRevision: chat.revision,
+      text: "SECRET_ERROR",
+      delivery: "normal",
+    });
+    expect(sent.status).toBe(202);
+    const notice = await errorNotice;
+    if (notice.type !== "notice") throw new Error("Expected an error notice");
+    expect(notice.item.text).toContain("[redacted]");
+    expect(notice.item.text).not.toContain("pidex-canary-secret-token");
+    socket.close();
+  });
+
+  it("requires acknowledgement instead of rerunning an accepted prompt after host restart", async () => {
+    const chat = await createChat();
+    const renamedResponse = await mutate(`/api/chats/${chat.chatId}/rename`, {
+      clientId,
+      actionId: "actionrestartname",
+      expectedRevision: chat.revision,
+      name: "Restart recovery sentinel",
+    });
+    const renamed = (await renamedResponse.json()) as ChatSnapshot;
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionrestart01",
+      expectedRevision: renamed.revision,
+      text: "stop this",
+      delivery: "normal",
+    });
+    const accepted = (await sent.json()) as ActionOutcome;
+    expect(accepted.status).toBe("accepted");
+
+    await app.close();
+    app = await createPidexServer();
+    await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("No address after restart");
+    origin = `http://127.0.0.1:${address.port}`;
+    csrf = ((await (await fetch(`${origin}/api/bootstrap`)).json()) as { csrfToken: string })
+      .csrfToken;
+
+    const opened = await mutate("/api/workspaces/open", { path: process.cwd() });
+    const workspace = (await opened.json()) as { id: string };
+    const sessions = (await (
+      await fetch(`${origin}/api/workspaces/${workspace.id}/sessions`)
+    ).json()) as { sessions: Array<{ id: string; name?: string }> };
+    const restartedSession = sessions.sessions.find(
+      (session) => session.name === "Restart recovery sentinel",
+    );
+    expect(restartedSession).toBeDefined();
+    const resumed = await mutate("/api/chats/resume", {
+      workspaceId: workspace.id,
+      sessionId: restartedSession!.id,
+    });
+    const interrupted = (await resumed.json()) as ChatSnapshot;
+    expect(interrupted).toMatchObject({
+      revision: accepted.revision,
+      runStatus: "idle",
+      run: {
+        runId: accepted.runId,
+        status: "interrupted",
+        requiresAcknowledgement: true,
+      },
+    });
+
+    const blocked = await mutate(`/api/chats/${interrupted.chatId}/messages`, {
+      clientId,
+      actionId: "actionrestartblocked",
+      expectedRevision: interrupted.revision,
+      text: "do not rerun blindly",
+      delivery: "normal",
+    });
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toMatchObject({ error: { code: "interrupted_run" } });
+
+    const acknowledged = await mutate(`/api/chats/${interrupted.chatId}/interrupted/acknowledge`, {
+      clientId,
+      actionId: "actionrestartack",
+      expectedRevision: interrupted.revision,
+    });
+    expect(acknowledged.status).toBe(200);
+    await expect(acknowledged.json()).resolves.toMatchObject({
+      revision: accepted.revision + 1,
+    });
+  });
+
+  it("rejects configuration while a run is active without consuming a revision", async () => {
+    const chat = await createChat();
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionbusyconfig",
+      expectedRevision: chat.revision,
+      text: "stop this",
+      delivery: "normal",
+    });
+    const accepted = (await sent.json()) as ActionOutcome;
+
+    const configured = await fetch(`${origin}/api/chats/${chat.chatId}/config`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-Pidex-CSRF": csrf },
+      body: JSON.stringify({
+        clientId,
+        actionId: "configwhilebusy",
+        expectedRevision: accepted.revision,
+        thinkingLevel: "high",
+      }),
+    });
+    expect(configured.status).toBe(409);
+    await expect(configured.json()).resolves.toMatchObject({ error: { code: "session_busy" } });
+
+    const unchanged = (await (
+      await fetch(`${origin}/api/chats/${chat.chatId}`)
+    ).json()) as ChatSnapshot;
+    expect(unchanged).toMatchObject({ revision: accepted.revision, thinkingLevel: "medium" });
+
+    const stopped = await mutate(`/api/chats/${chat.chatId}/abort`, {
+      clientId,
+      actionId: "stopbusyconfig",
+      expectedRevision: accepted.revision,
+      runId: accepted.runId,
+    });
+    expect(stopped.status).toBe(202);
+    await waitForIdle(chat.chatId);
+  });
+
+  it("rejects an empty configuration without consuming a revision", async () => {
+    const chat = await createChat();
+    const configured = await fetch(`${origin}/api/chats/${chat.chatId}/config`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-Pidex-CSRF": csrf },
+      body: JSON.stringify({
+        clientId,
+        actionId: "emptyconfiguration",
+        expectedRevision: chat.revision,
+      }),
+    });
+
+    expect(configured.status).toBe(400);
+    await expect(configured.json()).resolves.toMatchObject({ error: { code: "validation" } });
+    const unchanged = (await (
+      await fetch(`${origin}/api/chats/${chat.chatId}`)
+    ).json()) as ChatSnapshot;
+    expect(unchanged.revision).toBe(chat.revision);
+  });
+
+  it("rejects an unavailable model without consuming a revision", async () => {
+    const chat = await createChat();
+    const configured = await fetch(`${origin}/api/chats/${chat.chatId}/config`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-Pidex-CSRF": csrf },
+      body: JSON.stringify({
+        clientId,
+        actionId: "missingmodelconfig",
+        expectedRevision: chat.revision,
+        model: "missing/model",
+      }),
+    });
+
+    expect(configured.status).toBe(400);
+    await expect(configured.json()).resolves.toMatchObject({
+      error: { code: "model_unavailable" },
+    });
+    const unchanged = (await (
+      await fetch(`${origin}/api/chats/${chat.chatId}`)
+    ).json()) as ChatSnapshot;
+    expect(unchanged).toMatchObject({ revision: chat.revision, model: "fake/deterministic" });
+  });
+
+  it("rejects compaction while a run is active without consuming a revision", async () => {
+    const chat = await createChat();
+    const sent = await mutate(`/api/chats/${chat.chatId}/messages`, {
+      clientId,
+      actionId: "actionbusycompact",
+      expectedRevision: chat.revision,
+      text: "stop this",
+      delivery: "normal",
+    });
+    const accepted = (await sent.json()) as ActionOutcome;
+
+    const compacted = await mutate(`/api/chats/${chat.chatId}/compact`, {
+      clientId,
+      actionId: "compactwhilebusy",
+      expectedRevision: accepted.revision,
+    });
+    expect(compacted.status).toBe(409);
+    await expect(compacted.json()).resolves.toMatchObject({ error: { code: "session_busy" } });
+
+    const unchanged = (await (
+      await fetch(`${origin}/api/chats/${chat.chatId}`)
+    ).json()) as ChatSnapshot;
+    expect(unchanged).toMatchObject({ revision: accepted.revision, runStatus: "running" });
+
+    const stopped = await mutate(`/api/chats/${chat.chatId}/abort`, {
+      clientId,
+      actionId: "stopbusycompact",
+      expectedRevision: accepted.revision,
+      runId: accepted.runId,
+    });
+    expect(stopped.status).toBe(202);
+    await waitForIdle(chat.chatId);
   });
 
   it("keeps large tool output out of events and serves it in bounded chunks", async () => {

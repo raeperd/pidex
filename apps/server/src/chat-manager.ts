@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import type {
   ActionOutcome,
   ChatSnapshot,
+  ExtensionDialog,
   RunOutcome,
   ServerEvent,
+  SessionSummary,
   ToolOutputChunk,
   TranscriptItem,
   TranscriptPage,
@@ -13,6 +15,7 @@ import type {
 import type { WebSocket } from "ws";
 import type { AdapterEvent, AdapterSession, AdapterSessionInfo, PiAdapter } from "./adapter.js";
 import type { MetadataStore } from "./metadata.js";
+import { safeError } from "./security.js";
 
 interface WorkspaceRecord {
   id: string;
@@ -24,6 +27,21 @@ interface ToolResource {
   text: string;
   sourceTruncated: boolean;
 }
+interface MappedSession {
+  opaque: string;
+  info: AdapterSessionInfo;
+  workspaceId: string;
+}
+type NativeSessionReference =
+  | Pick<AdapterSession, "nativeId" | "nativePath">
+  | Pick<AdapterSessionInfo, "nativeId" | "nativePath">;
+
+const nativeSessionKey = (session: NativeSessionReference) =>
+  session.nativePath ?? session.nativeId;
+
+const sameNativeSession = (left: NativeSessionReference, right: NativeSessionReference) =>
+  nativeSessionKey(left) === nativeSessionKey(right);
+
 interface ChatRecord {
   id: string;
   workspaceId: string;
@@ -37,6 +55,7 @@ interface ChatRecord {
   items: TranscriptItem[];
   steering: string[];
   followUp: string[];
+  extensionDialog: ExtensionDialog | undefined;
   resources: Map<string, ToolResource>;
   eventId: number;
   events: ServerEvent[];
@@ -53,10 +72,7 @@ type EventPayload = ServerEvent extends infer Event
 
 export class ChatManager {
   private workspaces = new Map<string, WorkspaceRecord>();
-  private sessions = new Map<
-    string,
-    { opaque: string; info: AdapterSessionInfo; workspaceId: string }
-  >();
+  private sessions = new Map<string, MappedSession>();
   private chats = new Map<string, ChatRecord>();
   private owners = new Map<string, string>();
 
@@ -65,22 +81,33 @@ export class ChatManager {
     private readonly metadata: MetadataStore,
   ) {}
 
+  private mapSession(workspaceId: string, info: AdapterSessionInfo): MappedSession {
+    let mapped = [...this.sessions.values()].find(
+      (entry) => sameNativeSession(entry.info, info) && entry.workspaceId === workspaceId,
+    );
+    if (!mapped) {
+      mapped = { opaque: randomUUID().replaceAll("-", ""), info, workspaceId };
+      this.sessions.set(mapped.opaque, mapped);
+    } else mapped.info = info;
+    return mapped;
+  }
+
+  private publicSession(workspaceId: string, info: AdapterSessionInfo): SessionSummary {
+    return {
+      id: this.mapSession(workspaceId, info).opaque,
+      ...(info.name ? { name: info.name } : {}),
+      firstMessage: info.firstMessage,
+      createdAt: info.createdAt,
+      modifiedAt: info.modifiedAt,
+      messageCount: info.messageCount,
+    };
+  }
+
   async openWorkspace(id: string, canonicalPath: string): Promise<Workspace> {
     const info = await this.adapter.inspectWorkspace(canonicalPath);
     const record = { id, path: canonicalPath, info };
     this.workspaces.set(id, record);
-    const sessions = info.sessions.map((session) => {
-      const key = session.nativePath ?? session.nativeId;
-      let mapped = [...this.sessions.values()].find(
-        (entry) =>
-          (entry.info.nativePath ?? entry.info.nativeId) === key && entry.workspaceId === id,
-      );
-      if (!mapped) {
-        mapped = { opaque: randomUUID().replaceAll("-", ""), info: session, workspaceId: id };
-        this.sessions.set(mapped.opaque, mapped);
-      } else mapped.info = session;
-      return { ...session, id: mapped.opaque };
-    });
+    const sessions = info.sessions.map((session) => this.publicSession(id, session));
     return {
       id,
       path: canonicalPath,
@@ -106,7 +133,7 @@ export class ChatManager {
   }
 
   private attach(workspaceId: string, session: AdapterSession, opaque?: string): ChatRecord {
-    const sessionKey = session.nativePath ?? session.nativeId;
+    const sessionKey = nativeSessionKey(session);
     const existingId = this.owners.get(sessionKey);
     if (existingId) return this.chat(existingId);
     const persisted = this.metadata.sessionState(sessionKey);
@@ -126,6 +153,7 @@ export class ChatManager {
       items: [...session.messages],
       steering: [],
       followUp: [],
+      extensionDialog: undefined,
       resources: new Map(),
       eventId: 0,
       events: [],
@@ -145,7 +173,16 @@ export class ChatManager {
 
   async create(workspaceId: string) {
     const ws = this.workspace(workspaceId);
-    return this.attach(workspaceId, await this.adapter.createSession(ws.path, "read-only"));
+    const session = await this.adapter.createSession(ws.path, "read-only");
+    const sessionKey = nativeSessionKey(session);
+    const fresh = await this.adapter.inspectWorkspace(ws.path);
+    ws.info = fresh;
+    const listed = fresh.sessions.find((info) => nativeSessionKey(info) === sessionKey);
+    return this.attach(
+      workspaceId,
+      session,
+      listed ? this.mapSession(workspaceId, listed).opaque : undefined,
+    );
   }
 
   async resume(workspaceId: string, opaque: string) {
@@ -155,10 +192,7 @@ export class ChatManager {
     const mapped = this.sessions.get(opaque);
     if (!mapped || mapped.workspaceId !== workspaceId)
       throw new Error("Session ID is invalid or stale");
-    const listed = fresh.sessions.find(
-      (entry) =>
-        (entry.nativePath ?? entry.nativeId) === (mapped.info.nativePath ?? mapped.info.nativeId),
-    );
+    const listed = fresh.sessions.find((entry) => sameNativeSession(entry, mapped.info));
     if (!listed?.nativePath) throw new Error("Session no longer exists");
     const owner = this.owners.get(listed.nativePath);
     if (owner) return this.chat(owner);
@@ -195,6 +229,7 @@ export class ChatManager {
       steeringQueue: chat.steering,
       followUpQueue: chat.followUp,
       stats: chat.session.getStats(),
+      ...(chat.extensionDialog ? { extensionDialog: chat.extensionDialog } : {}),
     };
   }
 
@@ -296,6 +331,7 @@ export class ChatManager {
       chat.items.push(item);
       this.broadcast(chat, { type: "notice", item });
     } else if (event.type === "dialog") {
+      chat.extensionDialog = event.dialog;
       this.broadcast(chat, {
         type: "extension_dialog",
         ...(event.dialog ? { dialog: event.dialog } : {}),
@@ -342,7 +378,7 @@ export class ChatManager {
       this.handle(chat, {
         type: "notice",
         level: "error",
-        text: error instanceof Error ? error.message : "Prompt failed",
+        text: safeError(error),
       });
       this.broadcastRun(chat);
     });

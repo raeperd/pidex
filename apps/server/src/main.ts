@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type RawData } from "ws";
 import {
   abortRequestSchema,
   acknowledgeInterruptedRequestSchema,
@@ -20,7 +20,7 @@ import {
   wsClientMessageSchema,
   trustWorkspaceSchema,
 } from "@pidex/api";
-import type { Bootstrap, Health } from "@pidex/api";
+import type { Bootstrap, ExtensionDialog, Health } from "@pidex/api";
 import type { ZodType } from "zod";
 import { ChatManager } from "./chat-manager.js";
 import { FakePiAdapter } from "./fake-adapter.js";
@@ -49,14 +49,64 @@ const parse = async <T>(req: IncomingMessage, schema: ZodType<T>) => {
   return result.data;
 };
 const mutation = (method?: string) => method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
-const mime = (file: string) =>
-  file.endsWith(".js")
-    ? "text/javascript; charset=utf-8"
-    : file.endsWith(".css")
-      ? "text/css; charset=utf-8"
-      : file.endsWith(".svg")
-        ? "image/svg+xml"
-        : "text/html; charset=utf-8";
+
+type Chat = ReturnType<ChatManager["chat"]>;
+
+function requireIdle(chat: Chat, message: string) {
+  if (chat.session.isIdle) return;
+  throw new ActionProtocolError("session_busy", message);
+}
+
+function validateDialogResponse(
+  dialog: ExtensionDialog | undefined,
+  requestId: string,
+  value: string | boolean | null,
+) {
+  if (!dialog || dialog.id !== requestId)
+    throw new HttpError(409, "Extension dialog is no longer pending", "dialog_mismatch");
+  if (value === null) return;
+  if (dialog.kind === "confirm" && typeof value === "boolean") return;
+  if (dialog.kind === "select" && typeof value === "string" && dialog.options?.includes(value))
+    return;
+  if ((dialog.kind === "input" || dialog.kind === "editor") && typeof value === "string") return;
+  throw new HttpError(
+    400,
+    "Extension response does not match the pending dialog",
+    "dialog_value_invalid",
+  );
+}
+
+function parseClientMessage(data: RawData) {
+  try {
+    const result = wsClientMessageSchema.safeParse(JSON.parse(data.toString()));
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const contentTypeFor = (file: string) => {
+  switch (path.extname(file).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".ico":
+      return "image/x-icon";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+};
 
 export async function createPidexServer() {
   const csrf = randomBytes(32).toString("base64url");
@@ -96,7 +146,7 @@ export async function createPidexServer() {
         const canonical = await canonicalWorkspace(body.path, roots);
         const id =
           body.remember === false
-            ? (metadata.workspaceId(canonical) ?? metadata.rememberWorkspace(canonical))
+            ? (metadata.workspaceId(canonical) ?? randomBytes(16).toString("hex"))
             : metadata.rememberWorkspace(canonical);
         return json(res, 200, await manager.openWorkspace(id, canonical));
       }
@@ -233,6 +283,12 @@ export async function createPidexServer() {
       if (req.method === "PATCH" && match?.[1]) {
         const body = await parse(req, configRequestSchema);
         const chat = manager.chat(match[1]);
+        requireIdle(chat, "Configuration can only change while the session is idle");
+        const modelAvailable = manager
+          .workspace(chat.workspaceId)
+          .info.models.some((model) => model.id === body.model);
+        if (body.model && !modelAvailable)
+          throw new HttpError(400, "Model is no longer available", "model_unavailable");
         const patch = {
           ...(body.model ? { model: body.model } : {}),
           ...(body.thinkingLevel ? { thinkingLevel: body.thinkingLevel } : {}),
@@ -268,6 +324,7 @@ export async function createPidexServer() {
       if (req.method === "POST" && match?.[1]) {
         const body = await parse(req, compactRequestSchema);
         const chat = manager.chat(match[1]);
+        requireIdle(chat, "Compaction can only run while the session is idle");
         const outcome = metadata.acceptSessionMutation({
           actionId: body.actionId,
           clientId: body.clientId,
@@ -285,6 +342,7 @@ export async function createPidexServer() {
       if (req.method === "POST" && match?.[1]) {
         const body = await parse(req, dialogResponseSchema);
         const chat = manager.chat(match[1]);
+        validateDialogResponse(chat.extensionDialog, body.requestId, body.value);
         const outcome = metadata.acceptSessionMutation({
           actionId: body.actionId,
           clientId: body.clientId,
@@ -310,20 +368,18 @@ export async function createPidexServer() {
       )
         file = path.join(webRoot, "index.html");
       res.statusCode = 200;
-      res.setHeader("Content-Type", mime(file));
+      res.setHeader("Content-Type", contentTypeFor(file));
       res.setHeader(
         "Cache-Control",
         file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
       );
       createReadStream(file).pipe(res);
     } catch (error) {
-      const status =
-        error instanceof HttpError || error instanceof ActionProtocolError ? error.status : 500;
-      const code =
-        error instanceof HttpError || error instanceof ActionProtocolError
-          ? error.code
-          : "internal_error";
-      json(res, status, { error: { code, message: safeError(error) } });
+      const protocolError =
+        error instanceof HttpError || error instanceof ActionProtocolError ? error : undefined;
+      json(res, protocolError?.status ?? 500, {
+        error: { code: protocolError?.code ?? "internal_error", message: safeError(error) },
+      });
     }
   };
   const server = createServer((req, res) => void handler(req, res));
@@ -343,17 +399,18 @@ export async function createPidexServer() {
     let connected = false;
     let alive = true;
     socket.on("message", (data) => {
-      const result = wsClientMessageSchema.safeParse(JSON.parse(data.toString()));
-      if (!result.success) return socket.close(1008, "Invalid protocol message");
-      if (result.data.type === "hello") {
+      const message = parseClientMessage(data);
+      if (!message) return socket.close(1008, "Invalid protocol message");
+      if (!connected && message.type !== "hello") return socket.close(1008, "Hello required");
+      if (message.type === "hello") {
         if (connected) return socket.close(1008, "Already connected");
         connected = true;
         try {
-          manager.connect(manager.chat(result.data.chatId), socket, result.data.lastEventId);
+          manager.connect(manager.chat(message.chatId), socket, message.lastEventId);
         } catch {
           socket.close(1008, "Chat not found");
         }
-      } else if (result.data.type === "pong") alive = true;
+      } else if (message.type === "pong") alive = true;
     });
     const timer = setInterval(() => {
       if (!alive) return socket.terminate();
