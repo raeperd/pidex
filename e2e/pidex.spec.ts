@@ -18,6 +18,18 @@ test("serves the Pi host and branded assets", async ({ request }) => {
 });
 
 test("keeps search and new-chat setup in the pre-chat experience", async ({ page, request }) => {
+  const startRequests: Array<{ kind: "create" | "configure" | "prompt"; body: unknown }> = [];
+  page.on("request", (browserRequest) => {
+    const path = new URL(browserRequest.url()).pathname;
+    if (browserRequest.method() === "POST" && path === "/api/chats")
+      startRequests.push({ kind: "create", body: browserRequest.postDataJSON() });
+    else if (browserRequest.method() === "PATCH" && /^\/api\/chats\/[^/]+\/config$/.test(path))
+      startRequests.push({ kind: "configure", body: browserRequest.postDataJSON() });
+    else if (browserRequest.method() === "POST" && /^\/api\/chats\/[^/]+\/messages$/.test(path))
+      startRequests.push({ kind: "prompt", body: browserRequest.postDataJSON() });
+  });
+  await page.route("**/api/chats/*/messages", (route) => route.abort("blockedbyclient"));
+
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
@@ -51,6 +63,21 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
   await page.getByRole("button", { name: "New thread in apps" }).click();
   await page.waitForTimeout(250);
   await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+
+  await page.getByLabel("Thinking level").selectOption("high");
+  await page.getByLabel("Tool access").selectOption("full");
+  await page.getByLabel("Prompt").fill("Verify first prompt configuration");
+  await Promise.all([
+    page.waitForRequest((browserRequest) =>
+      /\/api\/chats\/[^/]+\/messages$/.test(browserRequest.url()),
+    ),
+    page.getByRole("button", { name: "Send" }).click(),
+  ]);
+
+  expect(startRequests.map(({ kind }) => kind)).toEqual(["create", "configure", "prompt"]);
+  expect(startRequests[1]?.body).toEqual(
+    expect.objectContaining({ thinkingLevel: "high", toolMode: "full" }),
+  );
 });
 
 async function rememberWorkspace(request: APIRequestContext, workspacePath: string) {
