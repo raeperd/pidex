@@ -27,4 +27,16 @@ describe("local security", () => {
     expect(() => parsePort("oops")).toThrow(/integer/);
     expect(safeError(new Error("Bearer secret-token-value"))).not.toContain("secret-token-value");
   });
+
+  it("redacts common labeled secrets from errors", () => {
+    const sanitized = safeError(
+      new Error(
+        "OPENAI_API_KEY=canary-api-key-value refresh_token: canary-refresh-token password=canary-password-value",
+      ),
+    );
+
+    expect(sanitized).not.toContain("canary-api-key-value");
+    expect(sanitized).not.toContain("canary-refresh-token");
+    expect(sanitized).not.toContain("canary-password-value");
+  });
 });

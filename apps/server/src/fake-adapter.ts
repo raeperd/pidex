@@ -106,6 +106,10 @@ class FakeSession implements AdapterSession {
     };
     this.messages.push(user);
     this.emit({ type: "message", item: user });
+    if (text === "SECRET_ERROR") {
+      this.isIdle = true;
+      throw new Error("Provider rejected Bearer pidex-canary-secret-token");
+    }
     if (text === "DIALOG") {
       const id = randomUUID().replaceAll("-", "");
       const answer = await new Promise<string | boolean | null>((resolve) => {

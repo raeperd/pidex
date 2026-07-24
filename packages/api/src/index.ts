@@ -209,7 +209,11 @@ export const actionRequestSchema = z.object({
 });
 const actionRequestBase = actionRequestSchema;
 export const messageRequestSchema = actionRequestBase.extend({
-  text: z.string().min(1).max(20_000),
+  text: z
+    .string()
+    .min(1)
+    .max(20_000)
+    .refine((value) => value.trim().length > 0, "Prompt cannot be blank"),
   delivery: z.enum(["normal", "steer", "follow-up"]),
   runId: idSchema.optional(),
 });
@@ -219,11 +223,19 @@ export const acknowledgeInterruptedRequestSchema = actionRequestBase.pick({
   actionId: true,
   expectedRevision: true,
 });
-export const configRequestSchema = actionRequestBase.extend({
-  model: z.string().max(300).optional(),
-  thinkingLevel: thinkingLevelSchema.optional(),
-  toolMode: toolModeSchema.optional(),
-});
+export const configRequestSchema = actionRequestBase
+  .extend({
+    model: z.string().max(300).optional(),
+    thinkingLevel: thinkingLevelSchema.optional(),
+    toolMode: toolModeSchema.optional(),
+  })
+  .refine(
+    (value) =>
+      value.model !== undefined ||
+      value.thinkingLevel !== undefined ||
+      value.toolMode !== undefined,
+    { message: "At least one configuration field is required" },
+  );
 export const renameRequestSchema = actionRequestBase.extend({
   name: z.string().trim().min(1).max(200),
 });

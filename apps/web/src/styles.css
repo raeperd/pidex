@@ -1726,10 +1726,6 @@ main {
   .composer-controls select:nth-of-type(2) {
     max-width: 92px;
   }
-  .composer-controls select:nth-of-type(3),
-  .composer-controls .control-divider:last-of-type {
-    display: none;
-  }
   .composer-actions select {
     max-width: 82px;
   }
@@ -1749,9 +1745,16 @@ main {
   .header-actions button:last-child {
     display: none;
   }
-  .composer-controls select:nth-of-type(2),
   .composer-controls .control-divider {
     display: none;
+  }
+  .composer-controls select {
+    max-width: 82px;
+    padding-right: 13px;
+    font-size: 9px;
+  }
+  .composer-controls select:nth-of-type(2) {
+    max-width: 78px;
   }
   .messages {
     padding-right: 11px;

@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -40,6 +40,8 @@ export async function canonicalWorkspace(candidate: string, roots: string[]): Pr
   } catch {
     throw new HttpError(404, "Project directory does not exist", "workspace_missing");
   }
+  if (!(await stat(canonical)).isDirectory())
+    throw new HttpError(400, "Project path is not a directory", "workspace_not_directory");
   if (!roots.some((root) => isDescendant(root, canonical)))
     throw new HttpError(403, "Project is outside WORKSPACE_ROOTS", "workspace_forbidden");
   return canonical;
@@ -48,9 +50,11 @@ const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export function validateRequest(req: IncomingMessage, mutation: boolean, csrf: string): void {
   const rawHost = req.headers.host;
   if (!rawHost) throw new HttpError(400, "Missing Host header", "bad_host");
+  let requestUrl: URL;
   let hostname: string;
   try {
-    hostname = new URL(`http://${rawHost}`).hostname;
+    requestUrl = new URL(`http://${rawHost}`);
+    hostname = requestUrl.hostname;
   } catch {
     throw new HttpError(400, "Invalid Host header", "bad_host");
   }
@@ -67,11 +71,14 @@ export function validateRequest(req: IncomingMessage, mutation: boolean, csrf: s
     } catch {
       throw new HttpError(403, "Invalid Origin", "bad_origin");
     }
+    const loopback = loopbackHosts.has(hostname.toLowerCase());
+    const requestPort = requestUrl.port || (loopback ? "80" : "443");
+    const originPort = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
     const originAllowed =
-      loopbackHosts.has(parsed.hostname.toLowerCase()) ||
-      (tailscaleHost !== undefined &&
-        parsed.protocol === "https:" &&
-        parsed.hostname.toLowerCase() === tailscaleHost);
+      parsed.hostname.toLowerCase() === hostname.toLowerCase() &&
+      originPort === requestPort &&
+      ((loopback && parsed.protocol === "http:") ||
+        (hostname.toLowerCase() === tailscaleHost && parsed.protocol === "https:"));
     if (!originAllowed) throw new HttpError(403, "Origin is not allowed", "bad_origin");
   }
   if (mutation && req.headers["x-pidex-csrf"] !== csrf)
@@ -104,5 +111,15 @@ export async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 export function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  return message.replace(/(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/gi, "[redacted]").slice(0, 1000);
+  return message
+    .replace(
+      /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi,
+      "[redacted]",
+    )
+    .replace(/(?:sk-|Bearer\s+)[A-Za-z0-9._-]{8,}/gi, "[redacted]")
+    .replace(
+      /((?:["']?[\w-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret)[\w-]*["']?)\s*[:=]\s*["']?)[^\s"',;}{]{8,}/gi,
+      "$1[redacted]",
+    )
+    .slice(0, 1000);
 }
