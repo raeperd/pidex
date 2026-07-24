@@ -1,0 +1,4 @@
+- Organize code top-down: put high-level entry points first and implementation details below them.
+- Prefer simple, direct solutions over unnecessary abstractions and dependencies.
+- Keep application wiring in one obvious composition root.
+- Prefer real integration tests over mocks; inject dependencies at boundaries when needed.
