@@ -12,6 +12,7 @@
     "start": "pnpm --filter @pidex/server start",
     "start:desktop": "pnpm --filter @pidex/desktop start",
     "smoke:real": "node scripts/real-pi-smoke.mjs",
+    "pretest": "pnpm --filter @pidex/api build",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck": "pnpm --filter @pidex/api build && pnpm -r --filter=!@pidex/api --if-present typecheck"
