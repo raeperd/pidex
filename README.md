@@ -33,7 +33,7 @@ Production restart command:
 pnpm build && pnpm start
 ```
 
-`PORT` may be an integer from 1024 through 65535. The host is fixed at literal `127.0.0.1` and cannot be widened. `WORKSPACE_ROOTS` is a platform-delimited allowlist of project roots and defaults to the current user’s home directory. `PIDEX_STATE_DIR` can relocate Pidex’s metadata database. `PIDEX_TAILSCALE_HOST` may name one explicitly allowed Tailscale Serve hostname; forwarded headers are not trusted from non-loopback peers.
+`PORT` may be an integer from 1024 through 65535. The host is fixed at literal `127.0.0.1` and cannot be widened. `WORKSPACE_ROOTS` is a platform-delimited security allowlist and defaults to the current user’s home directory. The name-first project picker discovers immediate child folders under `~/Projects`; `PIDEX_PROJECT_ROOTS` can replace that with a platform-delimited list of catalog roots. Catalog roots and discovered projects must still be inside `WORKSPACE_ROOTS`. `PIDEX_STATE_DIR` can relocate Pidex’s metadata database. `PIDEX_TAILSCALE_HOST` may name one explicitly allowed Tailscale Serve hostname; forwarded headers are not trusted from non-loopback peers.
 
 ## Architecture
 
@@ -46,7 +46,7 @@ apps/desktop ───────────> packages/api
 
 - `packages/api`: browser-safe Zod schemas and inferred protocol types.
 - `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, deterministic fake, and SQLite metadata.
-- `apps/web`: responsive Svelte 5/Tailwind 4 client, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
+- `apps/web`: responsive Svelte 5/Tailwind 4 client, name-first project picker, bounded nested task previews, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
 The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.

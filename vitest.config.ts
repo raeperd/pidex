@@ -1,2 +1,8 @@
 import { defineConfig } from "vitest/config";
-export default defineConfig({ test: { include: ["apps/**/*.test.ts", "packages/**/*.test.ts"], exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"], testTimeout: 10_000 } });
+export default defineConfig({
+  test: {
+    include: ["apps/**/*.test.ts", "packages/**/*.test.ts"],
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
+    testTimeout: 10_000,
+  },
+});

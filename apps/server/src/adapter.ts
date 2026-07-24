@@ -9,7 +9,10 @@ export type AdapterEvent =
   | { type: "settled" }
   | { type: "dialog"; dialog?: ExtensionDialog };
 
-export interface AdapterSessionInfo extends SessionSummary { nativeId: string; nativePath?: string }
+export interface AdapterSessionInfo extends SessionSummary {
+  nativeId: string;
+  nativePath?: string;
+}
 export interface AdapterWorkspaceInfo {
   models: ModelInfo[];
   sessions: AdapterSessionInfo[];
@@ -33,7 +36,11 @@ export interface AdapterSession {
   followUp(text: string): Promise<void>;
   abort(): Promise<void>;
   clearQueue(kind?: "steering" | "follow-up" | "all"): void;
-  configure(input: { model?: string; thinkingLevel?: AdapterSession["thinkingLevel"]; toolMode?: "read-only" | "full" }): Promise<void>;
+  configure(input: {
+    model?: string;
+    thinkingLevel?: AdapterSession["thinkingLevel"];
+    toolMode?: "read-only" | "full";
+  }): Promise<void>;
   rename(name: string): void;
   compact(instructions?: string): Promise<void>;
   getStats(): { messages: number; toolCalls: number; tokens: number; cost: number };
@@ -49,11 +56,20 @@ export interface PiAdapter {
 }
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
   let text: string;
-  try { text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value)); } catch { text = "[unserializable output]"; }
-  return text.length <= max ? { text, truncated: false } : { text: `${text.slice(0, max)}\n… output truncated`, truncated: true };
+  try {
+    text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
+  } catch {
+    text = "[unserializable output]";
+  }
+  return text.length <= max
+    ? { text, truncated: false }
+    : { text: `${text.slice(0, max)}\n… output truncated`, truncated: true };
 }
 
-export function boundedResource(value: unknown, max = 1_000_000): { text: string; sourceTruncated: boolean } {
+export function boundedResource(
+  value: unknown,
+  max = 1_000_000,
+): { text: string; sourceTruncated: boolean } {
   const serialized = bounded(value, max);
   return { text: serialized.text, sourceTruncated: serialized.truncated };
 }

@@ -53,13 +53,20 @@ export class ChatConnection {
     this.socket = socket;
     previous?.close();
 
-    socket.onopen = () => {
+    socket.addEventListener("open", () => {
       this.handlers.onStateChange("connected");
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, chatId, ...(this.lastEventId ? { lastEventId: this.lastEventId } : {}) }));
-    };
-    socket.onmessage = (message) => this.receive(socket, message.data);
-    socket.onerror = () => socket.close();
-    socket.onclose = () => {
+      socket.send(
+        JSON.stringify({
+          type: "hello",
+          protocolVersion: PROTOCOL_VERSION,
+          chatId,
+          ...(this.lastEventId ? { lastEventId: this.lastEventId } : {}),
+        }),
+      );
+    });
+    socket.addEventListener("message", (message) => this.receive(socket, message.data));
+    socket.addEventListener("error", () => socket.close());
+    socket.addEventListener("close", () => {
       if (this.socket !== socket || !this.chatId) return;
       if (!navigator.onLine) {
         this.handlers.onStateChange("disconnected");
@@ -67,7 +74,7 @@ export class ChatConnection {
       }
       this.handlers.onStateChange("reconnecting");
       this.reconnectTimer = setTimeout(() => this.open(), 800);
-    };
+    });
   }
 
   private receive(socket: WebSocket, data: unknown) {

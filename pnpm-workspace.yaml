@@ -3,7 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
-  '@google/genai': false
+  "@google/genai": false
   electron: true
   esbuild: true
   protobufjs: false
