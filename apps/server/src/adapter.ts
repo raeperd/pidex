@@ -47,13 +47,6 @@ export interface AdapterSession {
   respondToDialog(requestId: string, value: string | boolean | null): void;
   dispose(): void;
 }
-export interface PiAdapter {
-  readonly name: "real";
-  inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo>;
-  createSession(cwd: string, toolMode: "read-only" | "full"): Promise<AdapterSession>;
-  resumeSession(cwd: string, nativePath: string): Promise<AdapterSession>;
-  setWorkspaceTrust(cwd: string, trusted: boolean): Promise<void>;
-}
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
   let text: string;
   try {

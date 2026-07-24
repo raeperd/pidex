@@ -13,7 +13,7 @@ packages/
 ```
 
 - Keep the web connection code inside `apps/web`.
-- Keep the Pi adapter inside `apps/server`.
+- Keep the Pi SDK integration inside `apps/server`.
 - Add more packages only when there is a second consumer.
 
 ## Runtime

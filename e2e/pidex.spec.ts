@@ -1,12 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("serves the real Pi host and branded assets", async ({ request }) => {
+test("serves the Pi host and branded assets", async ({ request }) => {
   const health = await request.get("/api/health");
   expect(health.status()).toBe(200);
   await expect(health.json()).resolves.toEqual({
     ok: true,
-    adapter: "real",
-    protocolVersion: 2,
+    protocolVersion: 3,
   });
 
   const png = await request.get("/pidex-icon.png");

@@ -18,7 +18,7 @@ The SDK is exact-pinned and the dependency tree is committed in `pnpm-lock.yaml`
 ## Commands
 
 ```sh
-pnpm dev          # real Pi SDK server + Vite client
+pnpm dev          # Pi SDK server + Vite client
 pnpm typecheck
 pnpm test         # deterministic; never calls a paid model
 pnpm test:e2e     # deterministic Playwright Chromium suite
@@ -63,19 +63,19 @@ Project-local Pi resources are loaded only when Pi has a saved trust decision or
 
 Completed assistant Markdown is parsed as GFM with raw HTML escaped, remote images disabled, DOM sanitization, and an explicit `http:`, `https:`, and `mailto:` link allowlist. Tool output, bodies, WebSocket messages, and replay history are bounded. Mutations require a random per-process CSRF header; cross-site origins, cross-site fetches, and unapproved Host values are rejected. There is no CORS, shell endpoint, telemetry, analytics, public share, credential form, or transcript database.
 
-## Optional real-Pi smoke check
+## Optional Pi SDK smoke check
 
-This inspection uses the real Pi SDK but sends no model request:
+This inspection uses the Pi SDK but sends no model request:
 
 ```sh
 pnpm build
-pnpm smoke:real -- /absolute/project/path
+pnpm smoke:pi -- /absolute/project/path
 ```
 
 An explicitly opt-in paid turn is available with `--prompt`:
 
 ```sh
-pnpm smoke:real -- /absolute/project/path --prompt "Reply with OK"
+pnpm smoke:pi -- /absolute/project/path --prompt "Reply with OK"
 ```
 
 ## Optional Tailscale Serve (not automated or verified)

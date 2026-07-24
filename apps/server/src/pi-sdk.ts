@@ -21,7 +21,6 @@ import {
   type AdapterSession,
   type AdapterSessionInfo,
   type AdapterWorkspaceInfo,
-  type PiAdapter,
 } from "./adapter.js";
 
 const readOnly = ["read", "grep", "find", "ls"];
@@ -69,7 +68,13 @@ function trustState(
   return { trusted, skipped: trusted !== true };
 }
 
-class RealSession implements AdapterSession {
+type ResourceDiagnostic = AdapterWorkspaceInfo["resourceDiagnostics"][number];
+const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic => ({
+  level: type === "error" ? "error" : "warning",
+  message: message.slice(0, 1000),
+});
+
+class PiSession implements AdapterSession {
   readonly nativeId: string;
   readonly nativePath: string | undefined;
   private listeners = new Set<(event: AdapterEvent) => void>();
@@ -357,8 +362,7 @@ class RealSession implements AdapterSession {
   }
 }
 
-export class RealPiAdapter implements PiAdapter {
-  readonly name = "real" as const;
+export class PiSdk {
   private async services(cwd: string) {
     const agentDir = getAgentDir();
     const settings = SettingsManager.create(cwd, agentDir);
@@ -382,23 +386,21 @@ export class RealPiAdapter implements PiAdapter {
   async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
     const { trust, loader, modelRuntime, sessionDir } = await this.services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
-    const diagnostics = [
-      ...loader.getSkills().diagnostics.map((entry) => ({
-        level: entry.type === "error" ? ("error" as const) : ("warning" as const),
-        message: entry.message.slice(0, 1000),
-      })),
-      ...loader.getPrompts().diagnostics.map((entry) => ({
-        level: entry.type === "error" ? ("error" as const) : ("warning" as const),
-        message: entry.message.slice(0, 1000),
-      })),
-      ...loader.getThemes().diagnostics.map((entry) => ({
-        level: entry.type === "error" ? ("error" as const) : ("warning" as const),
-        message: entry.message.slice(0, 1000),
-      })),
-      ...loader.getExtensions().errors.map((entry) => ({
-        level: "error" as const,
-        message: `Extension ${path.basename(entry.path)}: ${entry.error}`.slice(0, 1000),
-      })),
+    const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
+      ...loader
+        .getSkills()
+        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
+      ...loader
+        .getPrompts()
+        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
+      ...loader
+        .getThemes()
+        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
+      ...loader
+        .getExtensions()
+        .errors.map((entry) =>
+          resourceDiagnostic("error", `Extension ${path.basename(entry.path)}: ${entry.error}`),
+        ),
     ].slice(0, 50);
     return {
       models: (await modelRuntime.getAvailable()).map((model) => ({
@@ -439,7 +441,7 @@ export class RealPiAdapter implements PiAdapter {
       sessionManager: manager,
       ...(toolMode === "read-only" ? { tools: readOnly } : {}),
     });
-    const wrapped = new RealSession(result.session);
+    const wrapped = new PiSession(result.session);
     await wrapped.bind();
     return wrapped;
   }

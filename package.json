@@ -11,7 +11,7 @@
     "lint": "oxlint .",
     "start": "pnpm --filter @pidex/server start",
     "start:desktop": "pnpm --filter @pidex/desktop start",
-    "smoke:real": "node scripts/real-pi-smoke.mjs",
+    "smoke:pi": "node scripts/pi-smoke.mjs",
     "pretest": "pnpm --filter @pidex/api build",
     "test": "vitest run",
     "test:e2e": "playwright test",

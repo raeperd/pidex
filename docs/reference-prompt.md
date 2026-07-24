@@ -53,7 +53,7 @@ Use Node.js 24 LTS when available; hard-require at least the version declared by
 
 Do not enable raw HTML in Markdown and do not use `dangerouslySetInnerHTML`; without raw HTML there is no HTML string for DOMPurify to sanitize. If the installed renderer forces an HTML-string path, sanitize it with DOMPurify before insertion, but prefer the AST-to-React path above. Apply an explicit URL policy: allow only safe `http:`, `https:`, and `mailto:` links; reject executable/unknown schemes; disable remote images by default.
 
-Keep Pi integration behind a small typed adapter. Keep server, shared browser-safe protocol types, and UI code separate.
+Keep Pi SDK integration inside the server. Keep server, shared browser-safe protocol types, and UI code separate.
 
 Provide and verify:
 
@@ -69,9 +69,9 @@ Use Vite's development proxy for `/api` so development stays same-origin. `npm s
 BUILD ORDER
 
 1. Finish discovery/version matching and write a short implementation checklist.
-2. Define shared protocol schemas and the Pi adapter interface, then connect the real matched Pi SDK.
+2. Define shared protocol schemas, then connect the matched Pi SDK.
 3. Make one vertical slice work end-to-end: open workspace, create chat, send, SSE stream, settle, reconnect, resume.
-4. Add the remaining real Pi session controls.
+4. Add the remaining Pi session controls.
 5. Add security, responsive polish, production service, and documentation; run the complete verification suite after every material fix. Do not replace required behavior with TODOs.
 
 PI INTEGRATION
@@ -251,7 +251,7 @@ Do not hand off until:
 2. the production app starts on literal host `127.0.0.1` and the validated effective port (`4783` by default), reports that URL, fails clearly when the port is occupied, and `/api/health` works;
 3. desktop and mobile layouts are manually checked;
 4. native Pi sessions can be listed, created, resumed, and survive server restart;
-5. stream, tools, steer, follow-up, stop, retry/compaction, settled state, and extension dialogs work through the real Pi adapter;
+5. stream, tools, steer, follow-up, stop, retry/compaction, settled state, and extension dialogs work through the Pi SDK;
 6. reconnect creates no duplicates and this server never creates two live writers for one session file;
 7. built assets and sampled API responses contain no credential values or raw environment data;
 8. README documents install/dev/test/build/start, architecture, Pi paths/state, trust, no-sandbox risk, troubleshooting, Tailscale Serve, the optional OS-native autostart choice, and intentionally omitted features.
