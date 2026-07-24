@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
-    "dev": "PIDEX_ADAPTER=fake pnpm --parallel --filter @pidex/server --filter @pidex/web dev",
+    "dev": "pnpm --filter @pidex/api build && PIDEX_ADAPTER=fake pnpm --parallel --filter @pidex/server --filter @pidex/web dev",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
