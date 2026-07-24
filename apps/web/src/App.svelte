@@ -70,6 +70,7 @@
   const api = new PidexApiClient();
   const chatConnection = new ChatConnection({
     onEvent: applyEvent,
+    onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),
   });
 
@@ -151,6 +152,16 @@
     } catch (cause) {
       bootstrapError = cause instanceof Error ? cause.message : "The Pidex host is unavailable";
     }
+  }
+  async function recoverInvalidChat() {
+    persistDraft();
+    snapshot = undefined;
+    workspaceCache = {};
+    expandedProjectIds = [];
+    await loadBootstrap();
+    if (bootstrapError) return;
+    error = "Pidex restarted. Resume your task from the refreshed project list.";
+    drawerOpen = matchMedia("(max-width: 900px)").matches;
   }
   function rememberWorkspace(loaded: Workspace, moveToTop = true, expand = true) {
     workspaceCache = { ...workspaceCache, [loaded.id]: loaded };
