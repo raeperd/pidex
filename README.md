@@ -5,7 +5,7 @@ Pidex is a local, private control surface for the installed Pi coding agent. The
 ## Requirements and setup
 
 - Node.js 24 LTS (`^24.13.1`; the matched Pi SDK requires at least `22.19.0`)
-- pnpm `11.13.0`
+- pnpm `11.16.0`
 - Pi CLI and SDK `@earendil-works/pi-coding-agent@0.80.10`
 
 ```sh
