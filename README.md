@@ -5,7 +5,7 @@ Pidex is a local, private control surface for the installed Pi coding agent. The
 ## Requirements and setup
 
 - Node.js 24 LTS (`^24.13.1`; the matched Pi SDK requires at least `22.19.0`)
-- pnpm `11.13.0`
+- pnpm `11.16.0`
 - Pi CLI and SDK `@earendil-works/pi-coding-agent@0.80.10`
 
 ```sh
@@ -18,7 +18,7 @@ The SDK is exact-pinned and the dependency tree is committed in `pnpm-lock.yaml`
 ## Commands
 
 ```sh
-pnpm dev          # fake Pi server + Vite client for safe development
+pnpm dev          # Pi SDK server + Vite client
 pnpm typecheck
 pnpm test         # deterministic; never calls a paid model
 pnpm test:e2e     # deterministic Playwright Chromium suite
@@ -45,7 +45,7 @@ apps/desktop ───────────> packages/api
 ```
 
 - `packages/api`: browser-safe Zod schemas and inferred protocol types.
-- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, deterministic fake, and SQLite metadata.
+- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, and SQLite metadata.
 - `apps/web`: responsive Svelte 5/Tailwind 4 client, name-first project picker, bounded nested task previews, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
@@ -63,19 +63,19 @@ Project-local Pi resources are loaded only when Pi has a saved trust decision or
 
 Completed assistant Markdown is parsed as GFM with raw HTML escaped, remote images disabled, DOM sanitization, and an explicit `http:`, `https:`, and `mailto:` link allowlist. Tool output, bodies, WebSocket messages, and replay history are bounded. Mutations require a random per-process CSRF header; cross-site origins, cross-site fetches, and unapproved Host values are rejected. There is no CORS, shell endpoint, telemetry, analytics, public share, credential form, or transcript database.
 
-## Optional real-Pi smoke check
+## Optional Pi SDK smoke check
 
-The default suite uses the fake adapter. This inspection sends no model request:
+This inspection uses the Pi SDK but sends no model request:
 
 ```sh
 pnpm build
-pnpm smoke:real -- /absolute/project/path
+pnpm smoke:pi -- /absolute/project/path
 ```
 
 An explicitly opt-in paid turn is available with `--prompt`:
 
 ```sh
-pnpm smoke:real -- /absolute/project/path --prompt "Reply with OK"
+pnpm smoke:pi -- /absolute/project/path --prompt "Reply with OK"
 ```
 
 ## Optional Tailscale Serve (not automated or verified)

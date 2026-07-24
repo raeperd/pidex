@@ -119,7 +119,7 @@ pidex/
 │   ├── web/                   # Svelte/Vite UI used by Electron and mobile browsers
 │   │   └── src/lib/client/    # fetch/WebSocket, reconnect, snapshots, action IDs
 │   └── server/                # Child-process HTTP/WS host, Pi, SQLite, auth, Tailscale
-│       └── src/pi/            # Matched-SDK adapter and deterministic test fake
+│       └── src/pi/            # Matched-SDK adapter
 ├── packages/
 │   └── api/                   # Browser-safe Zod schemas, DTOs, protocol version
 ├── tests/
@@ -147,7 +147,7 @@ Electron has a runtime supervision relationship, not a server-code import:
 apps/desktop ──spawns and supervises──> apps/server executable
 ```
 
-`packages/api` must remain browser-safe and contain schemas and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Its Pi adapter stays behind an internal interface, while the deterministic fake is test-only. The web connection runtime stays under `apps/web/src/lib/client`.
+`packages/api` must remain browser-safe and contain schemas and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Pi SDK integration remains internal to the server. The web connection runtime stays under `apps/web/src/lib/client`.
 
 This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`, or persistence packages later only if they gain a second consumer or need independent testing, ownership, or versioning that cannot be maintained cleanly in their app.
 

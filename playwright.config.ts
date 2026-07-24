@@ -20,8 +20,6 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       PORT: String(e2ePort),
-      PIDEX_ADAPTER: "fake",
-      PIDEX_FAKE_SEED_SESSIONS: "12",
       PIDEX_PROJECT_ROOTS: process.cwd(),
       WORKSPACE_ROOTS: process.cwd(),
       PIDEX_STATE_DIR: path.join(os.tmpdir(), `pidex-e2e-${process.pid}`),

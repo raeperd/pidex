@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 2 as const;
+export const PROTOCOL_VERSION = 3;
 export const idSchema = z
   .string()
   .min(8)
@@ -73,13 +73,11 @@ export const projectCandidateSchema = z.object({
 });
 export const healthSchema = z.object({
   ok: z.literal(true),
-  adapter: z.enum(["real", "fake"]),
   protocolVersion: z.literal(PROTOCOL_VERSION),
 });
 export const bootstrapSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   csrfToken: z.string().min(32),
-  adapter: z.enum(["real", "fake"]),
   piVersion: z.string().max(100),
   recentWorkspaces: z.array(recentWorkspaceSchema),
   projectCandidates: z.array(projectCandidateSchema).max(200),

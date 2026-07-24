@@ -13,14 +13,15 @@ import type {
   Workspace,
 } from "@pidex/api";
 import type { WebSocket } from "ws";
-import type { AdapterEvent, AdapterSession, AdapterSessionInfo, PiAdapter } from "./adapter.js";
+import type { AdapterEvent, AdapterSession, AdapterSessionInfo } from "./adapter.js";
 import type { MetadataStore } from "./metadata.js";
+import type { PiSdk } from "./pi-sdk.js";
 import { safeError } from "./security.js";
 
 interface WorkspaceRecord {
   id: string;
   path: string;
-  info: Awaited<ReturnType<PiAdapter["inspectWorkspace"]>>;
+  info: Awaited<ReturnType<PiSdk["inspectWorkspace"]>>;
 }
 interface ToolResource {
   id: string;
@@ -77,7 +78,7 @@ export class ChatManager {
   private owners = new Map<string, string>();
 
   constructor(
-    readonly adapter: PiAdapter,
+    readonly pi: PiSdk,
     private readonly metadata: MetadataStore,
   ) {}
 
@@ -104,7 +105,7 @@ export class ChatManager {
   }
 
   async openWorkspace(id: string, canonicalPath: string): Promise<Workspace> {
-    const info = await this.adapter.inspectWorkspace(canonicalPath);
+    const info = await this.pi.inspectWorkspace(canonicalPath);
     const record = { id, path: canonicalPath, info };
     this.workspaces.set(id, record);
     const sessions = info.sessions.map((session) => this.publicSession(id, session));
@@ -173,9 +174,9 @@ export class ChatManager {
 
   async create(workspaceId: string) {
     const ws = this.workspace(workspaceId);
-    const session = await this.adapter.createSession(ws.path, "read-only");
+    const session = await this.pi.createSession(ws.path, "read-only");
     const sessionKey = nativeSessionKey(session);
-    const fresh = await this.adapter.inspectWorkspace(ws.path);
+    const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
     const listed = fresh.sessions.find((info) => nativeSessionKey(info) === sessionKey);
     return this.attach(
@@ -187,7 +188,7 @@ export class ChatManager {
 
   async resume(workspaceId: string, opaque: string) {
     const ws = this.workspace(workspaceId);
-    const fresh = await this.adapter.inspectWorkspace(ws.path);
+    const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
     const mapped = this.sessions.get(opaque);
     if (!mapped || mapped.workspaceId !== workspaceId)
@@ -198,7 +199,7 @@ export class ChatManager {
     if (owner) return this.chat(owner);
     return this.attach(
       workspaceId,
-      await this.adapter.resumeSession(ws.path, listed.nativePath),
+      await this.pi.resumeSession(ws.path, listed.nativePath),
       opaque,
     );
   }
@@ -322,8 +323,8 @@ export class ChatManager {
       chat.followUp = event.followUp;
       this.broadcast(chat, { type: "queue", steering: event.steering, followUp: event.followUp });
     } else if (event.type === "notice") {
-      const item = {
-        type: "notice" as const,
+      const item: Extract<TranscriptItem, { type: "notice" }> = {
+        type: "notice",
         id: randomUUID().replaceAll("-", ""),
         level: event.level,
         text: event.text,

@@ -53,7 +53,7 @@ Use Node.js 24 LTS when available; hard-require at least the version declared by
 
 Do not enable raw HTML in Markdown and do not use `dangerouslySetInnerHTML`; without raw HTML there is no HTML string for DOMPurify to sanitize. If the installed renderer forces an HTML-string path, sanitize it with DOMPurify before insertion, but prefer the AST-to-React path above. Apply an explicit URL policy: allow only safe `http:`, `https:`, and `mailto:` links; reject executable/unknown schemes; disable remote images by default.
 
-Keep Pi integration behind a small typed adapter that can be replaced by a fake in tests. Keep server, shared browser-safe protocol types, and UI code separate.
+Keep Pi SDK integration inside the server. Keep server, shared browser-safe protocol types, and UI code separate.
 
 Provide and verify:
 
@@ -69,9 +69,9 @@ Use Vite's development proxy for `/api` so development stays same-origin. `npm s
 BUILD ORDER
 
 1. Finish discovery/version matching and write a short implementation checklist.
-2. Define shared protocol schemas and the Pi adapter interface, then build a fake adapter.
-3. Make one vertical slice work end-to-end with the fake: open workspace, create chat, send, SSE stream, settle, reconnect, resume.
-4. Add the real matched Pi adapter and remaining controls; keep all UI/API tests on the fake.
+2. Define shared protocol schemas, then connect the matched Pi SDK.
+3. Make one vertical slice work end-to-end: open workspace, create chat, send, SSE stream, settle, reconnect, resume.
+4. Add the remaining Pi session controls.
 5. Add security, responsive polish, production service, and documentation; run the complete verification suite after every material fix. Do not replace required behavior with TODOs.
 
 PI INTEGRATION
@@ -239,7 +239,7 @@ Do not implement profiles, voice/transcription, `/btw`, side agents, browser edi
 
 TEST WITHOUT SPENDING MODEL TOKENS
 
-Create a deterministic fake Pi adapter. Unit/integration tests must cover workspace-root containment including symlinks and path-prefix traps, opaque session validation, single session ownership, active-branch restoration, event normalization, bounded tool previews, streamed/resumed reconciliation without duplicates, stale-event rejection, queue/abort/settled behavior, SSE reconnect/replay/resnapshot, extension dialog round trips, local and Tailscale-proxied CSRF/origin checks, malicious Markdown/link schemes, request limits, and secret redaction.
+Use the real Pi SDK for integration checks. Default automated checks must remain non-inference where possible; prompt-dependent verification must be an explicit opt-in real-provider smoke so it cannot spend model tokens accidentally.
 
 Install only the Playwright Chromium browser needed for the suite. Playwright must cover desktop new/send/stream/tool/stop, resume, mobile drawer/composer/stream, reconnect recovery, and basic keyboard focus. Default tests must never send a paid model request. Add only an opt-in real-Pi smoke checklist/script that never runs by default.
 
@@ -251,7 +251,7 @@ Do not hand off until:
 2. the production app starts on literal host `127.0.0.1` and the validated effective port (`4783` by default), reports that URL, fails clearly when the port is occupied, and `/api/health` works;
 3. desktop and mobile layouts are manually checked;
 4. native Pi sessions can be listed, created, resumed, and survive server restart;
-5. stream, tools, steer, follow-up, stop, retry/compaction, settled state, and extension dialogs work with the fake adapter;
+5. stream, tools, steer, follow-up, stop, retry/compaction, settled state, and extension dialogs work through the Pi SDK;
 6. reconnect creates no duplicates and this server never creates two live writers for one session file;
 7. built assets and sampled API responses contain no credential values or raw environment data;
 8. README documents install/dev/test/build/start, architecture, Pi paths/state, trust, no-sandbox risk, troubleshooting, Tailscale Serve, the optional OS-native autostart choice, and intentionally omitted features.

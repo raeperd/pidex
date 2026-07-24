@@ -23,10 +23,9 @@ import {
 import type { Bootstrap, ExtensionDialog, Health } from "@pidex/api";
 import type { ZodType } from "zod";
 import { ChatManager } from "./chat-manager.js";
-import { FakePiAdapter } from "./fake-adapter.js";
 import { ActionProtocolError, MetadataStore, requestDigest } from "./metadata.js";
 import { discoverProjectCandidates } from "./project-catalog.js";
-import { RealPiAdapter } from "./real-adapter.js";
+import { PiSdk } from "./pi-sdk.js";
 import {
   allowedRoots,
   canonicalWorkspace,
@@ -112,8 +111,8 @@ export async function createPidexServer() {
   const csrf = randomBytes(32).toString("base64url");
   const roots = await allowedRoots();
   const metadata = new MetadataStore();
-  const adapter = process.env.PIDEX_ADAPTER === "fake" ? new FakePiAdapter() : new RealPiAdapter();
-  const manager = new ChatManager(adapter, metadata);
+  const pi = new PiSdk();
+  const manager = new ChatManager(pi, metadata);
   const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
     securityHeaders(res);
@@ -124,7 +123,6 @@ export async function createPidexServer() {
       if (req.method === "GET" && route === "/api/health") {
         const health: Health = {
           ok: true,
-          adapter: adapter.name,
           protocolVersion: PROTOCOL_VERSION,
         };
         return json(res, 200, health);
@@ -133,8 +131,7 @@ export async function createPidexServer() {
         const bootstrap: Bootstrap = {
           protocolVersion: PROTOCOL_VERSION,
           csrfToken: csrf,
-          adapter: adapter.name,
-          piVersion: adapter.name === "real" ? "0.80.10" : "fake",
+          piVersion: "0.80.10",
           recentWorkspaces: metadata.recent(),
           projectCandidates: await discoverProjectCandidates(roots),
           warning: "Pi runs with your host user permissions and has no built-in sandbox.",
@@ -157,7 +154,7 @@ export async function createPidexServer() {
       if (req.method === "POST" && match?.[1]) {
         const body = await parse(req, trustWorkspaceSchema);
         const record = manager.workspace(match[1]);
-        await adapter.setWorkspaceTrust(record.path, body.trusted);
+        await pi.setWorkspaceTrust(record.path, body.trusted);
         return json(res, 200, await manager.openWorkspace(record.id, record.path));
       }
       if (req.method === "POST" && route === "/api/chats") {
