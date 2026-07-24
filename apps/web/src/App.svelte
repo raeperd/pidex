@@ -26,7 +26,11 @@
   let projectPath = "";
   let projectQuery = "";
   let draft = "";
+  let newChatModel = "";
+  let newChatThinkingLevel: ChatSnapshot["thinkingLevel"] = "medium";
+  let newChatToolMode: ChatSnapshot["toolMode"] = "read-only";
   let search = "";
+  let searchOpen = false;
   let connection: ConnectionState = "disconnected";
   let error = "";
   let bootstrapError = "";
@@ -210,6 +214,7 @@
         projectPath = loaded.path;
         localStorage.setItem("pidex:last-project", loaded.path);
         snapshot = undefined;
+        draft = "";
         if (options.closeDrawer ?? true) drawerOpen = false;
       }
       return loaded;
@@ -311,8 +316,30 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  async function newChat(target = workspace) {
+  function selectedNewChatModel() {
+    if (workspace?.models.some((model) => model.id === newChatModel)) return newChatModel;
+    return workspace?.models[0]?.id ?? "";
+  }
+  function prepareNewChat(target = workspace) {
     if (!target || chatLoading) return;
+    persistDraft();
+    chatConnection.close();
+    workspace = target;
+    projectPath = target.path;
+    rememberWorkspace(target);
+    localStorage.setItem("pidex:last-project", target.path);
+    snapshot = undefined;
+    draft = "";
+    drawerOpen = false;
+    void tick().then(() => promptInput?.focus());
+  }
+  async function newChat(
+    target = workspace,
+    initialDraft = "",
+    configuration: Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">> = {},
+  ) {
+    if (!target || chatLoading) return false;
+    let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
@@ -320,10 +347,19 @@
       projectPath = target.path;
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
-      snapshot = await api.createChat(target.id);
-      await afterChat();
+      created = await api.createChat(target.id);
+      snapshot = created;
+      if (configuration.model || configuration.thinkingLevel || configuration.toolMode)
+        snapshot = await api.configure(snapshot.chatId, configuration, snapshot.revision);
+      await afterChat(initialDraft, true);
+      return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not create chat";
+      if (created) {
+        snapshot = created;
+        await afterChat(initialDraft, true);
+      }
+      return false;
     } finally {
       chatLoading = false;
     }
@@ -332,7 +368,7 @@
     const target =
       workspaceFor(project.id) ??
       (await openProject(project.path, { activate: false, moveToTop: false }));
-    if (target) await newChat(target);
+    if (target) prepareNewChat(target);
   }
   async function resume(session: SessionSummary, target: Workspace) {
     if (chatLoading) return;
@@ -354,9 +390,10 @@
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
   }
-  async function afterChat() {
+  async function afterChat(initialDraft = "", focusComposer = false) {
     drawerOpen = false;
-    draft = localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) ?? "";
+    draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) || "";
+    if (initialDraft) persistDraft();
     restorePendingPrompt();
     if (snapshot) chatConnection.connect(snapshot.chatId);
     await tick();
@@ -366,6 +403,7 @@
     }
     resizePrompt();
     scrollLatest();
+    if (focusComposer) promptInput?.focus();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
     if (!snapshot) return;
@@ -444,6 +482,20 @@
     if (!snapshot || !draft.trim() || connection !== "connected") return;
     const text = draft.trim();
     const mode = active() ? delivery : "normal";
+    await submitPrompt(text, mode);
+  }
+  async function startChat() {
+    if (!workspace || !draft.trim() || !workspace.models.length || chatLoading) return;
+    const text = draft.trim();
+    const created = await newChat(workspace, text, {
+      model: selectedNewChatModel(),
+      thinkingLevel: newChatThinkingLevel,
+      toolMode: newChatToolMode,
+    });
+    if (created && snapshot) await submitPrompt(text, "normal");
+  }
+  async function submitPrompt(text: string, mode: "normal" | "steer" | "follow-up") {
+    if (!snapshot) return;
     const matching =
       pendingPrompt?.text === text && pendingPrompt.delivery === mode ? pendingPrompt : undefined;
     pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: mode };
@@ -652,7 +704,8 @@
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      void send();
+      if (snapshot) void send();
+      else void startChat();
     }
   }
   function onScroll() {
@@ -666,10 +719,19 @@
     }
   }
   async function focusSearch() {
+    searchOpen = true;
     if (matchMedia("(max-width: 900px)").matches) drawerOpen = true;
     await tick();
     searchInput?.focus();
     searchInput?.select();
+  }
+  function toggleSearch() {
+    if (!searchOpen) {
+      void focusSearch();
+      return;
+    }
+    search = "";
+    searchOpen = false;
   }
   function globalKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
@@ -679,15 +741,17 @@
       return;
     }
     if (event.key !== "Escape") return;
+    if (searchOpen) {
+      if (search) search = "";
+      else searchOpen = false;
+      return;
+    }
     if (drawerOpen) {
       drawerOpen = false;
       (document.querySelector(".menu-button") as HTMLElement)?.focus();
       return;
     }
-    if (document.activeElement === searchInput) {
-      if (search) search = "";
-      else promptInput?.focus();
-    }
+    if (document.activeElement === searchInput) promptInput?.focus();
   }
   function wentOffline() {
     chatConnection.disconnect();
@@ -721,13 +785,23 @@
   <aside aria-label="Sessions">
     <div class="sidebar-titlebar">
       <div class="brand">
-        <div class="mark">π</div>
         <strong>Pidex</strong>
         <span>LOCAL</span>
       </div>
       <button
+        class:active={searchOpen}
         class="square-button"
-        onclick={() => newChat()}
+        onclick={toggleSearch}
+        aria-label={searchOpen ? "Close search" : "Search projects and threads"}
+        aria-expanded={searchOpen}
+        aria-keyshortcuts="Meta+K Control+K"
+        title={searchOpen ? "Close search" : "Search (⌘K)"}
+      >
+        <Icon name={searchOpen ? "x" : "search"} />
+      </button>
+      <button
+        class="square-button"
+        onclick={() => prepareNewChat()}
         disabled={!workspace || chatLoading}
         aria-label="New chat"
         title="New chat"
@@ -736,17 +810,17 @@
       </button>
     </div>
 
-    <label class="search">
-      <Icon name="search" />
-      <input
-        bind:this={searchInput}
-        bind:value={search}
-        aria-label="Search projects and threads"
-        aria-keyshortcuts="Meta+K Control+K"
-        placeholder="Search projects and threads"
-      />
-      <kbd aria-hidden="true">⌘K</kbd>
-    </label>
+    {#if searchOpen}
+      <label class="search">
+        <Icon name="search" />
+        <input
+          bind:this={searchInput}
+          bind:value={search}
+          aria-label="Search projects and threads"
+          placeholder="Search projects and threads"
+        />
+      </label>
+    {/if}
 
     <section class="project-browser">
       <div class="section-label">
@@ -972,18 +1046,63 @@
           <button class="retry-button hero-add" onclick={openProjectPicker}>Add a project</button>
         </div>
       {:else if !snapshot}
-        <div class="empty workspace-empty">
-          <div class="hero-project">{workspace.name.slice(0, 1).toUpperCase()}</div>
-          <p class="eyebrow">{workspace.name}</p>
-          <h1>What should Pi work on?</h1>
-          <p>Start a fresh thread or pick up a native Pi session from the sidebar.</p>
-          <button
-            class="hero-composer"
-            onclick={() => newChat()}
-            disabled={!workspace.models.length || chatLoading}
-          >
-            <span>Start a new chat</span><span class="hero-send"><Icon name="send" /></span>
-          </button>
+        <div class="workspace-start">
+          <div class="workspace-start-content">
+            <h1>What should we build in <strong>{workspace.name}</strong>?</h1>
+          </div>
+          <div class="start-composer-wrap">
+            <div class="composer-frame">
+              <textarea
+                bind:this={promptInput}
+                bind:value={draft}
+                oninput={draftInput}
+                onkeydown={keydown}
+                rows="2"
+                placeholder={`Ask Pi to work on ${workspace.name}…`}
+                aria-label="Prompt"></textarea>
+              <div class="composer-toolbar">
+                <div class="composer-controls">
+                  <select
+                    aria-label="Model"
+                    value={selectedNewChatModel()}
+                    onchange={(event) => (newChatModel = event.currentTarget.value)}
+                    disabled={!workspace.models.length || chatLoading}
+                  >
+                    {#each workspace.models as model}<option value={model.id}>{model.name}</option
+                      >{/each}
+                  </select>
+                  <span class="control-divider"></span>
+                  <select
+                    aria-label="Thinking level"
+                    bind:value={newChatThinkingLevel}
+                    disabled={chatLoading}
+                  >
+                    {#each ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as level}<option
+                        value={level}>{level} thinking</option
+                      >{/each}
+                  </select>
+                  <span class="control-divider"></span>
+                  <select
+                    aria-label="Tool access"
+                    bind:value={newChatToolMode}
+                    disabled={chatLoading}
+                  >
+                    <option value="read-only">Read only</option><option value="full"
+                      >Full access</option
+                    >
+                  </select>
+                </div>
+                <div class="composer-actions">
+                  <button
+                    class="send"
+                    onclick={startChat}
+                    disabled={!draft.trim() || !workspace.models.length || chatLoading}
+                    aria-label="Send"><Icon name="send" /></button
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       {:else}
         <div class="messages">
