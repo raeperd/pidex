@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@pidex/api": "workspace:*",
     "electron": "41.5.0"
   },
   "devDependencies": {
