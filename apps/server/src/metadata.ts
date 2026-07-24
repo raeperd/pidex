@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -59,17 +59,10 @@ export class MetadataStore {
     const dir = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const databasePath = path.join(dir, "pidex.sqlite");
-    const migrationBackup = path.join(dir, "pidex.sqlite.pre-continuity-v1.backup");
-    if (existsSync(databasePath) && !existsSync(migrationBackup))
-      copyFileSync(databasePath, migrationBackup, 0);
     this.db = new DatabaseSync(databasePath);
     this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at TEXT NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS workspaces (
         id TEXT PRIMARY KEY,
         path TEXT NOT NULL UNIQUE,
@@ -97,7 +90,6 @@ export class MetadataStore {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS actions_session_idx ON actions(session_key, created_at DESC);
-      INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'));
     `);
 
     // A process death cannot prove whether Pi completed after the last durable update.
