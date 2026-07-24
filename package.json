@@ -14,7 +14,7 @@
     "smoke:real": "node scripts/real-pi-smoke.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm --filter @pidex/api build && pnpm -r --filter=!@pidex/api --if-present typecheck"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
