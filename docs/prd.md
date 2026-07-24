@@ -141,7 +141,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - A small Pidex metadata store holds project and session references, host identity, client and pairing verifiers, prompt-action records, Pidex settings, and security events. It does not duplicate transcript bodies.
 - The host is its only writer. An accepted prompt record is crash-safe before the Pi call or acceptance response.
 - Startup validates project paths and Pi session references. Missing, escaped, unreadable, or malformed entries remain unavailable with recovery guidance; Pidex does not silently delete or replace them.
-- Updates use forward-only metadata migrations from a pre-migration backup. Failure restores the backup, leaves Pi JSONL untouched, and prevents startup against partial state.
+- The prototype initializes its current metadata schema directly. Breaking metadata compatibility is acceptable before users, and Pi JSONL remains independent of Pidex metadata.
 
 ### Packaging and background behavior
 
@@ -156,7 +156,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 3. Add durable action IDs, authoritative snapshots, crash recovery, and background lifecycle.
 4. Complete the shared session UI, response copying, and mobile offline behavior.
 5. Add pairing, per-device credentials, revocation, reconnect, and Tailscale Serve setup and cleanup.
-6. Complete packaged macOS, migration, resume, security, and release testing.
+6. Complete packaged macOS, restart, resume, security, and release testing.
 
 ## Testing Decisions
 
@@ -168,7 +168,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - Prompt-delivery tests disconnect or lose the response before submission, before and after durable acceptance, during streaming, during Stop, and after completion. Retrying the same client action ID must return the recorded outcome and produce at most one accepted Pi prompt; an unresolved action blocks resubmission until an authoritative snapshot resolves it.
 - Continuity tests connect desktop and mobile clients to one host, disconnect either client at each run phase, allow Pi to continue, and reconnect after missed events. Both clients must converge on the same bounded transcript, run status, effective model and thinking state, and revision; locally stored drafts remain drafts and are never submitted automatically.
 - Crash tests terminate the host before and after durable action acceptance and while Pi is active, then restart through the production recovery path. Tests prove that accepted actions are not blindly repeated, interrupted work is not reported as completed, Pi JSONL and Pidex metadata remain recoverable, and the session does not accept new work until ambiguous state is resolved.
-- Persistence tests terminate the host at externally meaningful project, session, pairing, accepted-action, settings, and migration boundaries. Restart exposes only complete durable outcomes, preserves unavailable projects and malformed or missing-session records with recovery guidance, never silently deletes them, and leaves the pre-migration backup recoverable when migration does not complete.
+- Persistence tests terminate the host at externally meaningful project, session, pairing, accepted-action, and settings boundaries. Restart exposes only complete durable outcomes and preserves unavailable projects and malformed or missing-session records with recovery guidance rather than silently deleting them.
 - Authentication tests cover remote access disabled by default, local desktop bootstrap origin restrictions, short-lived pairing grants that work once through the QR code or link, independently issued and revoked device credentials, one-time WebSocket ticket replay, origin mismatch, rate-limited authentication attempts, and active-connection revocation. Canary secrets placed in test credentials must never appear in HTTP/WebSocket payloads, browser-visible errors, or normal and security logs.
 - Tailscale adapter tests use recorded CLI status and Serve outputs for a missing CLI, signed-out state, malformed output, missing MagicDNS, timeouts, permission failures, conflicting configuration, successful ownership, failed endpoint verification, wrong host identity, and cleanup whose ownership cannot be proven. Observable results must preserve unrelated Serve routes, keep the host loopback-only, disable application access when cleanup is unsafe, and provide actionable remediation.
 - An opt-in real-Tailscale smoke runs only on a prepared Tailnet. It records the initial Serve state, enables the Pidex-owned route, verifies the expected host descriptor at the final MagicDNS HTTPS origin, pairs a fresh browser profile, exercises authenticated HTTP and WebSocket access, revokes that client, disables remote access, and proves that only the Pidex-owned route changed.
@@ -235,7 +235,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - From either client, one action copies the full text of a completed assistant response without requiring manual text selection.
 - Pidex resolves Pi models, credentials, settings, context files, skills, and supported resources through the pinned Pi SDK. Missing credentials and ignored or unsupported resources produce actionable diagnostics, while secret values appear in neither client payloads nor normal logs.
 - Standalone Pi session files remain byte-identical, and every Pidex-managed Pi session remains under Pidex-owned application data. Missing or malformed Pidex sessions remain visible as unavailable records rather than being deleted.
-- Restart and update recovery preserve Pi JSONL history and Pidex metadata. Metadata publication is atomic, and each forward-only metadata migration creates a pre-migration backup.
+- Restart recovery preserves Pi JSONL history and committed Pidex metadata. Prototype database compatibility across schema changes is not required.
 - Desktop and mobile use the same versioned host protocol. After each accepted command or reconnect, both clients converge on the same host-authored transcript, run state, model and thinking state, and session revision.
 - Losing either client connection does not stop Pi. Reconnecting after missed events yields a proven gap-free replay or a replacement snapshot before the prompt input can submit another prompt.
 - The host durably records prompt acceptance before invoking Pi. Replaying a client action ID returns its recorded outcome and never accepts a second prompt; after response loss, the client resolves the action from the host before offering resend.
