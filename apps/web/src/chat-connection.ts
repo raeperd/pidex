@@ -78,6 +78,7 @@ export class ChatConnection {
   }
 
   private receive(socket: WebSocket, data: unknown) {
+    if (this.socket !== socket) return;
     const raw: unknown = JSON.parse(String(data));
     if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "ping") {
       socket.send(JSON.stringify({ type: "pong" }));
@@ -85,7 +86,7 @@ export class ChatConnection {
     }
 
     const parsed = serverEventSchema.safeParse(raw);
-    if (!parsed.success) return;
+    if (!parsed.success || parsed.data.chatId !== this.chatId) return;
     this.lastEventId = Math.max(this.lastEventId, parsed.data.eventId);
     socket.send(JSON.stringify({ type: "ack", eventId: parsed.data.eventId }));
     this.handlers.onEvent(parsed.data);
