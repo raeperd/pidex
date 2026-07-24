@@ -6,13 +6,13 @@ class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
 
   readonly sent: string[] = [];
-  private readonly listeners = new Map<string, Array<(event: { data?: unknown }) => void>>();
+  private readonly listeners = new Map<string, Array<(event: FakeSocketEvent) => void>>();
 
   constructor(readonly url: string) {
     FakeWebSocket.instances.push(this);
   }
 
-  addEventListener(type: string, listener: (event: { data?: unknown }) => void) {
+  addEventListener(type: string, listener: (event: FakeSocketEvent) => void) {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
@@ -26,9 +26,15 @@ class FakeWebSocket {
     this.emit("close");
   }
 
-  emit(type: string, event: { data?: unknown } = {}) {
+  emit(type: string, event: FakeSocketEvent = {}) {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
+}
+
+interface FakeSocketEvent {
+  data?: unknown;
+  code?: number;
+  reason?: string;
 }
 
 const queueEvent = (chatId: string, eventId: number): ServerEvent => ({
@@ -48,12 +54,17 @@ describe("ChatConnection", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
   it("ignores queued events from a socket replaced by another chat", () => {
     const onEvent = vi.fn();
-    const connection = new ChatConnection({ onEvent, onStateChange: vi.fn() });
+    const connection = new ChatConnection({
+      onEvent,
+      onInvalidChat: vi.fn(),
+      onStateChange: vi.fn(),
+    });
     connection.connect("old-chat-123");
     const oldSocket = FakeWebSocket.instances[0]!;
 
@@ -66,7 +77,11 @@ describe("ChatConnection", () => {
 
   it("ignores an event for another chat on the current socket", () => {
     const onEvent = vi.fn();
-    const connection = new ChatConnection({ onEvent, onStateChange: vi.fn() });
+    const connection = new ChatConnection({
+      onEvent,
+      onInvalidChat: vi.fn(),
+      onStateChange: vi.fn(),
+    });
     connection.connect("current-chat-123");
     const socket = FakeWebSocket.instances[0]!;
 
@@ -74,5 +89,25 @@ describe("ChatConnection", () => {
 
     expect(onEvent).not.toHaveBeenCalled();
     expect(socket.sent).toEqual([]);
+  });
+
+  it("stops retrying and invalidates the chat after a policy close", () => {
+    vi.useFakeTimers();
+    const onInvalidChat = vi.fn();
+    const onStateChange = vi.fn();
+    const connection = new ChatConnection({
+      onEvent: vi.fn(),
+      onStateChange,
+      onInvalidChat,
+    });
+    connection.connect("expired-chat-123");
+    const socket = FakeWebSocket.instances[0]!;
+
+    socket.emit("close", { code: 1008, reason: "Chat not found" });
+    vi.advanceTimersByTime(1_000);
+
+    expect(onStateChange).toHaveBeenLastCalledWith("disconnected");
+    expect(onInvalidChat).toHaveBeenCalledOnce();
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });

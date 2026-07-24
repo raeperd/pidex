@@ -4,6 +4,7 @@ export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
 interface ChatConnectionHandlers {
   onEvent: (event: ServerEvent) => void;
+  onInvalidChat: () => void;
   onStateChange: (state: ConnectionState) => void;
 }
 
@@ -66,8 +67,16 @@ export class ChatConnection {
     });
     socket.addEventListener("message", (message) => this.receive(socket, message.data));
     socket.addEventListener("error", () => socket.close());
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket || !this.chatId) return;
+      if (event.code === 1008) {
+        this.chatId = undefined;
+        this.lastEventId = 0;
+        this.socket = undefined;
+        this.handlers.onStateChange("disconnected");
+        this.handlers.onInvalidChat();
+        return;
+      }
       if (!navigator.onLine) {
         this.handlers.onStateChange("disconnected");
         return;
