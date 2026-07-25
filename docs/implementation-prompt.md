@@ -109,7 +109,7 @@ Use the technologies fixed by `docs/architecture.md` and the existing manifests:
 - Electron 41 with a sandboxed, context-isolated renderer;
 - Svelte 5, Vite, and Tailwind CSS 4;
 - Zod 4 for browser-safe API and persisted-data validation;
-- Node's built-in HTTP and `node:sqlite` modules;
+- Node's built-in HTTP and `node:sqlite` modules, with Drizzle ORM for typed database access;
 - `ws` on the server and native `WebSocket` in the browser;
 - Pi's exact-matched Node SDK;
 - Vitest and Playwright Chromium for verification.

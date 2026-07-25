@@ -61,4 +61,4 @@ Browser storage  unsent drafts and local UI preferences
 - Electron 41 with a supervised Node child process.
 - Svelte 5, Vite, and Tailwind CSS 4.
 - Zod 4 for API and persisted-data validation.
-- Node HTTP, `ws`, and `node:sqlite` in `apps/server`.
+- Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `apps/server`.

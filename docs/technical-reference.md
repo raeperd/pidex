@@ -21,7 +21,7 @@ These are design references, not source dependencies. Pidex will not import thei
 | Desktop                 | Electron 41.5.0, electron-builder 26.15.6, context-isolated preload                                                                 | Electron 41.2.0, electron-builder 26.8.1, context-isolated preload                         | Electron 41 is demonstrated by both; exact-pin a compatible patch and preserve the narrow preload boundary.                     |
 | Web UI                  | React/React DOM 19.2.6, Vite-based DOM app, Tailwind 4, TanStack Router, Zustand                                                    | React 19.1, Expo 54, React Native 0.81.5, React Native Web 0.21, Expo Router, Zustand      | Keep the DOM/Vite/Tailwind lesson, but implement it with Svelte 5. Expo's value is native reuse, which Pidex does not need.     |
 | Transport and contracts | Node HTTP/WebSocket host, Effect schemas and runtime, browser-safe contracts and connection runtime                                 | Express, `ws`, Zod 4.4.3, separate protocol and client packages                            | Use built-in Node HTTP, `ws`, and Zod; keep reconnect and snapshot logic out of Svelte components.                              |
-| Persistence             | SQLite, including a `node:sqlite` adapter, plus migrations                                                                          | Atomic JSON replacement for several small stores                                           | Pidex's durable prompt acceptance and revisions justify `node:sqlite`; initialize the current prototype schema directly.        |
+| Persistence             | SQLite, including a `node:sqlite` adapter, plus migrations                                                                          | Atomic JSON replacement for several small stores                                           | Pidex's durable prompt acceptance and revisions justify Drizzle ORM over `node:sqlite`; initialize the current schema directly. |
 | Broader dependencies    | Effect, Clerk, provider SDKs, SSH/Tailscale packages, Git/terminal/diff tooling, native Expo app                                    | Expo/native modules, daemon/CLI/relay, multiple agent SDKs, ACP, Git/terminal/file tooling | Do not carry these dependency families into the Pi-only desktop/mobile-web scope.                                               |
 
 ## What to reuse and what to leave behind
@@ -84,7 +84,7 @@ Pidex should copy the separation, not T3 Code's workspace count or extra orchest
 - Electron 41, exact-pinned to the latest compatible patch when scaffolding begins.
 - `electron-builder` for the macOS artifact and `electron-updater` only for the packaged update flow.
 - Electron main owns child-process supervision, application lifecycle, native dialogs, and the narrow preload bridge. The server process owns the host, Pi, persistence, authentication, pairing, and Tailscale.
-- Node's built-in `http`, `crypto`, filesystem, and `node:sqlite` modules provide the HTTP server, credentials and digests, file operations, and transactional metadata store. This avoids Express and a native SQLite add-on.
+- Node's built-in `http`, `crypto`, filesystem, and `node:sqlite` modules provide the HTTP server, credentials and digests, file operations, and SQLite driver. Drizzle provides typed queries and transactions without adding a native SQLite package.
 - `ws` provides the host WebSocket server. The browser uses the native `WebSocket` API.
 - `qrcode` creates pairing QR payloads. Pidex invokes the installed Tailscale CLI through Node child-process APIs; it does not add a Tailscale SDK.
 - The Pi SDK package and version are resolved from the installed Pi CLI during implementation discovery and then saved exactly. No generic provider SDK is included.
@@ -105,7 +105,7 @@ The same production web build is served by the loopback host to Electron and by 
 ### Contracts, persistence, and tests
 
 - Zod 4 schemas are the source for runtime validation and inferred TypeScript protocol types. Network input is parsed at the host boundary and untrusted persisted metadata is parsed when loaded.
-- `node:sqlite` stores Pidex metadata, durable action IDs, revisions, pairing verifiers, and bounded security events. Pi JSONL remains the only transcript store.
+- Drizzle ORM over `node:sqlite` stores Pidex metadata, durable action IDs, revisions, pairing verifiers, and bounded security events. Pi JSONL remains the only transcript store.
 - Vitest covers pure units, protocol parsing, host services, persistence, the client connection state machine, and Svelte behavior.
 - Svelte Testing Library covers focused browser interactions without asserting component internals.
 - Playwright Chromium covers the built responsive web client and packaged Electron flows. Host contract tests use real HTTP and WebSocket transports with the deterministic Pi adapter described in the PRD.
@@ -155,12 +155,12 @@ This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`
 
 The first scaffold should include only dependencies needed for the first vertical slice.
 
-| Workspace      | Runtime dependencies                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts                                                      |
-| `apps/web`     | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api`                            |
-| `apps/server`  | exact-matched Pi SDK, `@pidex/api`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, SQLite, and process execution |
-| `packages/api` | `zod`                                                                                                                     |
+| Workspace      | Runtime dependencies                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts                                                                                |
+| `apps/web`     | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api`                                                      |
+| `apps/server`  | exact-matched Pi SDK, `@pidex/api`, `drizzle-orm`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, the SQLite driver, and process execution |
+| `packages/api` | `zod`                                                                                                                                               |
 
 Build and test dependencies live at the narrowest workspace that uses them. `apps/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. Root tooling may coordinate TypeScript, Playwright, Oxlint, and Oxfmt, but production packages must not depend on test runners or Electron development tooling.
 

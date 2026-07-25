@@ -65,7 +65,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - The initial workspace contains `apps/desktop`, `apps/web`, `apps/server`, and one browser-safe `packages/api` package for shared Zod schemas and inferred protocol types.
 - `apps/desktop` packages, spawns, and supervises the `apps/server` executable as a child process. The Pi adapter and web connection runtime remain internal modules until reuse justifies extracting them. There is no independently installed daemon or native mobile workspace.
 - The same Svelte/Vite production build runs in Electron and in mobile Chrome. Mobile web is not implemented with React, Expo, React Native, or React Native Web.
-- Zod validates protocol and persisted metadata boundaries, `ws` provides the server transport, and `node:sqlite` stores Pidex metadata while Pi JSONL remains the transcript source of truth.
+- Zod validates protocol and persisted metadata boundaries, `ws` provides the server transport, and Drizzle ORM over `node:sqlite` stores Pidex metadata while Pi JSONL remains the transcript source of truth.
 - Electron's renderer is sandboxed and context-isolated with Node integration disabled. The preload carries only one-time desktop bootstrap material and desktop-only capabilities; session traffic uses the authenticated host protocol.
 
 ### Application architecture
