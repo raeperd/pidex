@@ -18,6 +18,7 @@
     "zod": "4.1.12"
   },
   "devDependencies": {
+    "@orpc/client": "1.14.8",
     "@types/node": "catalog:",
     "@types/ws": "8.18.1",
     "tsx": "4.20.6",
