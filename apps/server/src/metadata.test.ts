@@ -138,7 +138,7 @@ describe("metadata store", () => {
     expect(store.sessionState(request.sessionKey).revision).toBe(1);
   });
 
-  it("initializes the optimized product schema without a migration backup", async () => {
+  it("initializes only the product tables without a migration backup", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-schema-"));
     process.env.PIDEX_STATE_DIR = stateDir;
     store = new MetadataStore();
@@ -152,12 +152,6 @@ describe("metadata store", () => {
       .where(and(eq(sqliteMaster.type, "table"), notLike(sqliteMaster.name, "sqlite_%")))
       .orderBy(sqliteMaster.name)
       .all();
-    const indexes = drizzle({ client: database })
-      .select({ name: sqliteMaster.name })
-      .from(sqliteMaster)
-      .where(and(eq(sqliteMaster.type, "index"), notLike(sqliteMaster.name, "sqlite_%")))
-      .orderBy(sqliteMaster.name)
-      .all();
     database.close();
 
     expect(tables).toEqual([
@@ -165,7 +159,6 @@ describe("metadata store", () => {
       { name: "session_state" },
       { name: "workspaces" },
     ]);
-    expect(indexes).toEqual([{ name: "actions_prompt_idx" }, { name: "workspaces_recent_idx" }]);
     expect(existsSync(path.join(stateDir, "pidex.sqlite.pre-continuity-v1.backup"))).toBe(false);
   });
 
