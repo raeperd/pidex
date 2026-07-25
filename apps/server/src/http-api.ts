@@ -65,7 +65,7 @@ export function createRpcApiRouter({ csrf, roots, metadata, pi, manager }: HttpA
         manager.snapshot(await manager.create(input.workspaceId)),
       ),
       resume: chats.resume.handler(async ({ input }) =>
-        manager.snapshot(await manager.resume(input.workspaceId, input.sessionId)),
+        manager.snapshot(await manager.resume(input.taskId)),
       ),
       get: chats.get.handler(({ input }) => manager.snapshot(manager.chat(input.chatId))),
       dispose: chats.dispose.handler(({ input }) => {

@@ -102,6 +102,36 @@ export class MetadataStore {
       .all();
   }
 
+  rememberTask(workspaceId: string, workspacePath: string, sessionKey: string): string {
+    this.db
+      .insert(tasks)
+      .values({ id: randomUUID(), workspaceId, workspacePath, sessionKey })
+      .onConflictDoNothing({ target: tasks.sessionKey })
+      .run();
+    const row = this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.sessionKey, sessionKey))
+      .get();
+    if (!row) throw new Error(`Task for ${sessionKey} was not persisted`);
+    return row.id;
+  }
+
+  task(
+    id: string,
+  ): { id: string; workspaceId: string; workspacePath: string; sessionKey: string } | undefined {
+    return this.db
+      .select({
+        id: tasks.id,
+        workspaceId: tasks.workspaceId,
+        workspacePath: tasks.workspacePath,
+        sessionKey: tasks.sessionKey,
+      })
+      .from(tasks)
+      .where(eq(tasks.id, id))
+      .get();
+  }
+
   sessionState(sessionKey: string): { revision: number; run?: RunOutcome } {
     return this.readSessionState(this.db, sessionKey);
   }
@@ -520,6 +550,13 @@ const sessionState = sqliteTable("session_state", {
   updatedAt: text("updated_at").notNull(),
 });
 
+const tasks = sqliteTable("tasks", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  workspacePath: text("workspace_path").notNull(),
+  sessionKey: text("session_key").notNull().unique(),
+});
+
 const actions = sqliteTable(
   "actions",
   {
@@ -544,6 +581,12 @@ const METADATA_SCHEMA_SQL = `
     id TEXT PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
     opened_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    workspace_path TEXT NOT NULL,
+    session_key TEXT NOT NULL UNIQUE
   );
   CREATE TABLE IF NOT EXISTS session_state (
     session_key TEXT PRIMARY KEY,

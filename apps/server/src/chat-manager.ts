@@ -17,7 +17,6 @@ import type { AdapterEvent, AdapterSession, AdapterSessionInfo } from "./adapter
 import type { MetadataStore } from "./metadata.js";
 import type { PiSdk } from "./pi-sdk.js";
 import { safeError } from "./security.js";
-import { sessionRouteId } from "./session-route-id.js";
 
 interface WorkspaceRecord {
   id: string;
@@ -39,7 +38,7 @@ const nativeSessionKey = (session: NativeSessionReference) =>
 interface ChatRecord {
   id: string;
   workspaceId: string;
-  sessionOpaqueId: string;
+  taskId: string;
   sessionKey: string;
   session: AdapterSession;
   revision: number;
@@ -74,8 +73,9 @@ export class ChatManager {
   ) {}
 
   private publicSession(workspaceId: string, info: AdapterSessionInfo): SessionSummary {
+    const workspace = this.workspace(workspaceId);
     return {
-      id: sessionRouteId(workspaceId, nativeSessionKey(info)),
+      id: this.metadata.rememberTask(workspaceId, workspace.path, nativeSessionKey(info)),
       ...(info.name ? { name: info.name } : {}),
       firstMessage: info.firstMessage,
       createdAt: info.createdAt,
@@ -113,18 +113,20 @@ export class ChatManager {
     return (await this.openWorkspace(workspaceId, ws.path)).sessions;
   }
 
-  private attach(workspaceId: string, session: AdapterSession, opaque?: string): ChatRecord {
+  private attach(workspaceId: string, session: AdapterSession, taskId?: string): ChatRecord {
     const sessionKey = nativeSessionKey(session);
     const existingId = this.owners.get(sessionKey);
     if (existingId) return this.chat(existingId);
     const persisted = this.metadata.sessionState(sessionKey);
     const runIsActive = persisted.run?.status === "accepted" || persisted.run?.status === "running";
     const id = randomUUID().replaceAll("-", "");
-    const sessionOpaqueId = opaque ?? sessionRouteId(workspaceId, sessionKey);
+    const workspace = this.workspace(workspaceId);
+    const persistedTaskId =
+      taskId ?? this.metadata.rememberTask(workspaceId, workspace.path, sessionKey);
     const chat: ChatRecord = {
       id,
       workspaceId,
-      sessionOpaqueId,
+      taskId: persistedTaskId,
       sessionKey,
       session,
       revision: persisted.revision,
@@ -154,35 +156,31 @@ export class ChatManager {
   async create(workspaceId: string) {
     const ws = this.workspace(workspaceId);
     const session = await this.pi.createSession(ws.path);
-    const sessionKey = nativeSessionKey(session);
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
-    const listed = fresh.sessions.find((info) => nativeSessionKey(info) === sessionKey);
-    return this.attach(
-      workspaceId,
-      session,
-      listed ? sessionRouteId(workspaceId, nativeSessionKey(listed)) : undefined,
-    );
+    return this.attach(workspaceId, session);
   }
 
-  async resume(workspaceId: string, opaque: string) {
-    const active = [...this.chats.values()].find(
-      (chat) => chat.workspaceId === workspaceId && chat.sessionOpaqueId === opaque,
-    );
+  async resume(taskId: string) {
+    const active = [...this.chats.values()].find((chat) => chat.taskId === taskId);
     if (active) return active;
-    const ws = this.workspace(workspaceId);
+    const persisted = this.metadata.task(taskId);
+    if (!persisted) throw new Error("Task no longer exists");
+    let ws = this.workspaces.get(persisted.workspaceId);
+    if (!ws) {
+      await this.openWorkspace(persisted.workspaceId, persisted.workspacePath);
+      ws = this.workspace(persisted.workspaceId);
+    }
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
-    const listed = fresh.sessions.find(
-      (entry) => sessionRouteId(workspaceId, nativeSessionKey(entry)) === opaque,
-    );
+    const listed = fresh.sessions.find((entry) => nativeSessionKey(entry) === persisted.sessionKey);
     if (!listed?.nativePath) throw new Error("Session no longer exists");
     const owner = this.owners.get(listed.nativePath);
     if (owner) return this.chat(owner);
     return this.attach(
-      workspaceId,
+      persisted.workspaceId,
       await this.pi.resumeSession(ws.path, listed.nativePath),
-      opaque,
+      taskId,
     );
   }
 
@@ -198,7 +196,7 @@ export class ChatManager {
     return {
       chatId: chat.id,
       workspaceId: chat.workspaceId,
-      sessionId: chat.sessionOpaqueId,
+      taskId: chat.taskId,
       ...(chat.session.sessionName ? { sessionName: chat.session.sessionName } : {}),
       revision: chat.revision,
       ...(chat.run ? { run: chat.run } : {}),

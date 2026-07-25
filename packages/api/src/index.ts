@@ -141,7 +141,7 @@ export const contextUsageSchema = z.object({
 export const chatSnapshotSchema = z.object({
   chatId: idSchema,
   workspaceId: idSchema,
-  sessionId: idSchema,
+  taskId: idSchema,
   sessionName: z.string().max(300).optional(),
   revision: z.number().int().nonnegative(),
   run: runOutcomeSchema.optional(),
@@ -203,7 +203,7 @@ export const openWorkspaceSchema = z.object({
 });
 export const trustWorkspaceSchema = z.object({ trusted: z.boolean() });
 export const createChatSchema = z.object({ workspaceId: idSchema });
-export const resumeChatSchema = z.object({ workspaceId: idSchema, sessionId: idSchema });
+export const resumeChatSchema = z.object({ taskId: idSchema });
 export const actionRequestSchema = z.object({
   clientId: idSchema,
   actionId: idSchema,

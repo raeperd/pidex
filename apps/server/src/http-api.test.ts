@@ -144,15 +144,26 @@ describe.sequential("HTTP API endpoints", () => {
 
     expect(result).toMatchObject({
       workspaceId,
+      taskId: expect.any(String),
       revision: 0,
       runStatus: "idle",
     });
   });
 
   it("chats.resume", async () => {
-    await expect(
-      api.chats.resume({ workspaceId, sessionId: "missing_session_12345" }),
-    ).rejects.toMatchObject({ code: "internal_error", status: 500 });
+    const created = await api.chats.create({ workspaceId });
+    const resumed = await api.chats.resume({ taskId: created.taskId });
+    expect(resumed).toMatchObject({
+      chatId: created.chatId,
+      taskId: created.taskId,
+      workspaceId,
+    });
+    await api.chats.dispose({ chatId: created.chatId });
+
+    await expect(api.chats.resume({ taskId: "missing_task_12345" })).rejects.toMatchObject({
+      code: "internal_error",
+      status: 500,
+    });
   });
 
   it("chats.get", async () => {

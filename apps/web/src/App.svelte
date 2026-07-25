@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
   import type {
     Bootstrap,
@@ -8,7 +10,6 @@
     ProjectCandidate,
     RecentWorkspace,
     ServerEvent,
-    SessionSummary,
     ToolItem,
     Workspace,
   } from "@pidex/api";
@@ -17,8 +18,9 @@
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
+  import { taskPath, TaskSnapshotCache } from "./task-navigation";
 
-  const THREAD_PREVIEW_COUNT = 6;
+  const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
@@ -28,7 +30,7 @@
   let snapshot = $state.raw<ChatSnapshot>();
   let workspaceCache = $state.raw<Record<string, Workspace>>({});
   let expandedProjectIds = $state.raw<string[]>([]);
-  let threadLimits = $state.raw<Record<string, number>>({});
+  let taskLimits = $state.raw<Record<string, number>>({});
   let projectPath = $state("");
   let projectQuery = $state("");
   let draft = $state("");
@@ -43,6 +45,10 @@
   let projectBatchLoading = $state(false);
   let projectBatchProgress = $state(0);
   let chatLoading = $state(false);
+  let routeLoading = $state(false);
+  let routeReady = $state(false);
+  let appliedRoute = $state("");
+  let routeSequence = 0;
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
   let delivery = $state<"steer" | "follow-up">("steer");
@@ -78,18 +84,26 @@
   let compactDialogElement = $state<HTMLDialogElement>();
   const mobileViewport = new MediaQuery("max-width: 900px");
   const api = new PidexApiClient();
+  const snapshotCache = new TaskSnapshotCache();
   const chatConnection = new ChatConnection({
     onEvent: applyEvent,
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),
   });
 
+  let routePath = $derived(page.url.pathname);
+  let routeTaskId = $derived(page.params.taskId ?? "");
+  $effect(() => {
+    if (routeReady && routePath !== untrack(() => appliedRoute))
+      void activateRoute(routePath, routeTaskId);
+  });
+  $effect(() => {
+    if (snapshot) snapshotCache.set(snapshot);
+  });
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
-  let configurationDraft = $derived(
-    snapshot ? (configurationDrafts[snapshot.sessionId] ?? {}) : {},
-  );
+  let configurationDraft = $derived(snapshot ? (configurationDrafts[snapshot.taskId] ?? {}) : {});
   let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
   let selectedThinkingLevel = $derived(
     configurationDraft.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
@@ -109,7 +123,7 @@
   const workspaceFor = (id: string) =>
     workspaceCache[id] ?? (workspace?.id === id ? workspace : undefined);
   const projectExpanded = (id: string) => expandedProjectIds.includes(id);
-  function sessionsFor(project: RecentWorkspace) {
+  function tasksFor(project: RecentWorkspace) {
     const loaded = workspaceFor(project.id);
     if (!loaded) return [];
     const query = search.trim().toLowerCase();
@@ -124,7 +138,7 @@
       (project) =>
         !query ||
         projectName(project.path).toLowerCase().includes(query) ||
-        sessionsFor(project).length > 0,
+        tasksFor(project).length > 0,
     );
   });
   let availableProjects = $derived.by(() => {
@@ -137,7 +151,7 @@
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
   let currentTitle = $derived.by(() => {
-    if (!snapshot) return workspace ? "No active thread" : "Pidex";
+    if (!snapshot) return workspace ? "No active task" : "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
     const firstUser = snapshot?.items.find((item) => item.type === "user");
     if (firstUser?.type === "user")
@@ -171,9 +185,11 @@
         loaded.recentWorkspaces[0]?.path ||
         "";
       projectPath = savedPath;
-      if (savedPath) await openProject(savedPath, { closeDrawer: false });
+      if (savedPath) await openProject(savedPath, { closeDrawer: false, navigate: false });
+      return true;
     } catch (cause) {
       bootstrapError = cause instanceof Error ? cause.message : "The Pidex host is unavailable";
+      return false;
     }
   }
   async function recoverInvalidChat() {
@@ -181,10 +197,11 @@
     snapshot = undefined;
     workspaceCache = {};
     expandedProjectIds = [];
-    await loadBootstrap();
-    if (bootstrapError) return;
-    error = "Pidex restarted. Resume your task from the refreshed project list.";
-    drawerOpen = matchMedia("(max-width: 900px)").matches;
+    routeReady = false;
+    if (!(await loadBootstrap())) return;
+    appliedRoute = "";
+    routeReady = true;
+    error = "Pidex restarted. Reconnecting this task…";
   }
   function rememberWorkspace(loaded: Workspace, moveToTop = true, expand = true) {
     workspaceCache = { ...workspaceCache, [loaded.id]: loaded };
@@ -216,6 +233,7 @@
       moveToTop?: boolean;
       expand?: boolean;
       remember?: boolean;
+      navigate?: boolean;
     } = {},
   ) {
     const activate = options.activate ?? true;
@@ -235,6 +253,11 @@
         snapshot = undefined;
         draft = "";
         if (options.closeDrawer ?? true) drawerOpen = false;
+        if (routeReady && (options.navigate ?? true)) {
+          appliedRoute = "/";
+          routeSequence += 1;
+          if (page.url.pathname !== "/") await goto("/");
+        }
       }
       return loaded;
     } catch (cause) {
@@ -335,12 +358,18 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  async function newChat(target = workspace) {
+  async function newTask(target = workspace) {
     if (!target || chatLoading) return;
+    const sequence = ++routeSequence;
+    let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
-      const created = await api.createChat(target.id);
+      created = await api.createChat(target.id);
+      if (sequence !== routeSequence) {
+        await disposeCreatedTask(created);
+        return;
+      }
       persistDraft();
       chatConnection.close();
       workspace = target;
@@ -350,41 +379,105 @@
       snapshot = created;
       draft = "";
       await afterChat("", true);
+      if (sequence !== routeSequence) {
+        await disposeCreatedTask(created);
+        return;
+      }
+      const path = taskPath(created.taskId);
+      appliedRoute = path;
+      await goto(path);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not create chat";
+      if (sequence !== routeSequence) {
+        if (created) await disposeCreatedTask(created);
+        return;
+      }
+      error = cause instanceof Error ? cause.message : "Could not create task";
     } finally {
-      chatLoading = false;
+      if (sequence === routeSequence) chatLoading = false;
     }
   }
-  async function newChatInProject(project: RecentWorkspace) {
+  async function disposeCreatedTask(created: ChatSnapshot) {
+    try {
+      await api.disposeChat(created.chatId);
+    } catch {
+      /* Route cancellation remains authoritative if best-effort cleanup fails. */
+    }
+  }
+  async function newTaskInProject(project: RecentWorkspace) {
     const target =
       workspaceFor(project.id) ??
       (await openProject(project.path, { activate: false, moveToTop: false }));
-    if (target) await newChat(target);
+    if (target) await newTask(target);
   }
-  async function resume(session: SessionSummary, target: Workspace) {
-    if (chatLoading) return;
+  function navigateToTask(taskId: string) {
+    if (!chatLoading) void goto(taskPath(taskId));
+  }
+  async function activateRoute(path: string, taskId: string) {
+    appliedRoute = path;
+    const sequence = ++routeSequence;
+    persistDraft();
+    chatConnection.close();
+
+    if (!taskId) {
+      snapshot = undefined;
+      draft = "";
+      routeLoading = false;
+      chatLoading = false;
+      return;
+    }
+
+    routeLoading = true;
+    chatLoading = true;
+    snapshot = snapshotCache.get(taskId);
+    workspace = snapshot ? workspaceFor(snapshot.workspaceId) : undefined;
+    if (snapshot) {
+      draft = localStorage.getItem(`pidex:draft:${snapshot.taskId}`) ?? "";
+      drawerOpen = false;
+      await tick();
+      scrollLatest();
+    }
+
     try {
       error = "";
-      chatLoading = true;
+      const resumed = await api.resumeTask(taskId);
+      if (sequence !== routeSequence) return;
+      const target = await workspaceById(resumed.workspaceId);
+      if (sequence !== routeSequence) return;
+      if (!target) throw new Error("The project for this task is no longer available");
       workspace = target;
       projectPath = target.path;
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
-      snapshot = await api.resumeChat(target.id, session.id);
+      snapshot = resumed;
       await afterChat();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Resume failed";
+      if (sequence === routeSequence)
+        error = cause instanceof Error ? cause.message : "Task could not be opened";
     } finally {
-      chatLoading = false;
+      if (sequence === routeSequence) {
+        routeLoading = false;
+        chatLoading = false;
+      }
     }
+  }
+  async function workspaceById(workspaceId: string) {
+    const cached = workspaceFor(workspaceId);
+    if (cached) return cached;
+    const recent = bootstrap?.recentWorkspaces.find((project) => project.id === workspaceId);
+    if (!recent) return undefined;
+    return openProject(recent.path, {
+      activate: false,
+      moveToTop: false,
+      expand: true,
+      remember: false,
+    });
   }
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
   }
   async function afterChat(initialDraft = "", focusComposer = false) {
     drawerOpen = false;
-    draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) || "";
+    draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.taskId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
     restoreConfigurationDraft();
@@ -462,7 +555,7 @@
     if (nearBottom) requestAnimationFrame(scrollLatest);
   }
   function pendingKey() {
-    return snapshot ? `pidex:pending:${snapshot.sessionId}` : "";
+    return snapshot ? `pidex:pending:${snapshot.taskId}` : "";
   }
   function clearPendingPrompt() {
     if (snapshot) localStorage.removeItem(pendingKey());
@@ -563,24 +656,24 @@
       if (patch.thinkingLevel === snapshot.thinkingLevel) delete next.thinkingLevel;
       else next.thinkingLevel = patch.thinkingLevel;
     }
-    setConfigurationDraft(snapshot.sessionId, next);
+    setConfigurationDraft(snapshot.taskId, next);
   }
   async function applyConfigurationDraft() {
     if (!snapshot || !hasConfigurationDraft) return true;
-    const sessionId = snapshot.sessionId;
+    const taskId = snapshot.taskId;
     const applied = { ...configurationDraft };
     if (!(await configure(applied))) return false;
 
-    const remaining = { ...configurationDrafts[sessionId] };
+    const remaining = { ...configurationDrafts[taskId] };
     if (remaining.model === applied.model) delete remaining.model;
     if (remaining.thinkingLevel === applied.thinkingLevel) delete remaining.thinkingLevel;
-    setConfigurationDraft(sessionId, remaining);
+    setConfigurationDraft(taskId, remaining);
     return true;
   }
   function restoreConfigurationDraft() {
     if (!snapshot) return;
     try {
-      const stored = localStorage.getItem(configurationDraftKey(snapshot.sessionId));
+      const stored = localStorage.getItem(configurationDraftKey(snapshot.taskId));
       if (!stored) return;
       const parsed = JSON.parse(stored) as Record<string, unknown>;
       const restored: ChatConfiguration = {};
@@ -596,25 +689,25 @@
         parsed.thinkingLevel !== snapshot.thinkingLevel
       )
         restored.thinkingLevel = parsed.thinkingLevel as ChatSnapshot["thinkingLevel"];
-      setConfigurationDraft(snapshot.sessionId, restored);
+      setConfigurationDraft(snapshot.taskId, restored);
     } catch {
-      setConfigurationDraft(snapshot.sessionId, {});
+      setConfigurationDraft(snapshot.taskId, {});
     }
   }
-  function setConfigurationDraft(sessionId: string, value: ChatConfiguration) {
+  function setConfigurationDraft(taskId: string, value: ChatConfiguration) {
     const next = { ...configurationDrafts };
     const hasValue = value.model !== undefined || value.thinkingLevel !== undefined;
     if (hasValue) {
-      next[sessionId] = value;
-      localStorage.setItem(configurationDraftKey(sessionId), JSON.stringify(value));
+      next[taskId] = value;
+      localStorage.setItem(configurationDraftKey(taskId), JSON.stringify(value));
     } else {
-      delete next[sessionId];
-      localStorage.removeItem(configurationDraftKey(sessionId));
+      delete next[taskId];
+      localStorage.removeItem(configurationDraftKey(taskId));
     }
     configurationDrafts = next;
   }
-  function configurationDraftKey(sessionId: string) {
-    return `${CONFIGURATION_DRAFT_PREFIX}${sessionId}`;
+  function configurationDraftKey(taskId: string) {
+    return `${CONFIGURATION_DRAFT_PREFIX}${taskId}`;
   }
   function openRename() {
     if (!snapshot) return;
@@ -732,13 +825,13 @@
     const previousScrollTop = transcript?.scrollTop;
     loadingEarlier = true;
     try {
-      const page = await api.transcript(snapshot.chatId, snapshot.transcriptStart);
+      const transcriptPage = await api.transcript(snapshot.chatId, snapshot.transcriptStart);
       const seen = new Set(snapshot.items.map((item) => item.id));
       snapshot = {
         ...snapshot,
-        items: [...page.items.filter((item) => !seen.has(item.id)), ...snapshot.items],
-        transcriptStart: page.start,
-        transcriptTotal: page.total,
+        items: [...transcriptPage.items.filter((item) => !seen.has(item.id)), ...snapshot.items],
+        transcriptStart: transcriptPage.start,
+        transcriptTotal: transcriptPage.total,
       };
       if (transcript && previousScrollHeight !== undefined && previousScrollTop !== undefined) {
         await tick();
@@ -754,10 +847,17 @@
     retryingConnection = true;
     error = "";
     try {
-      if (snapshot) {
+      if (routeTaskId) {
+        if (!bootstrap && !(await loadBootstrap())) return;
+        await activateRoute(routePath, routeTaskId);
+        routeReady = true;
+      } else if (snapshot) {
         snapshot = await api.getChat(snapshot.chatId);
         chatConnection.reconnect();
-      } else await loadBootstrap();
+      } else if (await loadBootstrap()) {
+        appliedRoute = "";
+        routeReady = true;
+      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "The Pidex host is still unavailable";
     } finally {
@@ -765,7 +865,7 @@
     }
   }
   function persistDraft() {
-    if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.sessionId}`, draft);
+    if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.taskId}`, draft);
   }
   function resizePrompt() {
     if (!promptInput) return;
@@ -836,7 +936,9 @@
   }
   onMount(() => {
     projectPath = localStorage.getItem("pidex:last-project") ?? "";
-    void loadBootstrap();
+    void loadBootstrap().then((loaded) => {
+      if (loaded) routeReady = true;
+    });
     const relativeTimeInterval = window.setInterval(() => (relativeNow = Date.now()), 60_000);
     return () => {
       window.clearInterval(relativeTimeInterval);
@@ -857,15 +959,15 @@
 >
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
-    aria-label="Close sessions"
+    aria-label="Close tasks"
     tabindex={drawerOpen ? 0 : -1}
     onclick={() => (drawerOpen = false)}
   ></button>
 
   <aside
-    id="sessions-drawer"
+    id="tasks-drawer"
     class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
-    aria-label="Sessions"
+    aria-label="Tasks"
     inert={mobileViewport.current && !drawerOpen}
   >
     <div class="flex min-h-14 items-center gap-2 px-1 pt-2 pr-1 pb-1.5 pl-2">
@@ -878,7 +980,7 @@
       <button
         class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
         onclick={toggleSearch}
-        aria-label={searchOpen ? "Close search" : "Search projects and threads"}
+        aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
         aria-expanded={searchOpen}
         aria-keyshortcuts="Meta+K Control+K"
         title={searchOpen ? "Close search" : "Search (⌘K)"}
@@ -896,8 +998,8 @@
           class="w-full min-w-0 border-0 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
           bind:this={searchInput}
           bind:value={search}
-          aria-label="Search projects and threads"
-          placeholder="Search projects and threads"
+          aria-label="Search projects and tasks"
+          placeholder="Search projects and tasks"
         />
       </label>
     {/if}
@@ -940,17 +1042,15 @@
               workspaceCache[project.id] ?? (workspace?.id === project.id ? workspace : undefined)}
             {@const expanded =
               expandedProjectIds.includes(project.id) || Boolean(search.trim() && loaded)}
-            {@const matchingSessions = sessionsFor(project)}
+            {@const matchingTasks = tasksFor(project)}
             {@const sessionLimit = search.trim()
-              ? matchingSessions.length
-              : (threadLimits[project.id] ?? THREAD_PREVIEW_COUNT)}
-            {@const shownSessions = expanded
-              ? matchingSessions.slice(0, sessionLimit)
-              : matchingSessions.filter(
-                  (session) => workspace?.id === project.id && snapshot?.sessionId === session.id,
-                )}
-            {@const hiddenSessions = expanded
-              ? Math.max(0, matchingSessions.length - shownSessions.length)
+              ? matchingTasks.length
+              : (taskLimits[project.id] ?? TASK_PREVIEW_COUNT)}
+            {@const shownTasks = expanded
+              ? matchingTasks.slice(0, sessionLimit)
+              : matchingTasks.filter((task) => routeTaskId === task.id)}
+            {@const hiddenTasks = expanded
+              ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
             <div class="mb-0.5">
               <div class="group flex min-w-0 items-center gap-0.5">
@@ -983,40 +1083,40 @@
                 </button>
                 <button
                   class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  onclick={() => newChatInProject(project)}
+                  onclick={() => newTaskInProject(project)}
                   disabled={chatLoading || projectLoadingId === project.id}
-                  aria-label={`New thread in ${projectLabel(project)}`}
-                  title="New thread"
+                  aria-label={`New task in ${projectLabel(project)}`}
+                  title="New task"
                 >
                   <Icon name="compose" size={14} />
                 </button>
               </div>
-              {#if expanded || shownSessions.length > 0}
+              {#if expanded || shownTasks.length > 0}
                 <div
                   class="mb-1 ml-5.5 border-l border-border-strong/60 pl-2"
                   id={`project-${project.id}`}
                 >
                   {#if projectLoadingId === project.id && !loaded}
-                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">Loading threads…</p>
-                  {:else if loaded && shownSessions.length === 0}
+                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">Loading tasks…</p>
+                  {:else if loaded && shownTasks.length === 0}
                     <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">
-                      {search ? "No matching threads." : "No threads yet."}
+                      {search ? "No matching tasks." : "No tasks yet."}
                     </p>
                   {:else if loaded}
-                    {#each shownSessions as session (session.id)}
-                      {@const current = snapshot?.sessionId === session.id}
+                    {#each shownTasks as task (task.id)}
+                      {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/thread mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
-                        onclick={() => resume(session, loaded)}
-                        disabled={chatLoading}
-                        title={session.name ?? session.firstMessage}
+                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        onclick={() => navigateToTask(task.id)}
+                        disabled={chatLoading && !routeLoading}
+                        title={task.name ?? task.firstMessage}
                       >
                         <span
                           class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
                         ></span>
                         <strong
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
-                          >{session.name ?? (session.firstMessage || "Untitled session")}</strong
+                          >{task.name ?? (task.firstMessage || "Untitled task")}</strong
                         >
                         {#if current && active}<span
                             class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
@@ -1025,17 +1125,16 @@
                             ></i>Working</span
                           >{:else}<time
                             class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
-                            datetime={session.modifiedAt}>{relativeTime(session.modifiedAt)}</time
+                            datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
                       </button>
                     {/each}
-                    {#if hiddenSessions > 0}
+                    {#if hiddenTasks > 0}
                       <button
                         class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground"
                         onclick={() =>
-                          (threadLimits = { ...threadLimits, [project.id]: sessionLimit + 10 })}
-                        >Show more <span class="ml-1 opacity-65">{hiddenSessions} hidden</span
-                        ></button
+                          (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
+                        >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button
                       >
                     {/if}
                   {/if}
@@ -1070,9 +1169,9 @@
     >
       <button
         class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
-        aria-label="Open sessions"
+        aria-label="Open tasks"
         aria-expanded={drawerOpen}
-        aria-controls="sessions-drawer"
+        aria-controls="tasks-drawer"
         onclick={() => (drawerOpen = true)}
       >
         <Icon name="menu" size={19} />
@@ -1088,7 +1187,7 @@
           <span
             class={`size-1.5 rounded-full ${connection === "connected" ? "bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-faint"}`}
           ></span>
-          <span>{snapshot ? connection : "local"}</span>
+          <span>{routeLoading ? "syncing" : snapshot ? connection : "local"}</span>
         </div>
       </div>
       {#if snapshot}
@@ -1098,7 +1197,7 @@
             onclick={openRename}
             disabled={active}
             aria-label="Rename"
-            title="Rename session"
+            title="Rename task"
             ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
           >
           <button
@@ -1106,7 +1205,7 @@
             onclick={openCompact}
             disabled={active}
             aria-label="Compact"
-            title="Compact session"
+            title="Compact task"
             ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
           >
         </div>
@@ -1125,14 +1224,14 @@
         >
       </div>
     {/if}
-    {#if snapshot && connection !== "connected"}
+    {#if snapshot && connection !== "connected" && !routeLoading}
       <div
         class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs text-muted"
         role="status"
       >
         <span class="leading-relaxed"
-          ><strong>Host unavailable.</strong> Your session remains on the desktop; drafts will not be
-          submitted while disconnected.</span
+          ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
+          while disconnected.</span
         ><button
           class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold disabled:opacity-40"
           onclick={retryConnection}
@@ -1228,6 +1327,20 @@
             >{retryingConnection ? "Retrying…" : "Retry connection"}</button
           >
         </div>
+      {:else if routeLoading && !snapshot}
+        <div
+          class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
+          aria-label="Loading task"
+          role="status"
+        >
+          <span class="sr-only">Loading task…</span>
+          {#each ["w-2/5", "w-4/5", "w-3/5"] as width, index (width)}
+            <div class={`animate-pulse ${index === 1 ? "ml-auto" : ""} ${width}`}>
+              <div class="mb-2 h-2.5 w-20 rounded-full bg-border"></div>
+              <div class="h-20 rounded-2xl bg-secondary/75"></div>
+            </div>
+          {/each}
+        </div>
       {:else if !workspace}
         <div
           class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
@@ -1240,7 +1353,7 @@
           <p
             class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
           >
-            YOUR PRIVATE PI WORKSPACE
+            YOUR PRIVATE PI PROJECT
           </p>
           <h1
             class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
@@ -1248,7 +1361,7 @@
             Bring Pi with you.
           </h1>
           <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-            Choose a project to create or resume a native Pi session.
+            Choose a project to create or resume a task.
           </p>
           <button
             class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
@@ -1261,10 +1374,10 @@
           role="status"
         >
           <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
-            Pick a thread to continue
+            Pick a task to continue
           </h1>
           <p class="mt-2 text-sm leading-relaxed text-muted">
-            Select an existing thread or create a new one to get started.
+            Select an existing task or create a new one to get started.
           </p>
         </div>
       {:else}
@@ -1650,14 +1763,14 @@
         <Icon name="rename" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold" id="rename-dialog-title">Rename thread</h2>
+        <h2 class="m-0 text-[15px] font-semibold" id="rename-dialog-title">Rename task</h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Give this Pi session a concise, memorable name.
+          Give this task a concise, memorable name.
         </p>
       </div>
     </div>
     <label class="mb-1.5 block text-[11px] font-medium text-muted" for="session-name"
-      >Session name</label
+      >Task name</label
     >
     <input
       class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
@@ -1703,9 +1816,7 @@
         <Icon name="compact" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold" id="compact-dialog-title">
-          Compact this thread?
-        </h2>
+        <h2 class="m-0 text-[15px] font-semibold" id="compact-dialog-title">Compact this task?</h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
           Pi will summarize older context to free space in the active context window.
         </p>
@@ -1718,7 +1829,7 @@
         onclick={() => compactDialogElement?.close()}>Cancel</button
       ><button
         class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
-        type="submit">Compact thread</button
+        type="submit">Compact task</button
       >
     </div>
   </form>

@@ -62,8 +62,8 @@ export class PidexApiClient {
     return this.client.chats.create({ workspaceId });
   }
 
-  resumeChat(workspaceId: string, sessionId: string): Promise<ChatSnapshot> {
-    return this.client.chats.resume({ workspaceId, sessionId });
+  resumeTask(taskId: string): Promise<ChatSnapshot> {
+    return this.client.chats.resume({ taskId });
   }
 
   getChat(chatId: string): Promise<ChatSnapshot> {
