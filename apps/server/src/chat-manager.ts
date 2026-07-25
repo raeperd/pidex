@@ -17,6 +17,7 @@ import type { AdapterEvent, AdapterSession, AdapterSessionInfo } from "./adapter
 import type { MetadataStore } from "./metadata.js";
 import type { PiSdk } from "./pi-sdk.js";
 import { safeError } from "./security.js";
+import { sessionRouteId } from "./session-route-id.js";
 
 interface WorkspaceRecord {
   id: string;
@@ -28,20 +29,12 @@ interface ToolResource {
   text: string;
   sourceTruncated: boolean;
 }
-interface MappedSession {
-  opaque: string;
-  info: AdapterSessionInfo;
-  workspaceId: string;
-}
 type NativeSessionReference =
   | Pick<AdapterSession, "nativeId" | "nativePath">
   | Pick<AdapterSessionInfo, "nativeId" | "nativePath">;
 
 const nativeSessionKey = (session: NativeSessionReference) =>
   session.nativePath ?? session.nativeId;
-
-const sameNativeSession = (left: NativeSessionReference, right: NativeSessionReference) =>
-  nativeSessionKey(left) === nativeSessionKey(right);
 
 interface ChatRecord {
   id: string;
@@ -72,7 +65,6 @@ type EventPayload = ServerEvent extends infer Event
 
 export class ChatManager {
   private workspaces = new Map<string, WorkspaceRecord>();
-  private sessions = new Map<string, MappedSession>();
   private chats = new Map<string, ChatRecord>();
   private owners = new Map<string, string>();
 
@@ -81,20 +73,9 @@ export class ChatManager {
     private readonly metadata: MetadataStore,
   ) {}
 
-  private mapSession(workspaceId: string, info: AdapterSessionInfo): MappedSession {
-    let mapped = [...this.sessions.values()].find(
-      (entry) => sameNativeSession(entry.info, info) && entry.workspaceId === workspaceId,
-    );
-    if (!mapped) {
-      mapped = { opaque: randomUUID().replaceAll("-", ""), info, workspaceId };
-      this.sessions.set(mapped.opaque, mapped);
-    } else mapped.info = info;
-    return mapped;
-  }
-
   private publicSession(workspaceId: string, info: AdapterSessionInfo): SessionSummary {
     return {
-      id: this.mapSession(workspaceId, info).opaque,
+      id: sessionRouteId(workspaceId, nativeSessionKey(info)),
       ...(info.name ? { name: info.name } : {}),
       firstMessage: info.firstMessage,
       createdAt: info.createdAt,
@@ -139,7 +120,7 @@ export class ChatManager {
     const persisted = this.metadata.sessionState(sessionKey);
     const runIsActive = persisted.run?.status === "accepted" || persisted.run?.status === "running";
     const id = randomUUID().replaceAll("-", "");
-    const sessionOpaqueId = opaque ?? randomUUID().replaceAll("-", "");
+    const sessionOpaqueId = opaque ?? sessionRouteId(workspaceId, sessionKey);
     const chat: ChatRecord = {
       id,
       workspaceId,
@@ -180,18 +161,21 @@ export class ChatManager {
     return this.attach(
       workspaceId,
       session,
-      listed ? this.mapSession(workspaceId, listed).opaque : undefined,
+      listed ? sessionRouteId(workspaceId, nativeSessionKey(listed)) : undefined,
     );
   }
 
   async resume(workspaceId: string, opaque: string) {
+    const active = [...this.chats.values()].find(
+      (chat) => chat.workspaceId === workspaceId && chat.sessionOpaqueId === opaque,
+    );
+    if (active) return active;
     const ws = this.workspace(workspaceId);
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
-    const mapped = this.sessions.get(opaque);
-    if (!mapped || mapped.workspaceId !== workspaceId)
-      throw new Error("Session ID is invalid or stale");
-    const listed = fresh.sessions.find((entry) => sameNativeSession(entry, mapped.info));
+    const listed = fresh.sessions.find(
+      (entry) => sessionRouteId(workspaceId, nativeSessionKey(entry)) === opaque,
+    );
     if (!listed?.nativePath) throw new Error("Session no longer exists");
     const owner = this.owners.get(listed.nativePath);
     if (owner) return this.chat(owner);

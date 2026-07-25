@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -43,12 +43,13 @@ export async function createPidexApplication() {
   const pi = new PiSdk();
   const manager = new ChatManager(pi, metadata);
   const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
+  const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
   const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots, metadata, pi, manager }), {
     plugins: [new BodyLimitPlugin({ maxBodySize: 64 * 1024 })],
   });
 
   const handler = async (req: IncomingMessage, res: ServerResponse) => {
-    securityHeaders(res);
+    securityHeaders(res, webScriptHashes);
     try {
       validateRequest(req, false, csrf);
       const route = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -116,6 +117,15 @@ export async function createPidexApplication() {
     },
     manager,
   };
+}
+
+function inlineScriptHashes(indexFile: string) {
+  if (!existsSync(indexFile)) return [];
+  const html = readFileSync(indexFile, "utf8");
+  return [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
+    .map((match) => match[1])
+    .filter((script): script is string => Boolean(script))
+    .map((script) => createHash("sha256").update(script).digest("base64"));
 }
 
 function serveWebApp(_req: IncomingMessage, res: ServerResponse, route: string, webRoot: string) {

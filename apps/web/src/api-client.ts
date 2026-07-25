@@ -70,6 +70,10 @@ export class PidexApiClient {
     return this.client.chats.get({ chatId });
   }
 
+  async disposeChat(chatId: string): Promise<void> {
+    await this.client.chats.dispose({ chatId });
+  }
+
   sendMessage(
     chatId: string,
     text: string,
