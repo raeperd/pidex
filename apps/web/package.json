@@ -22,9 +22,9 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "catalog:",
-    "@tailwindcss/vite": "4.1.17",
+    "@tailwindcss/vite": "4.3.3",
     "svelte-check": "catalog:",
-    "tailwindcss": "4.1.17",
+    "tailwindcss": "4.3.3",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "4.0.8"
