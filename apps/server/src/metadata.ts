@@ -42,47 +42,53 @@ export const requestDigest = (value: unknown) =>
 
 export class MetadataStore {
   private readonly sqlite: DatabaseSync;
-  private readonly db: ReturnType<typeof createMetadataDatabase>;
+  private readonly db: MetadataDatabase;
 
   constructor() {
     const dir = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
-    this.sqlite.exec(METADATA_SCHEMA_SQL);
-    this.db = createMetadataDatabase(this.sqlite);
+    this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"), { timeout: 5_000 });
+    try {
+      this.sqlite.exec(METADATA_SCHEMA_SQL);
+      this.db = createMetadataDatabase(this.sqlite);
 
-    // A process death cannot prove whether Pi completed after the last durable update.
-    // Preserve that ambiguity and require an explicit acknowledgement before new work.
-    this.db
-      .update(actions)
-      .set({ status: "interrupted", updatedAt: sql`datetime('now')` })
-      .where(and(eq(actions.kind, "prompt"), inArray(actions.status, ["accepted", "running"])))
-      .run();
-    this.db
-      .update(sessionState)
-      .set({
-        runStatus: "interrupted",
-        requiresAcknowledgement: true,
-        updatedAt: sql`datetime('now')`,
-      })
-      .where(inArray(sessionState.runStatus, ["accepted", "running", "stopping"]))
-      .run();
+      // A process death cannot prove whether Pi completed after the last durable update.
+      // Preserve that ambiguity and require an explicit acknowledgement before new work.
+      this.db.transaction(
+        (tx) => {
+          tx.update(actions)
+            .set({ status: "interrupted", updatedAt: sql`datetime('now')` })
+            .where(
+              and(eq(actions.kind, "prompt"), inArray(actions.status, ["accepted", "running"])),
+            )
+            .run();
+          tx.update(sessionState)
+            .set({
+              runStatus: "interrupted",
+              requiresAcknowledgement: true,
+              updatedAt: sql`datetime('now')`,
+            })
+            .where(inArray(sessionState.runStatus, ["accepted", "running", "stopping"]))
+            .run();
+        },
+        { behavior: "immediate" },
+      );
+    } catch (error) {
+      this.sqlite.close();
+      throw error;
+    }
   }
 
   rememberWorkspace(canonicalPath: string): string {
-    const row = this.db
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(eq(workspaces.path, canonicalPath))
-      .get();
-    const id = row?.id ?? randomUUID().replaceAll("-", "");
     const openedAt = new Date().toISOString();
-    this.db
+    const row = this.db
       .insert(workspaces)
-      .values({ id, path: canonicalPath, openedAt })
+      .values({ id: randomUUID().replaceAll("-", ""), path: canonicalPath, openedAt })
       .onConflictDoUpdate({ target: workspaces.path, set: { openedAt } })
-      .run();
-    return id;
+      .returning({ id: workspaces.id })
+      .get();
+    if (!row) throw new Error(`Workspace ${canonicalPath} was not persisted`);
+    return row.id;
   }
 
   workspaceId(canonicalPath: string): string | undefined {
@@ -97,57 +103,33 @@ export class MetadataStore {
     return this.db
       .select({ id: workspaces.id, path: workspaces.path })
       .from(workspaces)
-      .orderBy(desc(workspaces.openedAt))
+      .orderBy(desc(workspaces.openedAt), workspaces.id)
       .limit(100)
       .all();
   }
 
   sessionState(sessionKey: string): { revision: number; run?: RunOutcome } {
-    this.ensureSession(sessionKey);
-    const row = this.db
-      .select({
-        revision: sessionState.revision,
-        runId: sessionState.runId,
-        promptActionId: sessionState.promptActionId,
-        runStatus: sessionState.runStatus,
-        requiresAcknowledgement: sessionState.requiresAcknowledgement,
-      })
-      .from(sessionState)
-      .where(eq(sessionState.sessionKey, sessionKey))
-      .get();
-    if (!row) throw new Error(`Session ${sessionKey} was not initialized`);
-    if (!row.runId || !row.promptActionId || !row.runStatus) return { revision: row.revision };
-    if (row.runStatus === "stopping")
-      throw new Error(`Session ${sessionKey} retained an unrecovered stopping state`);
-    return {
-      revision: row.revision,
-      run: {
-        runId: row.runId,
-        actionId: row.promptActionId,
-        status: row.runStatus,
-        requiresAcknowledgement: row.requiresAcknowledgement,
-      },
-    };
+    return this.readSessionState(this.db, sessionKey);
   }
 
   acceptPrompt(input: ActionInput): ActionOutcome {
-    const replay = this.replay(input, "prompt");
-    if (replay) return replay;
-    const state = this.sessionState(input.sessionKey);
-    this.assertCurrentRevision(state.revision, input.expectedRevision);
-    if (state.run?.requiresAcknowledgement)
-      throw new ActionProtocolError(
-        "interrupted_run",
-        "A crash-interrupted run must be acknowledged before starting new work",
-      );
-    if (state.run && (state.run.status === "accepted" || state.run.status === "running"))
-      throw new ActionProtocolError("session_busy", "A run is already active for this session");
-
-    const runId = randomUUID().replaceAll("-", "");
-    const revision = state.revision + 1;
-    const now = new Date().toISOString();
-    this.db.transaction(
+    return this.db.transaction(
       (tx) => {
+        const replay = this.replay(tx, input, "prompt");
+        if (replay) return replay;
+        const state = this.readSessionState(tx, input.sessionKey);
+        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        if (state.run?.requiresAcknowledgement)
+          throw new ActionProtocolError(
+            "interrupted_run",
+            "A crash-interrupted run must be acknowledged before starting new work",
+          );
+        if (state.run && (state.run.status === "accepted" || state.run.status === "running"))
+          throw new ActionProtocolError("session_busy", "A run is already active for this session");
+
+        const runId = randomUUID().replaceAll("-", "");
+        const revision = state.revision + 1;
+        const now = new Date().toISOString();
         tx.insert(actions)
           .values({
             actionId: input.actionId,
@@ -173,33 +155,33 @@ export class MetadataStore {
           })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
+        return {
+          accepted: true,
+          actionId: input.actionId,
+          runId,
+          status: "accepted",
+          revision,
+          replayed: false,
+        };
       },
       { behavior: "immediate" },
     );
-    return {
-      accepted: true,
-      actionId: input.actionId,
-      runId,
-      status: "accepted",
-      revision,
-      replayed: false,
-    };
   }
 
   acceptStop(input: ActionInput & { runId: string }): ActionOutcome {
-    const replay = this.replay(input, "stop");
-    if (replay) return replay;
-    const state = this.sessionState(input.sessionKey);
-    this.assertCurrentRevision(state.revision, input.expectedRevision);
-    if (!state.run || state.run.runId !== input.runId)
-      throw new ActionProtocolError("run_mismatch", "Stop no longer targets the active run");
-    if (state.run.status !== "accepted" && state.run.status !== "running")
-      throw new ActionProtocolError("run_mismatch", "The targeted run is no longer active");
-
-    const revision = state.revision + 1;
-    const now = new Date().toISOString();
-    this.db.transaction(
+    return this.db.transaction(
       (tx) => {
+        const replay = this.replay(tx, input, "stop");
+        if (replay) return replay;
+        const state = this.readSessionState(tx, input.sessionKey);
+        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        if (!state.run || state.run.runId !== input.runId)
+          throw new ActionProtocolError("run_mismatch", "Stop no longer targets the active run");
+        if (state.run.status !== "accepted" && state.run.status !== "running")
+          throw new ActionProtocolError("run_mismatch", "The targeted run is no longer active");
+
+        const revision = state.revision + 1;
+        const now = new Date().toISOString();
         tx.insert(actions)
           .values({
             actionId: input.actionId,
@@ -218,40 +200,40 @@ export class MetadataStore {
           .set({ revision, runStatus: "running", updatedAt: now })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
+        return {
+          accepted: true,
+          actionId: input.actionId,
+          runId: input.runId,
+          status: "accepted",
+          revision,
+          replayed: false,
+        };
       },
       { behavior: "immediate" },
     );
-    return {
-      accepted: true,
-      actionId: input.actionId,
-      runId: input.runId,
-      status: "accepted",
-      revision,
-      replayed: false,
-    };
   }
 
   acceptRunMutation(
     input: ActionInput & { runId: string; kind: "steer" | "follow-up" },
   ): ActionOutcome {
-    const replay = this.replay(input, input.kind);
-    if (replay) return replay;
-    const state = this.sessionState(input.sessionKey);
-    this.assertCurrentRevision(state.revision, input.expectedRevision);
-    if (
-      !state.run ||
-      state.run.runId !== input.runId ||
-      (state.run.status !== "accepted" && state.run.status !== "running")
-    ) {
-      throw new ActionProtocolError(
-        "run_mismatch",
-        "The queued instruction no longer targets an active run",
-      );
-    }
-    const revision = state.revision + 1;
-    const now = new Date().toISOString();
-    this.db.transaction(
+    return this.db.transaction(
       (tx) => {
+        const replay = this.replay(tx, input, input.kind);
+        if (replay) return replay;
+        const state = this.readSessionState(tx, input.sessionKey);
+        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        if (
+          !state.run ||
+          state.run.runId !== input.runId ||
+          (state.run.status !== "accepted" && state.run.status !== "running")
+        ) {
+          throw new ActionProtocolError(
+            "run_mismatch",
+            "The queued instruction no longer targets an active run",
+          );
+        }
+        const revision = state.revision + 1;
+        const now = new Date().toISOString();
         tx.insert(actions)
           .values({
             actionId: input.actionId,
@@ -270,31 +252,31 @@ export class MetadataStore {
           .set({ revision, updatedAt: now })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
+        return {
+          accepted: true,
+          actionId: input.actionId,
+          runId: input.runId,
+          status: "accepted",
+          revision,
+          replayed: false,
+        };
       },
       { behavior: "immediate" },
     );
-    return {
-      accepted: true,
-      actionId: input.actionId,
-      runId: input.runId,
-      status: "accepted",
-      revision,
-      replayed: false,
-    };
   }
 
   acceptSessionMutation(
     input: ActionInput & { kind: "clear-queue" | "compact" | "config" | "dialog" | "rename" },
   ): ActionOutcome {
-    const replay = this.replay(input, input.kind);
-    if (replay) return replay;
-    const state = this.sessionState(input.sessionKey);
-    this.assertCurrentRevision(state.revision, input.expectedRevision);
-    const revision = state.revision + 1;
-    const actionRunId = state.run?.runId ?? randomUUID().replaceAll("-", "");
-    const now = new Date().toISOString();
-    this.db.transaction(
+    return this.db.transaction(
       (tx) => {
+        const replay = this.replay(tx, input, input.kind);
+        if (replay) return replay;
+        const state = this.readSessionState(tx, input.sessionKey);
+        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const revision = state.revision + 1;
+        const actionRunId = state.run?.runId ?? randomUUID().replaceAll("-", "");
+        const now = new Date().toISOString();
         tx.insert(actions)
           .values({
             actionId: input.actionId,
@@ -313,34 +295,34 @@ export class MetadataStore {
           .set({ revision, updatedAt: now })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
+        return {
+          accepted: true,
+          actionId: input.actionId,
+          runId: actionRunId,
+          status: "accepted",
+          revision,
+          replayed: false,
+        };
       },
       { behavior: "immediate" },
     );
-    return {
-      accepted: true,
-      actionId: input.actionId,
-      runId: actionRunId,
-      status: "accepted",
-      revision,
-      replayed: false,
-    };
   }
 
   acknowledgeInterrupted(input: ActionInput): ActionOutcome {
-    const replay = this.replay(input, "acknowledge");
-    if (replay) return replay;
-    const state = this.sessionState(input.sessionKey);
-    this.assertCurrentRevision(state.revision, input.expectedRevision);
-    if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
-      throw new ActionProtocolError(
-        "run_mismatch",
-        "There is no interrupted run awaiting acknowledgement",
-      );
-
-    const revision = state.revision + 1;
-    const now = new Date().toISOString();
-    this.db.transaction(
+    return this.db.transaction(
       (tx) => {
+        const replay = this.replay(tx, input, "acknowledge");
+        if (replay) return replay;
+        const state = this.readSessionState(tx, input.sessionKey);
+        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
+          throw new ActionProtocolError(
+            "run_mismatch",
+            "There is no interrupted run awaiting acknowledgement",
+          );
+
+        const revision = state.revision + 1;
+        const now = new Date().toISOString();
         tx.insert(actions)
           .values({
             actionId: input.actionId,
@@ -359,17 +341,17 @@ export class MetadataStore {
           .set({ revision, requiresAcknowledgement: false, updatedAt: now })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
+        return {
+          accepted: true,
+          actionId: input.actionId,
+          runId: state.run.runId,
+          status: "completed",
+          revision,
+          replayed: false,
+        };
       },
       { behavior: "immediate" },
     );
-    return {
-      accepted: true,
-      actionId: input.actionId,
-      runId: state.run.runId,
-      status: "completed",
-      revision,
-      replayed: false,
-    };
   }
 
   markPromptStatus(sessionKey: string, runId: string, status: ActionStatus) {
@@ -411,19 +393,50 @@ export class MetadataStore {
     this.sqlite.close();
   }
 
-  private ensureSession(sessionKey: string) {
-    this.db
-      .insert(sessionState)
+  private readSessionState(
+    db: MetadataExecutor,
+    sessionKey: string,
+  ): { revision: number; run?: RunOutcome } {
+    this.ensureSession(db, sessionKey);
+    const row = db
+      .select({
+        revision: sessionState.revision,
+        runId: sessionState.runId,
+        promptActionId: sessionState.promptActionId,
+        runStatus: sessionState.runStatus,
+        requiresAcknowledgement: sessionState.requiresAcknowledgement,
+      })
+      .from(sessionState)
+      .where(eq(sessionState.sessionKey, sessionKey))
+      .get();
+    if (!row) throw new Error(`Session ${sessionKey} was not initialized`);
+    if (!row.runId || !row.promptActionId || !row.runStatus) return { revision: row.revision };
+    if (row.runStatus === "stopping")
+      throw new Error(`Session ${sessionKey} retained an unrecovered stopping state`);
+    return {
+      revision: row.revision,
+      run: {
+        runId: row.runId,
+        actionId: row.promptActionId,
+        status: row.runStatus,
+        requiresAcknowledgement: row.requiresAcknowledgement,
+      },
+    };
+  }
+
+  private ensureSession(db: MetadataExecutor, sessionKey: string) {
+    db.insert(sessionState)
       .values({ sessionKey, revision: 0, updatedAt: new Date().toISOString() })
       .onConflictDoNothing()
       .run();
   }
 
   private replay(
+    db: MetadataExecutor,
     input: Pick<ActionInput, "actionId" | "clientId" | "sessionKey" | "requestDigest">,
     kind: ActionKind,
   ): ActionOutcome | undefined {
-    const row = this.db
+    const row = db
       .select({
         actionId: actions.actionId,
         clientId: actions.clientId,
@@ -472,6 +485,10 @@ function createMetadataDatabase(sqlite: DatabaseSync) {
   return drizzle({ client: sqlite });
 }
 
+type MetadataDatabase = ReturnType<typeof createMetadataDatabase>;
+type MetadataTransaction = Parameters<Parameters<MetadataDatabase["transaction"]>[0]>[0];
+type MetadataExecutor = MetadataDatabase | MetadataTransaction;
+
 const METADATA_SCHEMA_SQL = `
   PRAGMA journal_mode=WAL;
   PRAGMA foreign_keys=ON;
@@ -501,5 +518,7 @@ const METADATA_SCHEMA_SQL = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS actions_session_idx ON actions(session_key, created_at DESC);
+  DROP INDEX IF EXISTS actions_session_idx;
+  CREATE INDEX IF NOT EXISTS workspaces_recent_idx ON workspaces(opened_at DESC, id);
+  CREATE INDEX IF NOT EXISTS actions_prompt_idx ON actions(session_key, run_id, kind);
 `;

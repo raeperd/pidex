@@ -1,8 +1,10 @@
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { and, eq, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -55,8 +57,24 @@ describe("metadata store", () => {
     store = new MetadataStore();
     expect(store.workspaceId("/tmp/example-project")).toBeUndefined();
     const id = store.rememberWorkspace("/tmp/example-project");
+    expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
     expect(store.workspaceId("/tmp/example-project")).toBe(id);
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
+  });
+
+  it("waits for temporary SQLite write contention", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-contention-"));
+    process.env.PIDEX_STATE_DIR = stateDir;
+    store = new MetadataStore();
+    const worker = holdWriteLock(path.join(stateDir, "pidex.sqlite"));
+    const exited = once(worker, "exit");
+    await once(worker, "message");
+
+    const id = store.rememberWorkspace("/tmp/contended-project");
+
+    expect(id).toHaveLength(32);
+    expect(await exited).toEqual([0]);
+    expect(store.workspaceId("/tmp/contended-project")).toBe(id);
   });
 
   it("persists action transitions and replays through Drizzle transactions", async () => {
@@ -111,7 +129,33 @@ describe("metadata store", () => {
     ).toMatchObject({ revision: 4, replayed: false });
   });
 
-  it("initializes only the product tables without a migration backup", async () => {
+  it("rejects conflicting actions without consuming a revision", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-conflicts-"));
+    store = new MetadataStore();
+    const request = {
+      actionId: "actionconflict01",
+      clientId: "clientconflict1",
+      expectedRevision: 0,
+      requestDigest: requestDigest({ text: "original" }),
+      sessionKey: "session-conflicts",
+    };
+    store.acceptPrompt(request);
+
+    expect(() =>
+      store!.acceptPrompt({ ...request, requestDigest: requestDigest({ text: "changed" }) }),
+    ).toThrowError(expect.objectContaining({ code: "action_conflict" }));
+    expect(() =>
+      store!.acceptSessionMutation({
+        ...request,
+        actionId: "actionstale0001",
+        kind: "rename",
+        requestDigest: requestDigest({ name: "stale" }),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "stale_revision" }));
+    expect(store.sessionState(request.sessionKey).revision).toBe(1);
+  });
+
+  it("initializes the optimized product schema without a migration backup", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-schema-"));
     process.env.PIDEX_STATE_DIR = stateDir;
     store = new MetadataStore();
@@ -125,6 +169,12 @@ describe("metadata store", () => {
       .where(and(eq(sqliteMaster.type, "table"), notLike(sqliteMaster.name, "sqlite_%")))
       .orderBy(sqliteMaster.name)
       .all();
+    const indexes = drizzle({ client: database })
+      .select({ name: sqliteMaster.name })
+      .from(sqliteMaster)
+      .where(and(eq(sqliteMaster.type, "index"), notLike(sqliteMaster.name, "sqlite_%")))
+      .orderBy(sqliteMaster.name)
+      .all();
     database.close();
 
     expect(tables).toEqual([
@@ -132,9 +182,76 @@ describe("metadata store", () => {
       { name: "session_state" },
       { name: "workspaces" },
     ]);
+    expect(indexes).toEqual([{ name: "actions_prompt_idx" }, { name: "workspaces_recent_idx" }]);
     expect(existsSync(path.join(stateDir, "pidex.sqlite.pre-continuity-v1.backup"))).toBe(false);
   });
+
+  it("rolls back crash recovery when either durable update fails", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-recovery-"));
+    process.env.PIDEX_STATE_DIR = stateDir;
+    store = new MetadataStore();
+    const request = {
+      actionId: "actionrecovery01",
+      clientId: "clientrecovery1",
+      expectedRevision: 0,
+      requestDigest: requestDigest({ text: "recover" }),
+      sessionKey: "session-recovery",
+    };
+    const accepted = store.acceptPrompt(request);
+    store.markPromptStatus(request.sessionKey, accepted.runId, "running");
+    store.close();
+    store = undefined;
+
+    const databasePath = path.join(stateDir, "pidex.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TRIGGER block_session_recovery
+      BEFORE UPDATE OF run_status ON session_state
+      WHEN NEW.run_status = 'interrupted'
+      BEGIN
+        SELECT RAISE(ABORT, 'recovery blocked');
+      END;
+    `);
+    database.close();
+
+    expect(() => new MetadataStore()).toThrow(/Failed query: update "session_state"/);
+
+    const inspection = new DatabaseSync(databasePath);
+    const action = inspection
+      .prepare("SELECT status FROM actions WHERE action_id = ?")
+      .get(request.actionId) as { status: string };
+    const session = inspection
+      .prepare("SELECT run_status FROM session_state WHERE session_key = ?")
+      .get(request.sessionKey) as { run_status: string };
+    expect(action.status).toBe("running");
+    expect(session.run_status).toBe("running");
+    inspection.exec("DROP TRIGGER block_session_recovery");
+    inspection.close();
+
+    store = new MetadataStore();
+    expect(store.sessionState(request.sessionKey).run).toMatchObject({
+      status: "interrupted",
+      requiresAcknowledgement: true,
+    });
+  });
 });
+
+function holdWriteLock(databasePath: string) {
+  return new Worker(
+    `
+      const { DatabaseSync } = require("node:sqlite");
+      const { parentPort, workerData } = require("node:worker_threads");
+      const database = new DatabaseSync(workerData.databasePath);
+      database.exec("BEGIN IMMEDIATE");
+      parentPort.postMessage("locked");
+      setTimeout(() => {
+        database.exec("COMMIT");
+        database.close();
+      }, 100);
+    `,
+    { eval: true, workerData: { databasePath } },
+  );
+}
 
 const sqliteMaster = sqliteTable("sqlite_master", {
   type: text("type").notNull(),

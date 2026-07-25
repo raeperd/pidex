@@ -17,11 +17,15 @@ export type ActionKind =
   | "rename"
   | "acknowledge";
 
-export const workspaces = sqliteTable("workspaces", {
-  id: text("id").primaryKey(),
-  path: text("path").notNull().unique(),
-  openedAt: text("opened_at").notNull(),
-});
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    path: text("path").notNull().unique(),
+    openedAt: text("opened_at").notNull(),
+  },
+  (table) => [index("workspaces_recent_idx").on(desc(table.openedAt), table.id)],
+);
 
 export const sessionState = sqliteTable("session_state", {
   sessionKey: text("session_key").primaryKey(),
@@ -49,5 +53,5 @@ export const actions = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
-  (table) => [index("actions_session_idx").on(table.sessionKey, desc(table.createdAt))],
+  (table) => [index("actions_prompt_idx").on(table.sessionKey, table.runId, table.kind)],
 );
