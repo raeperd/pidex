@@ -1,6 +1,6 @@
 # Pidex
 
-Pidex is a local, private control surface for the installed Pi coding agent. The browser and Electron renderer are clients only: Pi’s SDK owns authentication, models, resources, tools, agent execution, and native JSONL conversation sessions. SQLite stores only Pidex metadata, durable client actions, run outcomes, and session revisions—never transcripts or credentials.
+Pidex is a local, private control surface for the installed Pi coding agent. The browser and Electron renderer are clients only: Pi’s SDK owns authentication, models, resources, tools, agent execution, and native JSONL conversation sessions. Drizzle ORM over `node:sqlite` stores only Pidex metadata, durable client actions, run outcomes, and session revisions—never transcripts or credentials.
 
 ## Requirements and setup
 
@@ -45,7 +45,7 @@ apps/desktop ───────────> packages/api
 ```
 
 - `packages/api`: browser-safe Zod schemas and inferred protocol types.
-- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, and SQLite metadata.
+- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, and Drizzle-backed SQLite metadata.
 - `apps/web`: responsive Svelte 5/Tailwind 4 client, name-first project picker, bounded nested task previews, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
