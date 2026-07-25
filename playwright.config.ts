@@ -15,7 +15,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "pnpm build && pnpm start",
-    url: `${e2eOrigin}/api/health`,
+    url: e2eOrigin,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {

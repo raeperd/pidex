@@ -38,8 +38,13 @@ function spawnServer() {
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt++) {
     try {
-      const response = await fetch(`${localUrl}/api/health`);
-      const health = healthSchema.safeParse(await response.json());
+      const response = await fetch(`${localUrl}/api/rpc/system/health`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"json":{}}',
+      });
+      const payload = (await response.json()) as { json?: unknown };
+      const health = healthSchema.safeParse(payload.json);
       if (response.ok && health.success) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 125));

@@ -12,7 +12,11 @@ function waitForBackend(): Plugin {
       const deadline = Date.now() + 30_000;
       while (Date.now() < deadline) {
         try {
-          const response = await fetch(`${backendUrl}/api/health`);
+          const response = await fetch(`${backendUrl}/api/rpc/system/health`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: '{"json":{}}',
+          });
           if (response.ok) return;
         } catch {
           // The server process is still starting.
