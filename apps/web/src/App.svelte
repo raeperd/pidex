@@ -18,6 +18,10 @@
   import Markdown from "./Markdown.svelte";
 
   const THREAD_PREVIEW_COUNT = 6;
+  const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
+  const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+  type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
   let snapshot = $state.raw<ChatSnapshot>();
@@ -27,9 +31,6 @@
   let projectPath = $state("");
   let projectQuery = $state("");
   let draft = $state("");
-  let newChatModel = $state("");
-  let newChatThinkingLevel = $state<ChatSnapshot["thinkingLevel"]>("medium");
-  let newChatToolMode = $state<ChatSnapshot["toolMode"]>("read-only");
   let search = $state("");
   let searchOpen = $state(false);
   let connection = $state<ConnectionState>("disconnected");
@@ -43,10 +44,11 @@
   let chatLoading = $state(false);
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
-  let delivery = $state<"normal" | "steer" | "follow-up">("normal");
+  let delivery = $state<"steer" | "follow-up">("steer");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
+  let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
   let copyState = $state.raw<Record<string, "copied" | "failed">>({});
   let toolOutputs = $state.raw<
     Record<
@@ -83,6 +85,19 @@
 
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
+  );
+  let configurationDraft = $derived(
+    snapshot ? (configurationDrafts[snapshot.sessionId] ?? {}) : {},
+  );
+  let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
+  let selectedThinkingLevel = $derived(
+    configurationDraft.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
+  );
+  let selectedToolMode = $derived(configurationDraft.toolMode ?? snapshot?.toolMode ?? "read-only");
+  let hasConfigurationDraft = $derived(
+    configurationDraft.model !== undefined ||
+      configurationDraft.thinkingLevel !== undefined ||
+      configurationDraft.toolMode !== undefined,
   );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   function projectLabel(project: RecentWorkspace) {
@@ -124,6 +139,7 @@
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
   let currentTitle = $derived.by(() => {
+    if (!snapshot) return workspace ? "No active thread" : "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
     const firstUser = snapshot?.items.find((item) => item.type === "user");
     if (firstUser?.type === "user")
@@ -321,51 +337,23 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  let selectedNewChatModel = $derived(
-    workspace?.models.some((model) => model.id === newChatModel)
-      ? newChatModel
-      : (workspace?.models[0]?.id ?? ""),
-  );
-  function prepareNewChat(target = workspace) {
+  async function newChat(target = workspace) {
     if (!target || chatLoading) return;
-    persistDraft();
-    chatConnection.close();
-    workspace = target;
-    projectPath = target.path;
-    rememberWorkspace(target);
-    localStorage.setItem("pidex:last-project", target.path);
-    snapshot = undefined;
-    draft = "";
-    drawerOpen = false;
-    void tick().then(() => promptInput?.focus());
-  }
-  async function newChat(
-    target = workspace,
-    initialDraft = "",
-    configuration: Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">> = {},
-  ) {
-    if (!target || chatLoading) return false;
-    let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
+      const created = await api.createChat(target.id);
+      persistDraft();
+      chatConnection.close();
       workspace = target;
       projectPath = target.path;
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
-      created = await api.createChat(target.id);
       snapshot = created;
-      if (configuration.model || configuration.thinkingLevel || configuration.toolMode)
-        snapshot = await api.configure(snapshot.chatId, configuration, snapshot.revision);
-      await afterChat(initialDraft, true);
-      return true;
+      draft = "";
+      await afterChat("", true);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not create chat";
-      if (created) {
-        snapshot = created;
-        await afterChat(initialDraft, true);
-      }
-      return false;
     } finally {
       chatLoading = false;
     }
@@ -374,7 +362,7 @@
     const target =
       workspaceFor(project.id) ??
       (await openProject(project.path, { activate: false, moveToTop: false }));
-    if (target) prepareNewChat(target);
+    if (target) await newChat(target);
   }
   async function resume(session: SessionSummary, target: Workspace) {
     if (chatLoading) return;
@@ -401,6 +389,7 @@
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
+    restoreConfigurationDraft();
     if (snapshot) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
@@ -491,19 +480,12 @@
   }
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
+    const chatId = snapshot.chatId;
     const text = draft.trim();
     const mode = active ? delivery : "normal";
+    if (mode === "normal" && !(await applyConfigurationDraft())) return;
+    if (snapshot?.chatId !== chatId) return;
     await submitPrompt(text, mode);
-  }
-  async function startChat() {
-    if (!workspace || !draft.trim() || !workspace.models.length || chatLoading) return;
-    const text = draft.trim();
-    const created = await newChat(workspace, text, {
-      model: selectedNewChatModel,
-      thinkingLevel: newChatThinkingLevel,
-      toolMode: newChatToolMode,
-    });
-    if (created && snapshot) await submitPrompt(text, "normal");
   }
   async function submitPrompt(text: string, mode: "normal" | "steer" | "follow-up") {
     if (!snapshot) return;
@@ -549,13 +531,94 @@
       error = cause instanceof Error ? cause.message : "Could not clear queued instructions";
     }
   }
-  async function configure(patch: Parameters<PidexApiClient["configure"]>[1]) {
-    if (!snapshot) return;
+  async function configure(patch: ChatConfiguration) {
+    if (!snapshot) return false;
+    const chatId = snapshot.chatId;
     try {
-      snapshot = await api.configure(snapshot.chatId, patch, snapshot.revision);
+      const configured = await api.configure(chatId, patch, snapshot.revision);
+      if (snapshot?.chatId === chatId) snapshot = configured;
+      return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Configuration failed";
+      return false;
     }
+  }
+  function stageConfiguration(patch: ChatConfiguration) {
+    if (!snapshot) return;
+    const next = { ...configurationDraft };
+    if (patch.model !== undefined) {
+      if (patch.model === snapshot.model) delete next.model;
+      else next.model = patch.model;
+    }
+    if (patch.thinkingLevel !== undefined) {
+      if (patch.thinkingLevel === snapshot.thinkingLevel) delete next.thinkingLevel;
+      else next.thinkingLevel = patch.thinkingLevel;
+    }
+    if (patch.toolMode !== undefined) {
+      if (patch.toolMode === snapshot.toolMode) delete next.toolMode;
+      else next.toolMode = patch.toolMode;
+    }
+    setConfigurationDraft(snapshot.sessionId, next);
+  }
+  async function applyConfigurationDraft() {
+    if (!snapshot || !hasConfigurationDraft) return true;
+    const sessionId = snapshot.sessionId;
+    const applied = { ...configurationDraft };
+    if (!(await configure(applied))) return false;
+
+    const remaining = { ...configurationDrafts[sessionId] };
+    if (remaining.model === applied.model) delete remaining.model;
+    if (remaining.thinkingLevel === applied.thinkingLevel) delete remaining.thinkingLevel;
+    if (remaining.toolMode === applied.toolMode) delete remaining.toolMode;
+    setConfigurationDraft(sessionId, remaining);
+    return true;
+  }
+  function restoreConfigurationDraft() {
+    if (!snapshot) return;
+    try {
+      const stored = localStorage.getItem(configurationDraftKey(snapshot.sessionId));
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      const restored: ChatConfiguration = {};
+      if (
+        typeof parsed.model === "string" &&
+        workspace?.models.some((model) => model.id === parsed.model) &&
+        parsed.model !== snapshot.model
+      )
+        restored.model = parsed.model;
+      if (
+        typeof parsed.thinkingLevel === "string" &&
+        THINKING_LEVELS.includes(parsed.thinkingLevel as ChatSnapshot["thinkingLevel"]) &&
+        parsed.thinkingLevel !== snapshot.thinkingLevel
+      )
+        restored.thinkingLevel = parsed.thinkingLevel as ChatSnapshot["thinkingLevel"];
+      if (
+        (parsed.toolMode === "read-only" || parsed.toolMode === "full") &&
+        parsed.toolMode !== snapshot.toolMode
+      )
+        restored.toolMode = parsed.toolMode;
+      setConfigurationDraft(snapshot.sessionId, restored);
+    } catch {
+      setConfigurationDraft(snapshot.sessionId, {});
+    }
+  }
+  function setConfigurationDraft(sessionId: string, value: ChatConfiguration) {
+    const next = { ...configurationDrafts };
+    const hasValue =
+      value.model !== undefined ||
+      value.thinkingLevel !== undefined ||
+      value.toolMode !== undefined;
+    if (hasValue) {
+      next[sessionId] = value;
+      localStorage.setItem(configurationDraftKey(sessionId), JSON.stringify(value));
+    } else {
+      delete next[sessionId];
+      localStorage.removeItem(configurationDraftKey(sessionId));
+    }
+    configurationDrafts = next;
+  }
+  function configurationDraftKey(sessionId: string) {
+    return `${CONFIGURATION_DRAFT_PREFIX}${sessionId}`;
   }
   function openRename() {
     if (!snapshot) return;
@@ -721,8 +784,7 @@
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      if (snapshot) void send();
-      else void startChat();
+      void send();
     }
   }
   function onScroll() {
@@ -826,15 +888,6 @@
         title={searchOpen ? "Close search" : "Search (⌘K)"}
       >
         <Icon name={searchOpen ? "x" : "search"} />
-      </button>
-      <button
-        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-        onclick={() => prepareNewChat()}
-        disabled={!workspace || chatLoading}
-        aria-label="New chat"
-        title="New chat"
-      >
-        <Icon name="compose" />
       </button>
     </div>
 
@@ -1208,90 +1261,15 @@
         </div>
       {:else if !snapshot}
         <div
-          class="grid min-h-full w-full grid-cols-[minmax(0,1fr)] grid-rows-[1fr_auto] px-6 pt-12 pb-6 max-[900px]:px-4.5 max-[900px]:pt-9 max-[900px]:pb-4.5 max-[560px]:px-3 max-[560px]:pt-7 max-[560px]:pb-3"
+          class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
+          role="status"
         >
-          <div class="w-[min(780px,100%)] place-self-center pb-6 text-center max-[560px]:pb-4.5">
-            <h1
-              class="m-0 text-[clamp(24px,2.4vw,32px)] font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
-            >
-              What should we build in <strong class="font-medium">{workspace.name}</strong>?
-            </h1>
-          </div>
-          <div class="w-full self-end">
-            <div class="chat-composer mx-auto" data-testid="chat-composer">
-              <textarea
-                class="chat-composer__input"
-                bind:this={promptInput}
-                bind:value={draft}
-                oninput={draftInput}
-                onkeydown={keydown}
-                rows="2"
-                placeholder={`Ask Pi to work on ${workspace.name}…`}
-                aria-label="Prompt"></textarea>
-              <div class="chat-composer__toolbar">
-                <div class="chat-composer__controls">
-                  <label class="chat-composer__control">
-                    <span
-                      class="chat-composer__control-icon chat-composer__model-mark"
-                      aria-hidden="true">π</span
-                    >
-                    <select
-                      class="chat-composer__select"
-                      aria-label="Model"
-                      value={selectedNewChatModel}
-                      onchange={(event) => (newChatModel = event.currentTarget.value)}
-                      disabled={!workspace.models.length || chatLoading}
-                    >
-                      {#each workspace.models as model (model.id)}<option value={model.id}
-                          >{model.name}</option
-                        >{/each}
-                    </select>
-                  </label>
-                  <span class="chat-composer__divider" aria-hidden="true"></span>
-                  <label class="chat-composer__control">
-                    <span class="chat-composer__control-icon" aria-hidden="true"
-                      ><Icon name="activity" size={14} /></span
-                    >
-                    <select
-                      class="chat-composer__select"
-                      aria-label="Thinking level"
-                      bind:value={newChatThinkingLevel}
-                      disabled={chatLoading}
-                    >
-                      <option value="off">Off</option><option value="minimal">Minimal</option
-                      ><option value="low">Low</option><option value="medium">Medium</option><option
-                        value="high">High</option
-                      ><option value="xhigh">Extra high</option><option value="max">Max</option>
-                    </select>
-                  </label>
-                  <span class="chat-composer__divider" aria-hidden="true"></span>
-                  <label class="chat-composer__control">
-                    <span class="chat-composer__control-icon" aria-hidden="true"
-                      ><Icon name="shield" size={14} /></span
-                    >
-                    <select
-                      class="chat-composer__select"
-                      aria-label="Tool access"
-                      bind:value={newChatToolMode}
-                      disabled={chatLoading}
-                    >
-                      <option value="read-only">Read only</option><option value="full"
-                        >Full access</option
-                      >
-                    </select>
-                  </label>
-                </div>
-                <div class="flex min-w-0 flex-none items-center gap-1">
-                  <button
-                    class="chat-composer__send"
-                    onclick={startChat}
-                    disabled={!draft.trim() || !workspace.models.length || chatLoading}
-                    aria-label="Send"><Icon name="send" /></button
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
+          <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
+            Pick a thread to continue
+          </h1>
+          <p class="mt-2 text-sm leading-relaxed text-muted">
+            Select an existing thread or create a new one to get started.
+          </p>
         </div>
       {:else}
         <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-12.5 max-[900px]:px-4 max-[350px]:px-3">
@@ -1457,16 +1435,12 @@
           <div class="chat-composer__toolbar">
             <div class="chat-composer__controls">
               <label class="chat-composer__control">
-                <span
-                  class="chat-composer__control-icon chat-composer__model-mark"
-                  aria-hidden="true">π</span
-                >
                 <select
                   class="chat-composer__select"
                   aria-label="Model"
-                  value={snapshot.model}
-                  onchange={(e) => configure({ model: e.currentTarget.value })}
-                  disabled={active || !workspace?.models.length}
+                  value={selectedModel}
+                  onchange={(e) => stageConfiguration({ model: e.currentTarget.value })}
+                  disabled={!workspace?.models.length}
                 >
                   {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
                       >{model.name}</option
@@ -1481,12 +1455,11 @@
                 <select
                   class="chat-composer__select"
                   aria-label="Thinking level"
-                  value={snapshot.thinkingLevel}
+                  value={selectedThinkingLevel}
                   onchange={(e) =>
-                    configure({
+                    stageConfiguration({
                       thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
                     })}
-                  disabled={active}
                 >
                   <option value="off">Off</option><option value="minimal">Minimal</option><option
                     value="low">Low</option
@@ -1503,16 +1476,19 @@
                 <select
                   class="chat-composer__select"
                   aria-label="Tool access"
-                  value={snapshot.toolMode}
+                  value={selectedToolMode}
                   onchange={(e) =>
-                    configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })}
-                  disabled={active}
+                    stageConfiguration({
+                      toolMode: e.currentTarget.value as ChatSnapshot["toolMode"],
+                    })}
                 >
                   <option value="read-only">Read only</option><option value="full"
                     >Full access</option
                   >
                 </select>
               </label>
+              {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span
+                >{/if}
             </div>
             <div class="flex min-w-0 flex-none items-center gap-1">
               {#if active}
