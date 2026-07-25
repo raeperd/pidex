@@ -94,12 +94,11 @@ test("keeps search and thread creation in the no-active-thread experience", asyn
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
 });
 
-test("stages configuration for the next normal turn while a run is active", async ({
-  page,
-  request,
-}) => {
+test("stages configuration without overwriting the next draft", async ({ page, request }) => {
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
+  const { promise: configurationPending, resolve: releaseConfiguration } =
+    Promise.withResolvers<void>();
   let snapshot: Record<string, unknown> | undefined;
 
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -127,6 +126,7 @@ test("stages configuration for the next normal turn while a run is active", asyn
     if (!snapshot) throw new Error("Expected a chat before configuration");
     const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
     mutations.push({ procedure: "configure", input });
+    await configurationPending;
     snapshot = {
       ...snapshot,
       ...(typeof input.model === "string" ? { model: input.model } : {}),
@@ -181,12 +181,16 @@ test("stages configuration for the next normal turn while a run is active", asyn
   await prompt.fill("Start the first turn");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  await prompt.fill("Draft the next turn while configuration is pending");
+  releaseConfiguration();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
   expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: nextThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
   await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
+  await expect(prompt).toHaveValue("Draft the next turn while configuration is pending");
 
   mutations.length = 0;
   const chatId = String(snapshot?.chatId);

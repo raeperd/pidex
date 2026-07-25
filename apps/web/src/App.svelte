@@ -478,21 +478,29 @@
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
     const chatId = snapshot.chatId;
-    const text = draft.trim();
+    const submittedDraft = draft;
+    const text = submittedDraft.trim();
     const mode = active ? delivery : "normal";
     if (mode === "normal" && !(await applyConfigurationDraft())) return;
     if (snapshot?.chatId !== chatId) return;
-    await submitPrompt(text, mode);
+    await submitPrompt(text, submittedDraft, mode);
   }
-  async function submitPrompt(text: string, mode: "normal" | "steer" | "follow-up") {
+  async function submitPrompt(
+    text: string,
+    submittedDraft: string,
+    mode: "normal" | "steer" | "follow-up",
+  ) {
     if (!snapshot) return;
     const matching =
       pendingPrompt?.text === text && pendingPrompt.delivery === mode ? pendingPrompt : undefined;
     pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: mode };
     localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
-    draft = "";
-    persistDraft();
-    void tick().then(resizePrompt);
+    const clearedSubmittedDraft = draft === submittedDraft;
+    if (clearedSubmittedDraft) {
+      draft = "";
+      persistDraft();
+      void tick().then(resizePrompt);
+    }
     try {
       const outcome = await api.sendMessage(
         snapshot.chatId,
@@ -505,9 +513,11 @@
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
       clearPendingPrompt();
     } catch (cause) {
-      draft = text;
-      persistDraft();
-      void tick().then(resizePrompt);
+      if (clearedSubmittedDraft && !draft) {
+        draft = text;
+        persistDraft();
+        void tick().then(resizePrompt);
+      }
       error = cause instanceof Error ? cause.message : "Prompt rejected";
     }
   }
