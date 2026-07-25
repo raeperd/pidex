@@ -52,7 +52,7 @@ describe("ChatConnection", () => {
     expect(second.sent).toEqual([
       JSON.stringify({
         type: "hello",
-        protocolVersion: 3,
+        protocolVersion: 4,
         chatId: "chat_second",
       }),
     ]);

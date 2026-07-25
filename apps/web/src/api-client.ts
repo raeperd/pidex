@@ -15,7 +15,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import { ResponseValidationPlugin } from "@orpc/contract/plugins";
 
 type Delivery = "normal" | "steer" | "follow-up";
-type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">>;
+type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
 
 export class PidexApiClient {
   private csrfToken = "";

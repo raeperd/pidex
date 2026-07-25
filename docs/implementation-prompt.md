@@ -31,7 +31,7 @@ Deliver a local, private, responsive Pi control surface that lets the user:
 - list and resume native Pi sessions for that project;
 - stream assistant text, thinking, and tool activity;
 - send a prompt, steer an active run, queue a follow-up, clear supported queues, and stop;
-- choose an available model, thinking level, and actual read-only or full tool set while idle;
+- choose an available model and thinking level;
 - rename and compact a session and view useful session statistics when supported by the matched SDK;
 - recover the current transcript and run state after a browser reconnect or server restart;
 - use the same interface comfortably in Electron and a mobile browser.
@@ -156,9 +156,6 @@ For each live chat:
 - load normal global and project settings, instruction files, skills, prompt templates, extensions, custom models, and tools through Pi's documented resource loader;
 - honor existing project-trust decisions and never silently approve trust. If protected resources are skipped, keep the session usable and show a clear notice;
 - list authenticated and available models from Pi rather than hard-coding them. If none are available, instruct the user to run Pi and log in locally; do not build a browser credential form;
-- default new browser chats to a real read-only tool allowlist such as `read`, `grep`, `find`, and `ls`, using the exact tools exposed by the installed SDK;
-- allow switching to Pi's real full tool set only while idle. If tool selection applies only at construction, dispose and reopen the same idle session exactly once with the new set;
-- clearly explain that read-only is a model-tool allowlist, not an operating-system sandbox, and does not make extensions harmless;
 - implement model and thinking changes, rename, compact, stats, prompt, steer, follow-up, abort, supported queue clearing, and clean disposal through documented public APIs.
 
 Bind supported extension interactions through Pi's documented non-TUI UI context. Bridge select, confirm, single-line input, multiline input, notifications, and status to accessible browser dialogs or events. Match responses by request ID, cancel pending requests on session disposal, never auto-confirm security questions, and fail visibly rather than hanging when a TUI-only interaction has no safe browser equivalent.

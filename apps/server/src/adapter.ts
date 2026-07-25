@@ -27,7 +27,6 @@ export interface AdapterSession {
   readonly messages: TextItem[];
   readonly model: string | undefined;
   readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  readonly activeTools: string[];
   readonly sessionName: string | undefined;
   readonly isIdle: boolean;
   subscribe(listener: (event: AdapterEvent) => void): () => void;
@@ -39,7 +38,6 @@ export interface AdapterSession {
   configure(input: {
     model?: string;
     thinkingLevel?: AdapterSession["thinkingLevel"];
-    toolMode?: "read-only" | "full";
   }): Promise<void>;
   rename(name: string): void;
   compact(instructions?: string): Promise<void>;

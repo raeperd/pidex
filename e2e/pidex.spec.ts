@@ -11,7 +11,7 @@ test("serves the Pi host and branded assets", async ({ request }) => {
   expect(health.response.status()).toBe(200);
   expect(health.result).toEqual({
     ok: true,
-    protocolVersion: 3,
+    protocolVersion: 4,
   });
 
   const png = await request.get("/pidex-icon.png");
@@ -144,7 +144,6 @@ test("keeps search and thread creation in the no-active-thread experience", asyn
   await expect(page.getByText("No active thread", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Prompt")).toHaveCount(0);
   await expect(page.getByLabel("Thinking level")).toHaveCount(0);
-  await expect(page.getByLabel("Tool access")).toHaveCount(0);
 
   await openSessions(page);
   await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toHaveCount(0);
@@ -174,7 +173,6 @@ test("keeps search and thread creation in the no-active-thread experience", asyn
   await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toHaveCount(0);
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
-  await expect(page.getByLabel("Tool access")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
 });
@@ -216,7 +214,6 @@ test("stages configuration for the next normal turn while a run is active", asyn
       ...snapshot,
       ...(typeof input.model === "string" ? { model: input.model } : {}),
       ...(typeof input.thinkingLevel === "string" ? { thinkingLevel: input.thinkingLevel } : {}),
-      ...(typeof input.toolMode === "string" ? { toolMode: input.toolMode } : {}),
       revision: Number(input.expectedRevision) + 1,
     };
     await route.fulfill({
@@ -257,7 +254,6 @@ test("stages configuration for the next normal turn while a run is active", asyn
 
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
-  const tools = page.getByLabel("Tool access");
   await expect(prompt).toBeVisible();
 
   const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
@@ -292,10 +288,9 @@ test("stages configuration for the next normal turn while a run is active", asyn
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(thinking).toBeEnabled();
-  await expect(tools).toBeEnabled();
 
-  const nextToolMode = (await tools.inputValue()) === "full" ? "read-only" : "full";
-  await tools.selectOption(nextToolMode);
+  const stagedThinking = nextThinking === "high" ? "medium" : "high";
+  await thinking.selectOption(stagedThinking);
   await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
   expect(mutations).toEqual([]);
 
@@ -324,7 +319,7 @@ test("stages configuration for the next normal turn while a run is active", asyn
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
-  expect(mutations[0]?.input).toEqual(expect.objectContaining({ toolMode: nextToolMode }));
+  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: stagedThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
 

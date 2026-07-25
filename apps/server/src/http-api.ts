@@ -157,7 +157,6 @@ export function createRpcApiRouter({ csrf, roots, metadata, pi, manager }: HttpA
         const patch = {
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
-          ...(input.toolMode ? { toolMode: input.toolMode } : {}),
         };
         const outcome = metadata.acceptSessionMutation({
           actionId: input.actionId,

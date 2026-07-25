@@ -49,7 +49,6 @@ interface ChatRecord {
   sessionOpaqueId: string;
   sessionKey: string;
   session: AdapterSession;
-  toolMode: "read-only" | "full";
   revision: number;
   run?: RunOutcome;
   runStatus: ChatSnapshot["runStatus"];
@@ -147,7 +146,6 @@ export class ChatManager {
       sessionOpaqueId,
       sessionKey,
       session,
-      toolMode: "read-only",
       revision: persisted.revision,
       ...(persisted.run ? { run: persisted.run } : {}),
       runStatus: runIsActive ? "running" : "idle",
@@ -174,7 +172,7 @@ export class ChatManager {
 
   async create(workspaceId: string) {
     const ws = this.workspace(workspaceId);
-    const session = await this.pi.createSession(ws.path, "read-only");
+    const session = await this.pi.createSession(ws.path);
     const sessionKey = nativeSessionKey(session);
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
@@ -222,8 +220,6 @@ export class ChatManager {
       runStatus: chat.runStatus,
       ...(chat.session.model ? { model: chat.session.model } : {}),
       thinkingLevel: chat.session.thinkingLevel,
-      toolMode: chat.toolMode,
-      activeTools: chat.session.activeTools,
       items: transcript.items,
       transcriptStart: transcript.start,
       transcriptTotal: transcript.total,
@@ -495,7 +491,6 @@ export class ChatManager {
   }
   async configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) {
     await chat.session.configure(input);
-    if (input.toolMode) chat.toolMode = input.toolMode;
     this.broadcast(chat, {
       type: "session",
       ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}),

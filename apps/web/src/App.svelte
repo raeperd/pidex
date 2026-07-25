@@ -93,11 +93,8 @@
   let selectedThinkingLevel = $derived(
     configurationDraft.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
   );
-  let selectedToolMode = $derived(configurationDraft.toolMode ?? snapshot?.toolMode ?? "read-only");
   let hasConfigurationDraft = $derived(
-    configurationDraft.model !== undefined ||
-      configurationDraft.thinkingLevel !== undefined ||
-      configurationDraft.toolMode !== undefined,
+    configurationDraft.model !== undefined || configurationDraft.thinkingLevel !== undefined,
   );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   function projectLabel(project: RecentWorkspace) {
@@ -554,10 +551,6 @@
       if (patch.thinkingLevel === snapshot.thinkingLevel) delete next.thinkingLevel;
       else next.thinkingLevel = patch.thinkingLevel;
     }
-    if (patch.toolMode !== undefined) {
-      if (patch.toolMode === snapshot.toolMode) delete next.toolMode;
-      else next.toolMode = patch.toolMode;
-    }
     setConfigurationDraft(snapshot.sessionId, next);
   }
   async function applyConfigurationDraft() {
@@ -569,7 +562,6 @@
     const remaining = { ...configurationDrafts[sessionId] };
     if (remaining.model === applied.model) delete remaining.model;
     if (remaining.thinkingLevel === applied.thinkingLevel) delete remaining.thinkingLevel;
-    if (remaining.toolMode === applied.toolMode) delete remaining.toolMode;
     setConfigurationDraft(sessionId, remaining);
     return true;
   }
@@ -592,11 +584,6 @@
         parsed.thinkingLevel !== snapshot.thinkingLevel
       )
         restored.thinkingLevel = parsed.thinkingLevel as ChatSnapshot["thinkingLevel"];
-      if (
-        (parsed.toolMode === "read-only" || parsed.toolMode === "full") &&
-        parsed.toolMode !== snapshot.toolMode
-      )
-        restored.toolMode = parsed.toolMode;
       setConfigurationDraft(snapshot.sessionId, restored);
     } catch {
       setConfigurationDraft(snapshot.sessionId, {});
@@ -604,10 +591,7 @@
   }
   function setConfigurationDraft(sessionId: string, value: ChatConfiguration) {
     const next = { ...configurationDrafts };
-    const hasValue =
-      value.model !== undefined ||
-      value.thinkingLevel !== undefined ||
-      value.toolMode !== undefined;
+    const hasValue = value.model !== undefined || value.thinkingLevel !== undefined;
     if (hasValue) {
       next[sessionId] = value;
       localStorage.setItem(configurationDraftKey(sessionId), JSON.stringify(value));
@@ -1468,25 +1452,6 @@
                   ><option value="max">Max</option>
                 </select>
               </label>
-              <span class="chat-composer__divider" aria-hidden="true"></span>
-              <label class="chat-composer__control">
-                <span class="chat-composer__control-icon" aria-hidden="true"
-                  ><Icon name="shield" size={14} /></span
-                >
-                <select
-                  class="chat-composer__select"
-                  aria-label="Tool access"
-                  value={selectedToolMode}
-                  onchange={(e) =>
-                    stageConfiguration({
-                      toolMode: e.currentTarget.value as ChatSnapshot["toolMode"],
-                    })}
-                >
-                  <option value="read-only">Read only</option><option value="full"
-                    >Full access</option
-                  >
-                </select>
-              </label>
               {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span
                 >{/if}
             </div>
@@ -1526,16 +1491,12 @@
           </div>
         </div>
         <div
-          class="mx-auto flex w-full max-w-3xl justify-between gap-3 px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
+          class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
         >
           <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
             >{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(
               4,
             )}</span
-          >
-          <span
-            class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-right max-[560px]:hidden"
-            >{snapshot.activeTools.join(" · ")}</span
           >
         </div>
       </footer>

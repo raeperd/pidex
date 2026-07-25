@@ -1,7 +1,7 @@
 import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const idSchema = z
   .string()
   .min(8)
@@ -16,7 +16,6 @@ export const thinkingLevelSchema = z.enum([
   "xhigh",
   "max",
 ]);
-export const toolModeSchema = z.enum(["read-only", "full"]);
 export const runStatusSchema = z.enum(["idle", "running", "stopping", "compacting", "error"]);
 export const actionStatusSchema = z.enum([
   "accepted",
@@ -142,8 +141,6 @@ export const chatSnapshotSchema = z.object({
   runStatus: runStatusSchema,
   model: z.string().max(300).optional(),
   thinkingLevel: thinkingLevelSchema,
-  toolMode: toolModeSchema,
-  activeTools: z.array(z.string().max(100)),
   items: z.array(transcriptItemSchema).max(200),
   transcriptStart: z.number().int().nonnegative(),
   transcriptTotal: z.number().int().nonnegative(),
@@ -223,15 +220,10 @@ export const configRequestSchema = actionRequestBase
   .extend({
     model: z.string().max(300).optional(),
     thinkingLevel: thinkingLevelSchema.optional(),
-    toolMode: toolModeSchema.optional(),
   })
-  .refine(
-    (value) =>
-      value.model !== undefined ||
-      value.thinkingLevel !== undefined ||
-      value.toolMode !== undefined,
-    { message: "At least one configuration field is required" },
-  );
+  .refine((value) => value.model !== undefined || value.thinkingLevel !== undefined, {
+    message: "At least one configuration field is required",
+  });
 export const renameRequestSchema = actionRequestBase.extend({
   name: z.string().trim().min(1).max(200),
 });

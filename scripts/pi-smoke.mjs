@@ -11,7 +11,7 @@ if (promptIndex >= 0) {
   const text = process.argv[promptIndex + 1];
   if (!text)
     throw new Error("Pass prompt text after --prompt. This opt-in path may spend model tokens.");
-  const session = await pi.createSession(cwd, "read-only");
+  const session = await pi.createSession(cwd);
   session.subscribe((event) => {
     if (event.type === "delta" && event.channel === "text") process.stdout.write(event.delta);
   });
