@@ -159,7 +159,7 @@ The first scaffold should include only dependencies needed for the first vertica
 
 | Workspace      | Runtime dependencies                                                               |
 | -------------- | ---------------------------------------------------------------------------------- |
-| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts               |
+| `apps/desktop` | `electron`, oRPC client; packaging includes the server and web artifacts           |
 | `apps/web`     | `svelte`, oRPC client/contract, and `@pidex/api`                                   |
 | `apps/server`  | exact-matched Pi SDK, `@pidex/api`, oRPC server, `drizzle-orm`, `ws`, and `qrcode` |
 | `packages/api` | `zod`, `@orpc/contract`                                                            |

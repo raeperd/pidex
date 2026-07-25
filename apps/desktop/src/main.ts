@@ -1,11 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { healthSchema } from "@pidex/api";
+import { healthSchema, type PidexApiContractClient } from "@pidex/api";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/fetch";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
 const appIconPath = path.resolve(import.meta.dirname, "../assets/icon.png");
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
 const localUrl = `http://127.0.0.1:${port}`;
+const apiClient: PidexApiContractClient = createORPCClient(
+  new RPCLink({ url: new URL("/api/rpc", localUrl) }),
+);
 let serverChild: ChildProcess | undefined;
 let quitting = false;
 let restartCount = 0;
@@ -38,14 +43,8 @@ function spawnServer() {
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt++) {
     try {
-      const response = await fetch(`${localUrl}/api/rpc/system/health`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: '{"json":{}}',
-      });
-      const payload = (await response.json()) as { json?: unknown };
-      const health = healthSchema.safeParse(payload.json);
-      if (response.ok && health.success) return;
+      const health = healthSchema.safeParse(await apiClient.system.health({}));
+      if (health.success) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 125));
   }
