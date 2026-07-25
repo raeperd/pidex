@@ -10,7 +10,9 @@ import {
   PROTOCOL_VERSION,
   type ChatSnapshot,
   type PidexApiContractClient,
+  type ServerEvent,
 } from "@pidex/api";
+import WebSocket, { type RawData } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
 
@@ -44,6 +46,7 @@ describe.sequential("HTTP API endpoints", () => {
   let workspacePath: string;
   let workspaceId: string;
   let chatId: string;
+  let websocketUrl: string;
   const originalEnvironment = preserveEnvironment([
     "PIDEX_PROJECT_ROOTS",
     "PIDEX_STATE_DIR",
@@ -69,6 +72,7 @@ describe.sequential("HTTP API endpoints", () => {
     await listen(app);
     const address = app.server.address() as AddressInfo;
     const rpcUrl = `http://127.0.0.1:${address.port}/api/rpc`;
+    websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
     const bootstrap = await publicApi.system.bootstrap({});
@@ -227,6 +231,41 @@ describe.sequential("HTTP API endpoints", () => {
     });
   });
 
+  it("broadcasts refreshed context usage after configuration", async () => {
+    const sockets = await Promise.all([
+      connectChatSocket(websocketUrl, chatId),
+      connectChatSocket(websocketUrl, chatId),
+    ]);
+    try {
+      const contextUsage = {
+        tokens: 32_000,
+        contextWindow: 128_000,
+        percent: 25,
+        totalProcessedTokens: 48_000,
+        compactsAutomatically: true,
+      };
+      Object.defineProperty(app.manager.chat(chatId).session, "contextUsage", {
+        configurable: true,
+        value: contextUsage,
+      });
+      const usageEvents = sockets.map((socket) =>
+        waitForSocketEvent(socket, (event) => event.type === "context_usage"),
+      );
+      const chat = await currentChat();
+
+      await api.chats.configure({ ...actionFor(chat), thinkingLevel: "minimal" });
+
+      const events = await Promise.all(usageEvents);
+      expect(events).toHaveLength(2);
+      for (const event of events) {
+        expect(event).toMatchObject({ type: "context_usage", chatId });
+        if (event.type === "context_usage") expect(event.usage).toEqual(contextUsage);
+      }
+    } finally {
+      for (const socket of sockets) socket.close();
+    }
+  });
+
   it("chats.rename", async () => {
     const chat = await currentChat();
     const result = await api.chats.rename({ ...actionFor(chat), name: "Renamed through HTTP" });
@@ -279,6 +318,53 @@ function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
     actionId: randomUUID().replaceAll("-", ""),
     expectedRevision: chat.revision + revisionOffset,
   };
+}
+
+async function connectChatSocket(url: string, chatId: string) {
+  const socket = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    socket.once("error", onError);
+    socket.once("open", () => {
+      socket.off("error", onError);
+      resolve();
+    });
+  });
+  const snapshot = waitForSocketEvent(socket, (event) => event.type === "snapshot");
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, chatId }));
+  await snapshot;
+  return socket;
+}
+
+function waitForSocketEvent(
+  socket: WebSocket,
+  matches: (event: ServerEvent) => boolean,
+): Promise<ServerEvent> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => finish(new Error("Timed out waiting for server event")),
+      5_000,
+    );
+    const onMessage = (data: RawData) => {
+      try {
+        const event = JSON.parse(data.toString()) as ServerEvent;
+        if (matches(event)) finish(undefined, event);
+      } catch {}
+    };
+    const onClose = () => finish(new Error("Socket closed before the expected server event"));
+    const onError = (error: Error) => finish(error);
+    const finish = (error?: Error, event?: ServerEvent) => {
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+      if (error) reject(error);
+      else resolve(event!);
+    };
+    socket.on("message", onMessage);
+    socket.once("close", onClose);
+    socket.once("error", onError);
+  });
 }
 
 function contractEndpoints(value: unknown, prefix: string[] = []): string[] {

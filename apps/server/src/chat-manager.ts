@@ -500,6 +500,8 @@ export class ChatManager {
       ...(chat.session.sessionName ? { name: chat.session.sessionName } : {}),
       stats: chat.session.getStats(),
     });
+    const contextUsage = chat.session.contextUsage;
+    if (contextUsage) this.broadcast(chat, { type: "context_usage", usage: contextUsage });
   }
   rename(chat: ChatRecord, name: string) {
     chat.session.rename(name);
