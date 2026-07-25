@@ -1194,11 +1194,9 @@
             </h1>
           </div>
           <div class="w-full self-end">
-            <div
-              class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
-            >
+            <div class="chat-composer mx-auto" data-testid="chat-composer">
               <textarea
-                class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
+                class="chat-composer__input"
                 bind:this={promptInput}
                 bind:value={draft}
                 oninput={draftInput}
@@ -1206,48 +1204,61 @@
                 rows="2"
                 placeholder={`Ask Pi to work on ${workspace.name}…`}
                 aria-label="Prompt"></textarea>
-              <div
-                class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
-              >
-                <div
-                  class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-                >
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Model"
-                    value={selectedNewChatModel()}
-                    onchange={(event) => (newChatModel = event.currentTarget.value)}
-                    disabled={!workspace.models.length || chatLoading}
-                  >
-                    {#each workspace.models as model}<option value={model.id}>{model.name}</option
-                      >{/each}
-                  </select>
-                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Thinking level"
-                    bind:value={newChatThinkingLevel}
-                    disabled={chatLoading}
-                  >
-                    {#each ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as level}<option
-                        value={level}>{level} thinking</option
-                      >{/each}
-                  </select>
-                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Tool access"
-                    bind:value={newChatToolMode}
-                    disabled={chatLoading}
-                  >
-                    <option value="read-only">Read only</option><option value="full"
-                      >Full access</option
+              <div class="chat-composer__toolbar">
+                <div class="chat-composer__controls">
+                  <label class="chat-composer__control">
+                    <span
+                      class="chat-composer__control-icon chat-composer__model-mark"
+                      aria-hidden="true">π</span
                     >
-                  </select>
+                    <select
+                      class="chat-composer__select"
+                      aria-label="Model"
+                      value={selectedNewChatModel()}
+                      onchange={(event) => (newChatModel = event.currentTarget.value)}
+                      disabled={!workspace.models.length || chatLoading}
+                    >
+                      {#each workspace.models as model}<option value={model.id}>{model.name}</option
+                        >{/each}
+                    </select>
+                  </label>
+                  <span class="chat-composer__divider" aria-hidden="true"></span>
+                  <label class="chat-composer__control">
+                    <span class="chat-composer__control-icon" aria-hidden="true"
+                      ><Icon name="activity" size={14} /></span
+                    >
+                    <select
+                      class="chat-composer__select"
+                      aria-label="Thinking level"
+                      bind:value={newChatThinkingLevel}
+                      disabled={chatLoading}
+                    >
+                      <option value="off">Off</option><option value="minimal">Minimal</option
+                      ><option value="low">Low</option><option value="medium">Medium</option><option
+                        value="high">High</option
+                      ><option value="xhigh">Extra high</option><option value="max">Max</option>
+                    </select>
+                  </label>
+                  <span class="chat-composer__divider" aria-hidden="true"></span>
+                  <label class="chat-composer__control">
+                    <span class="chat-composer__control-icon" aria-hidden="true"
+                      ><Icon name="shield" size={14} /></span
+                    >
+                    <select
+                      class="chat-composer__select"
+                      aria-label="Tool access"
+                      bind:value={newChatToolMode}
+                      disabled={chatLoading}
+                    >
+                      <option value="read-only">Read only</option><option value="full"
+                        >Full access</option
+                      >
+                    </select>
+                  </label>
                 </div>
                 <div class="flex min-w-0 flex-none items-center gap-1">
                   <button
-                    class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                    class="chat-composer__send"
                     onclick={startChat}
                     disabled={!draft.trim() || !workspace.models.length || chatLoading}
                     aria-label="Send"><Icon name="send" /></button
@@ -1404,11 +1415,9 @@
               >{/if}
           </div>
         {/if}
-        <div
-          class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
-        >
+        <div class="chat-composer mx-auto" data-testid="chat-composer">
           <textarea
-            class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
+            class="chat-composer__input"
             bind:this={promptInput}
             bind:value={draft}
             oninput={draftInput}
@@ -1420,50 +1429,65 @@
                 ? "Add guidance while Pi works…"
                 : "Ask Pi to work on this project…"}
             aria-label="Prompt"></textarea>
-          <div
-            class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
-          >
-            <div
-              class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-            >
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Model"
-                value={snapshot.model}
-                onchange={(e) => configure({ model: e.currentTarget.value })}
-                disabled={active() || !workspace?.models.length}
-              >
-                {#each workspace?.models ?? [] as model}<option value={model.id}
-                    >{model.name}</option
-                  >{/each}
-              </select>
-              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Thinking level"
-                value={snapshot.thinkingLevel}
-                onchange={(e) =>
-                  configure({
-                    thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                  })}
-                disabled={active()}
-              >
-                {#each ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as level}<option
-                    value={level}>{level} thinking</option
-                  >{/each}
-              </select>
-              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Tool access"
-                value={snapshot.toolMode}
-                onchange={(e) =>
-                  configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })}
-                disabled={active()}
-              >
-                <option value="read-only">Read only</option><option value="full">Full access</option
+          <div class="chat-composer__toolbar">
+            <div class="chat-composer__controls">
+              <label class="chat-composer__control">
+                <span
+                  class="chat-composer__control-icon chat-composer__model-mark"
+                  aria-hidden="true">π</span
                 >
-              </select>
+                <select
+                  class="chat-composer__select"
+                  aria-label="Model"
+                  value={snapshot.model}
+                  onchange={(e) => configure({ model: e.currentTarget.value })}
+                  disabled={active() || !workspace?.models.length}
+                >
+                  {#each workspace?.models ?? [] as model}<option value={model.id}
+                      >{model.name}</option
+                    >{/each}
+                </select>
+              </label>
+              <span class="chat-composer__divider" aria-hidden="true"></span>
+              <label class="chat-composer__control">
+                <span class="chat-composer__control-icon" aria-hidden="true"
+                  ><Icon name="activity" size={14} /></span
+                >
+                <select
+                  class="chat-composer__select"
+                  aria-label="Thinking level"
+                  value={snapshot.thinkingLevel}
+                  onchange={(e) =>
+                    configure({
+                      thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
+                    })}
+                  disabled={active()}
+                >
+                  <option value="off">Off</option><option value="minimal">Minimal</option><option
+                    value="low">Low</option
+                  ><option value="medium">Medium</option><option value="high">High</option><option
+                    value="xhigh">Extra high</option
+                  ><option value="max">Max</option>
+                </select>
+              </label>
+              <span class="chat-composer__divider" aria-hidden="true"></span>
+              <label class="chat-composer__control">
+                <span class="chat-composer__control-icon" aria-hidden="true"
+                  ><Icon name="shield" size={14} /></span
+                >
+                <select
+                  class="chat-composer__select"
+                  aria-label="Tool access"
+                  value={snapshot.toolMode}
+                  onchange={(e) =>
+                    configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })}
+                  disabled={active()}
+                >
+                  <option value="read-only">Read only</option><option value="full"
+                    >Full access</option
+                  >
+                </select>
+              </label>
             </div>
             <div class="flex min-w-0 flex-none items-center gap-1">
               {#if active()}
@@ -1488,7 +1512,7 @@
                 >
               {:else}
                 <button
-                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  class="chat-composer__send"
                   onclick={send}
                   disabled={!draft.trim() ||
                     !workspace?.models.length ||
