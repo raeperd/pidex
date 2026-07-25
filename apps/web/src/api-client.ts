@@ -1,102 +1,73 @@
 import {
-  actionOutcomeSchema,
-  apiErrorSchema,
-  bootstrapSchema,
-  chatSnapshotSchema,
-  okResponseSchema,
-  sessionsResponseSchema,
-  toolOutputChunkSchema,
-  transcriptPageSchema,
-  workspaceSchema,
-  type Bootstrap,
+  pidexApiContract,
   type ActionOutcome,
+  type Bootstrap,
   type ChatSnapshot,
   type ExtensionDialog,
+  type PidexApiContractClient,
   type SessionSummary,
   type ToolOutputChunk,
   type TranscriptPage,
   type Workspace,
 } from "@pidex/api";
-import type { ZodType } from "zod";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/fetch";
+import { ResponseValidationPlugin } from "@orpc/contract/plugins";
 
 type Delivery = "normal" | "steer" | "follow-up";
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">>;
 
 export class PidexApiClient {
   private csrfToken = "";
+  private readonly client: PidexApiContractClient;
   private readonly clientId: string;
 
   constructor() {
     const stored = localStorage.getItem("pidex:client-id");
     this.clientId = stored ?? this.createActionId();
     if (!stored) localStorage.setItem("pidex:client-id", this.clientId);
+
+    const link = new RPCLink({
+      url: new URL("/api/rpc", location.href),
+      headers: () => ({ "X-Pidex-CSRF": this.csrfToken }),
+      plugins: [new ResponseValidationPlugin(pidexApiContract)],
+    });
+    this.client = createORPCClient(link);
   }
 
   createActionId(): string {
     return crypto.randomUUID().replaceAll("-", "");
   }
-  private actionFields(expectedRevision: number) {
-    return { clientId: this.clientId, actionId: this.createActionId(), expectedRevision };
-  }
-
-  private async request<T>(url: string, schema: ZodType<T>, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers);
-    headers.set("Content-Type", "application/json");
-    if (init.method && init.method !== "GET") headers.set("X-Pidex-CSRF", this.csrfToken);
-
-    const response = await fetch(url, { ...init, headers });
-    const body: unknown = await response.json();
-    if (!response.ok) {
-      const error = apiErrorSchema.safeParse(body);
-      throw new Error(error.success ? error.data.error.message : "Request failed");
-    }
-    return schema.parse(body);
-  }
 
   async bootstrap(): Promise<Bootstrap> {
-    const result = await this.request("/api/bootstrap", bootstrapSchema);
+    const result = await this.client.system.bootstrap({});
     this.csrfToken = result.csrfToken;
     return result;
   }
 
   openWorkspace(path: string, remember = true): Promise<Workspace> {
-    return this.request("/api/workspaces/open", workspaceSchema, {
-      method: "POST",
-      body: JSON.stringify({ path, remember }),
-    });
+    return this.client.workspaces.open({ path, remember });
   }
 
   setWorkspaceTrust(workspaceId: string, trusted: boolean): Promise<Workspace> {
-    return this.request(`/api/workspaces/${workspaceId}/trust`, workspaceSchema, {
-      method: "POST",
-      body: JSON.stringify({ trusted }),
-    });
+    return this.client.workspaces.trust({ workspaceId, trusted });
   }
 
   async listSessions(workspaceId: string): Promise<SessionSummary[]> {
-    const result = await this.request(
-      `/api/workspaces/${workspaceId}/sessions`,
-      sessionsResponseSchema,
-    );
+    const result = await this.client.workspaces.sessions({ workspaceId });
     return result.sessions;
   }
 
   createChat(workspaceId: string): Promise<ChatSnapshot> {
-    return this.request("/api/chats", chatSnapshotSchema, {
-      method: "POST",
-      body: JSON.stringify({ workspaceId }),
-    });
+    return this.client.chats.create({ workspaceId });
   }
 
   resumeChat(workspaceId: string, sessionId: string): Promise<ChatSnapshot> {
-    return this.request("/api/chats/resume", chatSnapshotSchema, {
-      method: "POST",
-      body: JSON.stringify({ workspaceId, sessionId }),
-    });
+    return this.client.chats.resume({ workspaceId, sessionId });
   }
 
   getChat(chatId: string): Promise<ChatSnapshot> {
-    return this.request(`/api/chats/${chatId}`, chatSnapshotSchema);
+    return this.client.chats.get({ chatId });
   }
 
   sendMessage(
@@ -107,16 +78,14 @@ export class PidexApiClient {
     runId?: string,
     actionId = this.createActionId(),
   ): Promise<ActionOutcome> {
-    return this.request(`/api/chats/${chatId}/messages`, actionOutcomeSchema, {
-      method: "POST",
-      body: JSON.stringify({
-        clientId: this.clientId,
-        actionId,
-        expectedRevision,
-        text,
-        delivery,
-        ...(runId ? { runId } : {}),
-      }),
+    return this.client.chats.sendMessage({
+      chatId,
+      clientId: this.clientId,
+      actionId,
+      expectedRevision,
+      text,
+      delivery,
+      ...(runId ? { runId } : {}),
     });
   }
 
@@ -126,9 +95,12 @@ export class PidexApiClient {
     expectedRevision: number,
     actionId = this.createActionId(),
   ): Promise<ActionOutcome> {
-    return this.request(`/api/chats/${chatId}/abort`, actionOutcomeSchema, {
-      method: "POST",
-      body: JSON.stringify({ clientId: this.clientId, actionId, expectedRevision, runId }),
+    return this.client.chats.abort({
+      chatId,
+      clientId: this.clientId,
+      actionId,
+      expectedRevision,
+      runId,
     });
   }
 
@@ -137,30 +109,26 @@ export class PidexApiClient {
     expectedRevision: number,
     actionId = this.createActionId(),
   ): Promise<ActionOutcome> {
-    return this.request(`/api/chats/${chatId}/interrupted/acknowledge`, actionOutcomeSchema, {
-      method: "POST",
-      body: JSON.stringify({ clientId: this.clientId, actionId, expectedRevision }),
+    return this.client.chats.acknowledgeInterrupted({
+      chatId,
+      clientId: this.clientId,
+      actionId,
+      expectedRevision,
     });
   }
 
   toolOutput(chatId: string, resourceId: string, offset: number): Promise<ToolOutputChunk> {
-    return this.request(
-      `/api/chats/${chatId}/tools/${resourceId}?offset=${offset}&limit=16384`,
-      toolOutputChunkSchema,
-    );
+    return this.client.chats.toolOutput({ chatId, resourceId, offset, limit: 16_384 });
   }
 
   transcript(chatId: string, before: number): Promise<TranscriptPage> {
-    return this.request(
-      `/api/chats/${chatId}/transcript?before=${before}&limit=50`,
-      transcriptPageSchema,
-    );
+    return this.client.chats.transcript({ chatId, before, limit: 50 });
   }
 
   clearQueue(chatId: string, expectedRevision: number): Promise<ChatSnapshot> {
-    return this.request(`/api/chats/${chatId}/queue`, chatSnapshotSchema, {
-      method: "DELETE",
-      body: JSON.stringify(this.actionFields(expectedRevision)),
+    return this.client.chats.clearQueue({
+      chatId,
+      ...this.actionFields(expectedRevision),
     });
   }
 
@@ -169,23 +137,25 @@ export class PidexApiClient {
     patch: ChatConfiguration,
     expectedRevision: number,
   ): Promise<ChatSnapshot> {
-    return this.request(`/api/chats/${chatId}/config`, chatSnapshotSchema, {
-      method: "PATCH",
-      body: JSON.stringify({ ...this.actionFields(expectedRevision), ...patch }),
+    return this.client.chats.configure({
+      chatId,
+      ...this.actionFields(expectedRevision),
+      ...patch,
     });
   }
 
   rename(chatId: string, name: string, expectedRevision: number): Promise<ChatSnapshot> {
-    return this.request(`/api/chats/${chatId}/rename`, chatSnapshotSchema, {
-      method: "POST",
-      body: JSON.stringify({ ...this.actionFields(expectedRevision), name }),
+    return this.client.chats.rename({
+      chatId,
+      ...this.actionFields(expectedRevision),
+      name,
     });
   }
 
   compact(chatId: string, expectedRevision: number): Promise<ChatSnapshot> {
-    return this.request(`/api/chats/${chatId}/compact`, chatSnapshotSchema, {
-      method: "POST",
-      body: JSON.stringify(this.actionFields(expectedRevision)),
+    return this.client.chats.compact({
+      chatId,
+      ...this.actionFields(expectedRevision),
     });
   }
 
@@ -195,10 +165,16 @@ export class PidexApiClient {
     value: string | boolean | null,
     expectedRevision: number,
   ): Promise<void> {
-    await this.request(`/api/chats/${chatId}/dialog`, okResponseSchema, {
-      method: "POST",
-      body: JSON.stringify({ ...this.actionFields(expectedRevision), requestId, value }),
+    await this.client.chats.answerDialog({
+      chatId,
+      ...this.actionFields(expectedRevision),
+      requestId,
+      value,
     });
+  }
+
+  private actionFields(expectedRevision: number) {
+    return { clientId: this.clientId, actionId: this.createActionId(), expectedRevision };
   }
 }
 

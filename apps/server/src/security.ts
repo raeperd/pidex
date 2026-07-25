@@ -94,21 +94,6 @@ export function securityHeaders(res: ServerResponse) {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 }
-export async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buffer = Buffer.from(chunk);
-    size += buffer.length;
-    if (size > 64 * 1024) throw new HttpError(413, "Request body is too large", "body_too_large");
-    chunks.push(buffer);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-  } catch {
-    throw new HttpError(400, "Malformed JSON", "invalid_json");
-  }
-}
 export function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   return message

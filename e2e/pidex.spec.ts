@@ -1,9 +1,15 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type APIResponse,
+  type Page,
+} from "@playwright/test";
 
 test("serves the Pi host and branded assets", async ({ request }) => {
-  const health = await request.get("/api/health");
-  expect(health.status()).toBe(200);
-  await expect(health.json()).resolves.toEqual({
+  const health = await rpcRequest(request, "system/health", {});
+  expect(health.response.status()).toBe(200);
+  expect(health.result).toEqual({
     ok: true,
     protocolVersion: 3,
   });
@@ -17,47 +23,141 @@ test("serves the Pi host and branded assets", async ({ request }) => {
   expect(icon.headers()["content-type"]).toBe("image/x-icon");
 });
 
+test("serves the contract through oRPC's native transport", async ({ request }) => {
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const { csrfToken } = bootstrap.result;
+
+  const invalid = await rpcRequest(request, "chats/create", {}, csrfToken);
+  expect(invalid.response.status()).toBe(400);
+  expect(invalid.result).toEqual(
+    expect.objectContaining({ code: "BAD_REQUEST", message: "Input validation failed" }),
+  );
+
+  const malformed = await request.post("/api/rpc/chats/create", {
+    headers: { "X-Pidex-CSRF": csrfToken, "Content-Type": "application/json" },
+    data: Buffer.from("{"),
+  });
+  expect(malformed.status()).toBe(400);
+  await expect(rpcResult(malformed)).resolves.toEqual(
+    expect.objectContaining({ code: "BAD_REQUEST" }),
+  );
+
+  const missingCsrf = await rpcRequest(request, "chats/create", {
+    workspaceId: "workspace_12345",
+  });
+  expect(missingCsrf.response.status()).toBe(403);
+  expect(missingCsrf.result).toEqual(
+    expect.objectContaining({ code: "csrf", message: "Invalid CSRF token" }),
+  );
+
+  const oversized = await rpcRequest(
+    request,
+    "chats/create",
+    { workspaceId: "x".repeat(70 * 1024) },
+    csrfToken,
+  );
+  expect(oversized.response.status()).toBe(413);
+  expect(oversized.result).toEqual(expect.objectContaining({ code: "PAYLOAD_TOO_LARGE" }));
+
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    csrfToken,
+  );
+  expect(opened.response.ok()).toBe(true);
+
+  const created = await rpcRequest<{ chatId: string; revision: number }>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    csrfToken,
+  );
+  expect(created.response.status()).toBe(200);
+
+  const transcript = await rpcRequest(
+    request,
+    "chats/transcript",
+    { chatId: created.result.chatId, before: 0, limit: 50 },
+    csrfToken,
+  );
+  expect(transcript.response.status()).toBe(200);
+  expect(transcript.result).toEqual(
+    expect.objectContaining({ items: expect.any(Array), start: 0, total: 0 }),
+  );
+
+  const cleared = await rpcRequest(
+    request,
+    "chats/clearQueue",
+    {
+      chatId: created.result.chatId,
+      clientId: "e2e_client_12345",
+      actionId: crypto.randomUUID().replaceAll("-", ""),
+      expectedRevision: created.result.revision,
+    },
+    csrfToken,
+  );
+  expect(cleared.response.status()).toBe(200);
+
+  const disposed = await rpcRequest(
+    request,
+    "chats/dispose",
+    { chatId: created.result.chatId },
+    csrfToken,
+  );
+  expect(disposed.response.status()).toBe(200);
+  expect(disposed.result).toEqual({ ok: true });
+});
+
 test("keeps search and new-chat setup in the pre-chat experience", async ({ page, request }) => {
   const startRequests: Array<{ kind: "create" | "configure" | "prompt"; body: unknown }> = [];
   let createdSnapshot: Record<string, unknown> | undefined;
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
-    if (browserRequest.method() === "POST" && path === "/api/chats")
-      startRequests.push({ kind: "create", body: browserRequest.postDataJSON() });
-    else if (browserRequest.method() === "PATCH" && /^\/api\/chats\/[^/]+\/config$/.test(path))
-      startRequests.push({ kind: "configure", body: browserRequest.postDataJSON() });
-    else if (browserRequest.method() === "POST" && /^\/api\/chats\/[^/]+\/messages$/.test(path))
-      startRequests.push({ kind: "prompt", body: browserRequest.postDataJSON() });
+    const body = (browserRequest.postDataJSON() as { json?: unknown } | null)?.json;
+    if (path === "/api/rpc/chats/create") startRequests.push({ kind: "create", body });
+    else if (path === "/api/rpc/chats/configure") startRequests.push({ kind: "configure", body });
+    else if (path === "/api/rpc/chats/sendMessage") startRequests.push({ kind: "prompt", body });
   });
-  await page.route("**/api/workspaces/open", async (route) => {
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
     const response = await route.fetch();
-    const workspace = (await response.json()) as Record<string, unknown> & {
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const workspace = payload.json as Record<string, unknown> & {
       models: unknown[];
     };
     await route.fulfill({
       response,
       json: {
-        ...workspace,
-        models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        ...payload,
+        json: {
+          ...workspace,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
       },
     });
   });
-  await page.route("**/api/chats", async (route) => {
+  await page.route("**/api/rpc/chats/create", async (route) => {
     const response = await route.fetch();
-    createdSnapshot = (await response.json()) as Record<string, unknown>;
-    await route.fulfill({ response, json: createdSnapshot });
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    createdSnapshot = payload.json;
+    await route.fulfill({ response, json: payload });
   });
-  await page.route("**/api/chats/*/config", async (route) => {
+  await page.route("**/api/rpc/chats/configure", async (route) => {
     if (!createdSnapshot) throw new Error("Expected chat creation before configuration");
-    const configuration = route.request().postDataJSON() as Record<string, unknown>;
+    const configuration = (route.request().postDataJSON() as { json: Record<string, unknown> })
+      .json;
     createdSnapshot = {
       ...createdSnapshot,
       ...configuration,
       revision: Number(createdSnapshot.revision) + 1,
     };
-    await route.fulfill({ status: 200, contentType: "application/json", json: createdSnapshot });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: createdSnapshot },
+    });
   });
-  await page.route("**/api/chats/*/messages", (route) => route.abort("blockedbyclient"));
+  await page.route("**/api/rpc/chats/sendMessage", (route) => route.abort("blockedbyclient"));
 
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
@@ -98,7 +198,7 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
   await page.getByLabel("Prompt").fill("Verify first prompt configuration");
   await Promise.all([
     page.waitForRequest((browserRequest) =>
-      /\/api\/chats\/[^/]+\/messages$/.test(browserRequest.url()),
+      browserRequest.url().endsWith("/api/rpc/chats/sendMessage"),
     ),
     page.getByRole("button", { name: "Send" }).click(),
   ]);
@@ -110,14 +210,33 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
 });
 
 async function rememberWorkspace(request: APIRequestContext, workspacePath: string) {
-  const bootstrap = await request.get("/api/bootstrap");
-  expect(bootstrap.ok()).toBe(true);
-  const { csrfToken } = (await bootstrap.json()) as { csrfToken: string };
-  const opened = await request.post("/api/workspaces/open", {
-    headers: { "X-Pidex-CSRF": csrfToken },
-    data: { path: workspacePath },
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  expect(bootstrap.response.ok()).toBe(true);
+  const opened = await rpcRequest(
+    request,
+    "workspaces/open",
+    { path: workspacePath },
+    bootstrap.result.csrfToken,
+  );
+  expect(opened.response.ok()).toBe(true);
+}
+
+async function rpcRequest<T = unknown>(
+  request: APIRequestContext,
+  procedure: string,
+  input: unknown,
+  csrfToken?: string,
+) {
+  const response = await request.post(`/api/rpc/${procedure}`, {
+    headers: csrfToken ? { "X-Pidex-CSRF": csrfToken } : undefined,
+    data: { json: input },
   });
-  expect(opened.ok()).toBe(true);
+  return { response, result: (await rpcResult(response)) as T };
+}
+
+async function rpcResult(response: APIResponse) {
+  const payload = (await response.json()) as { json: unknown };
+  return payload.json;
 }
 
 async function openSessions(page: Page) {

@@ -191,16 +191,13 @@ Do not mark a run complete at an ordinary message-end or agent-end event if retr
 
 An idle Send uses Pi's prompt API. While busy, Steer must use the matched SDK's steering semantics and Follow-up must use its queued continuation semantics. Stop aborts Pi, clears supported queues, and remains visibly in Stopping state until the run settles.
 
-## HTTP and WebSocket Contract
+## Native RPC and WebSocket Contract
 
-Implement typed, Zod-validated equivalents of the reference prompt's API operations, adapted to WebSocket streaming:
+Expose the reference operations through native oRPC under `/api/rpc`:
 
-- `GET /api/health`;
-- `GET /api/bootstrap` for non-secret application and Pi status;
-- `POST /api/workspaces/open` with a canonicalized project path;
-- `GET /api/workspaces/:workspaceId/sessions`;
-- `POST /api/chats` and `POST /api/chats/resume`;
-- `GET /api/chats/:chatId` for a full authoritative snapshot;
+- `system.health` and `system.bootstrap`;
+- workspace open, session listing, and trust procedures;
+- chat creation, resume, lookup, and disposal procedures;
 - a WebSocket endpoint for snapshot, replay, live events, and connection state;
 - message operations for normal, steer, and follow-up delivery;
 - abort, queue-clear, config, rename, compact, extension-dialog response, and dispose operations.
@@ -321,7 +318,7 @@ Install only Playwright Chromium for browser tests. Default tests must never sen
 Do not hand off until:
 
 1. strict typecheck, default tests, Playwright, and production build pass;
-2. `pnpm start` serves the compiled application on `127.0.0.1:4783` by default, prints the URL, rejects invalid ports, fails clearly when occupied, and answers `/api/health`;
+2. `pnpm start` binds to `127.0.0.1:4783` and `system.health` responds;
 3. Electron supervises the server and loads the same production Svelte client used by a mobile browser;
 4. native Pi sessions can be listed, created, resumed, and recovered after server restart;
 5. prompt, streaming text and thinking, tools, steer, follow-up, queue clearing, Stop, retry, compaction, settled state, and supported extension dialogs work through the Pi SDK;

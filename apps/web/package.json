@@ -12,6 +12,8 @@
   "dependencies": {
     "@fontsource-variable/dm-sans": "5.2.8",
     "@fontsource/jetbrains-mono": "5.2.8",
+    "@orpc/client": "1.14.8",
+    "@orpc/contract": "1.14.8",
     "@pidex/api": "workspace:*",
     "dompurify": "3.3.0",
     "marked": "17.0.1",
