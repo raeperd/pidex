@@ -12,7 +12,7 @@ I should get a working dashboard that runs on the same computer as Pi and lets m
 - create or resume a native Pi session;
 - stream assistant text, thinking, and tool activity;
 - send, steer, queue a follow-up, and stop;
-- choose model, thinking level, and read-only/full tools;
+- choose model and thinking level;
 - use it comfortably from desktop and mobile;
 - reach it privately through Tailscale Serve.
 
@@ -86,7 +86,6 @@ For each live chat:
 - load the user’s normal global/project settings, AGENTS.md/CLAUDE.md files, skills, prompt templates, extensions, custom models, and tools through Pi’s normal resource loader;
 - respect existing project-trust decisions and never silently approve one. If protected resources are skipped, keep the chat usable and show a clear notice;
 - list authenticated/available models from Pi, never from a hard-coded list. If none exists, tell the user to run `pi` and `/login` locally—do not add a browser credential form;
-- default new browser chats to real read-only tools (`read`, `grep`, `find`, `ls`) and allow Full access while idle. Full means Pi’s normal tool set, including extension tools. Change the actual active tool array through a documented public API; if the matched SDK only applies tool selection at construction, dispose the idle instance and reopen the same session exactly once with the new tool set. Never show a cosmetic toggle. Explain that read-only is a model-tool allowlist, not an OS sandbox, and does not make loaded extensions harmless;
 - support model/thinking changes while idle, rename, compact, stats, prompt, steer, follow-up, abort, queue clearing when supported, and clean disposal.
 
 SESSION OWNERSHIP AND RECONCILIATION

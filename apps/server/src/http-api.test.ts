@@ -218,13 +218,12 @@ describe.sequential("HTTP API endpoints", () => {
     const chat = await currentChat();
     const result = await api.chats.configure({
       ...actionFor(chat),
-      toolMode: "full",
+      thinkingLevel: "off",
     });
 
     expect(result).toMatchObject({
       revision: chat.revision + 1,
       thinkingLevel: "off",
-      toolMode: "full",
     });
   });
 

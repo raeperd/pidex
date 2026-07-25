@@ -23,7 +23,6 @@ import {
   type AdapterWorkspaceInfo,
 } from "./adapter.js";
 
-const readOnly = ["read", "grep", "find", "ls"];
 const textOf = (content: unknown): string => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -119,9 +118,6 @@ class PiSession implements AdapterSession {
   }
   get thinkingLevel() {
     return this.session.thinkingLevel;
-  }
-  get activeTools() {
-    return this.session.getActiveToolNames();
   }
   get sessionName() {
     return this.session.sessionName;
@@ -308,11 +304,7 @@ class PiSession implements AdapterSession {
   clearQueue() {
     this.session.clearQueue();
   }
-  async configure(input: {
-    model?: string;
-    thinkingLevel?: AdapterSession["thinkingLevel"];
-    toolMode?: "read-only" | "full";
-  }) {
+  async configure(input: { model?: string; thinkingLevel?: AdapterSession["thinkingLevel"] }) {
     if (!this.session.isIdle) throw new Error("Configuration can only change while idle");
     if (input.model) {
       const slash = input.model.indexOf("/");
@@ -324,12 +316,6 @@ class PiSession implements AdapterSession {
       await this.session.setModel(model);
     }
     if (input.thinkingLevel) this.session.setThinkingLevel(input.thinkingLevel);
-    if (input.toolMode)
-      this.session.setActiveToolsByName(
-        input.toolMode === "read-only"
-          ? readOnly
-          : this.session.getAllTools().map((tool) => tool.name),
-      );
   }
   rename(name: string) {
     this.session.setSessionName(name);
@@ -430,7 +416,7 @@ export class PiSdk {
       })),
     };
   }
-  private async open(cwd: string, manager: SessionManager, toolMode: "read-only" | "full") {
+  private async open(cwd: string, manager: SessionManager) {
     const { agentDir, settings, loader, modelRuntime } = await this.services(cwd);
     const result = await createAgentSession({
       cwd,
@@ -439,19 +425,18 @@ export class PiSdk {
       resourceLoader: loader,
       modelRuntime,
       sessionManager: manager,
-      ...(toolMode === "read-only" ? { tools: readOnly } : {}),
     });
     const wrapped = new PiSession(result.session);
     await wrapped.bind();
     return wrapped;
   }
-  async createSession(cwd: string, toolMode: "read-only" | "full") {
+  async createSession(cwd: string) {
     const { sessionDir } = await this.services(cwd);
-    return this.open(cwd, SessionManager.create(cwd, sessionDir), toolMode);
+    return this.open(cwd, SessionManager.create(cwd, sessionDir));
   }
   async resumeSession(cwd: string, nativePath: string) {
     const { sessionDir } = await this.services(cwd);
-    return this.open(cwd, SessionManager.open(nativePath, sessionDir, cwd), "read-only");
+    return this.open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
   }
   async setWorkspaceTrust(cwd: string, trusted: boolean) {
     new ProjectTrustStore(getAgentDir()).set(cwd, trusted);

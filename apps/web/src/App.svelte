@@ -18,6 +18,10 @@
   import Markdown from "./Markdown.svelte";
 
   const THREAD_PREVIEW_COUNT = 6;
+  const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
+  const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+  type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
   let snapshot = $state.raw<ChatSnapshot>();
@@ -27,9 +31,6 @@
   let projectPath = $state("");
   let projectQuery = $state("");
   let draft = $state("");
-  let newChatModel = $state("");
-  let newChatThinkingLevel = $state<ChatSnapshot["thinkingLevel"]>("medium");
-  let newChatToolMode = $state<ChatSnapshot["toolMode"]>("read-only");
   let search = $state("");
   let searchOpen = $state(false);
   let connection = $state<ConnectionState>("disconnected");
@@ -43,10 +44,11 @@
   let chatLoading = $state(false);
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
-  let delivery = $state<"normal" | "steer" | "follow-up">("normal");
+  let delivery = $state<"steer" | "follow-up">("steer");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
+  let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
   let copyState = $state.raw<Record<string, "copied" | "failed">>({});
   let toolOutputs = $state.raw<
     Record<
@@ -83,6 +85,16 @@
 
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
+  );
+  let configurationDraft = $derived(
+    snapshot ? (configurationDrafts[snapshot.sessionId] ?? {}) : {},
+  );
+  let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
+  let selectedThinkingLevel = $derived(
+    configurationDraft.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
+  );
+  let hasConfigurationDraft = $derived(
+    configurationDraft.model !== undefined || configurationDraft.thinkingLevel !== undefined,
   );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   function projectLabel(project: RecentWorkspace) {
@@ -124,6 +136,7 @@
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
   let currentTitle = $derived.by(() => {
+    if (!snapshot) return workspace ? "No active thread" : "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
     const firstUser = snapshot?.items.find((item) => item.type === "user");
     if (firstUser?.type === "user")
@@ -321,51 +334,23 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  let selectedNewChatModel = $derived(
-    workspace?.models.some((model) => model.id === newChatModel)
-      ? newChatModel
-      : (workspace?.models[0]?.id ?? ""),
-  );
-  function prepareNewChat(target = workspace) {
+  async function newChat(target = workspace) {
     if (!target || chatLoading) return;
-    persistDraft();
-    chatConnection.close();
-    workspace = target;
-    projectPath = target.path;
-    rememberWorkspace(target);
-    localStorage.setItem("pidex:last-project", target.path);
-    snapshot = undefined;
-    draft = "";
-    drawerOpen = false;
-    void tick().then(() => promptInput?.focus());
-  }
-  async function newChat(
-    target = workspace,
-    initialDraft = "",
-    configuration: Partial<Pick<ChatSnapshot, "model" | "thinkingLevel" | "toolMode">> = {},
-  ) {
-    if (!target || chatLoading) return false;
-    let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
+      const created = await api.createChat(target.id);
+      persistDraft();
+      chatConnection.close();
       workspace = target;
       projectPath = target.path;
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
-      created = await api.createChat(target.id);
       snapshot = created;
-      if (configuration.model || configuration.thinkingLevel || configuration.toolMode)
-        snapshot = await api.configure(snapshot.chatId, configuration, snapshot.revision);
-      await afterChat(initialDraft, true);
-      return true;
+      draft = "";
+      await afterChat("", true);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Could not create chat";
-      if (created) {
-        snapshot = created;
-        await afterChat(initialDraft, true);
-      }
-      return false;
     } finally {
       chatLoading = false;
     }
@@ -374,7 +359,7 @@
     const target =
       workspaceFor(project.id) ??
       (await openProject(project.path, { activate: false, moveToTop: false }));
-    if (target) prepareNewChat(target);
+    if (target) await newChat(target);
   }
   async function resume(session: SessionSummary, target: Workspace) {
     if (chatLoading) return;
@@ -401,6 +386,7 @@
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.sessionId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
+    restoreConfigurationDraft();
     if (snapshot) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
@@ -491,29 +477,30 @@
   }
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
-    const text = draft.trim();
+    const chatId = snapshot.chatId;
+    const submittedDraft = draft;
+    const text = submittedDraft.trim();
     const mode = active ? delivery : "normal";
-    await submitPrompt(text, mode);
+    if (mode === "normal" && !(await applyConfigurationDraft())) return;
+    if (snapshot?.chatId !== chatId) return;
+    await submitPrompt(text, submittedDraft, mode);
   }
-  async function startChat() {
-    if (!workspace || !draft.trim() || !workspace.models.length || chatLoading) return;
-    const text = draft.trim();
-    const created = await newChat(workspace, text, {
-      model: selectedNewChatModel,
-      thinkingLevel: newChatThinkingLevel,
-      toolMode: newChatToolMode,
-    });
-    if (created && snapshot) await submitPrompt(text, "normal");
-  }
-  async function submitPrompt(text: string, mode: "normal" | "steer" | "follow-up") {
+  async function submitPrompt(
+    text: string,
+    submittedDraft: string,
+    mode: "normal" | "steer" | "follow-up",
+  ) {
     if (!snapshot) return;
     const matching =
       pendingPrompt?.text === text && pendingPrompt.delivery === mode ? pendingPrompt : undefined;
     pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: mode };
     localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
-    draft = "";
-    persistDraft();
-    void tick().then(resizePrompt);
+    const clearedSubmittedDraft = draft === submittedDraft;
+    if (clearedSubmittedDraft) {
+      draft = "";
+      persistDraft();
+      void tick().then(resizePrompt);
+    }
     try {
       const outcome = await api.sendMessage(
         snapshot.chatId,
@@ -526,9 +513,11 @@
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
       clearPendingPrompt();
     } catch (cause) {
-      draft = text;
-      persistDraft();
-      void tick().then(resizePrompt);
+      if (clearedSubmittedDraft && !draft) {
+        draft = text;
+        persistDraft();
+        void tick().then(resizePrompt);
+      }
       error = cause instanceof Error ? cause.message : "Prompt rejected";
     }
   }
@@ -549,13 +538,81 @@
       error = cause instanceof Error ? cause.message : "Could not clear queued instructions";
     }
   }
-  async function configure(patch: Parameters<PidexApiClient["configure"]>[1]) {
-    if (!snapshot) return;
+  async function configure(patch: ChatConfiguration) {
+    if (!snapshot) return false;
+    const chatId = snapshot.chatId;
     try {
-      snapshot = await api.configure(snapshot.chatId, patch, snapshot.revision);
+      const configured = await api.configure(chatId, patch, snapshot.revision);
+      if (snapshot?.chatId === chatId) snapshot = configured;
+      return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Configuration failed";
+      return false;
     }
+  }
+  function stageConfiguration(patch: ChatConfiguration) {
+    if (!snapshot) return;
+    const next = { ...configurationDraft };
+    if (patch.model !== undefined) {
+      if (patch.model === snapshot.model) delete next.model;
+      else next.model = patch.model;
+    }
+    if (patch.thinkingLevel !== undefined) {
+      if (patch.thinkingLevel === snapshot.thinkingLevel) delete next.thinkingLevel;
+      else next.thinkingLevel = patch.thinkingLevel;
+    }
+    setConfigurationDraft(snapshot.sessionId, next);
+  }
+  async function applyConfigurationDraft() {
+    if (!snapshot || !hasConfigurationDraft) return true;
+    const sessionId = snapshot.sessionId;
+    const applied = { ...configurationDraft };
+    if (!(await configure(applied))) return false;
+
+    const remaining = { ...configurationDrafts[sessionId] };
+    if (remaining.model === applied.model) delete remaining.model;
+    if (remaining.thinkingLevel === applied.thinkingLevel) delete remaining.thinkingLevel;
+    setConfigurationDraft(sessionId, remaining);
+    return true;
+  }
+  function restoreConfigurationDraft() {
+    if (!snapshot) return;
+    try {
+      const stored = localStorage.getItem(configurationDraftKey(snapshot.sessionId));
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      const restored: ChatConfiguration = {};
+      if (
+        typeof parsed.model === "string" &&
+        workspace?.models.some((model) => model.id === parsed.model) &&
+        parsed.model !== snapshot.model
+      )
+        restored.model = parsed.model;
+      if (
+        typeof parsed.thinkingLevel === "string" &&
+        THINKING_LEVELS.includes(parsed.thinkingLevel as ChatSnapshot["thinkingLevel"]) &&
+        parsed.thinkingLevel !== snapshot.thinkingLevel
+      )
+        restored.thinkingLevel = parsed.thinkingLevel as ChatSnapshot["thinkingLevel"];
+      setConfigurationDraft(snapshot.sessionId, restored);
+    } catch {
+      setConfigurationDraft(snapshot.sessionId, {});
+    }
+  }
+  function setConfigurationDraft(sessionId: string, value: ChatConfiguration) {
+    const next = { ...configurationDrafts };
+    const hasValue = value.model !== undefined || value.thinkingLevel !== undefined;
+    if (hasValue) {
+      next[sessionId] = value;
+      localStorage.setItem(configurationDraftKey(sessionId), JSON.stringify(value));
+    } else {
+      delete next[sessionId];
+      localStorage.removeItem(configurationDraftKey(sessionId));
+    }
+    configurationDrafts = next;
+  }
+  function configurationDraftKey(sessionId: string) {
+    return `${CONFIGURATION_DRAFT_PREFIX}${sessionId}`;
   }
   function openRename() {
     if (!snapshot) return;
@@ -721,8 +778,7 @@
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      if (snapshot) void send();
-      else void startChat();
+      void send();
     }
   }
   function onScroll() {
@@ -826,15 +882,6 @@
         title={searchOpen ? "Close search" : "Search (⌘K)"}
       >
         <Icon name={searchOpen ? "x" : "search"} />
-      </button>
-      <button
-        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-        onclick={() => prepareNewChat()}
-        disabled={!workspace || chatLoading}
-        aria-label="New chat"
-        title="New chat"
-      >
-        <Icon name="compose" />
       </button>
     </div>
 
@@ -1208,79 +1255,15 @@
         </div>
       {:else if !snapshot}
         <div
-          class="grid min-h-full w-full grid-cols-[minmax(0,1fr)] grid-rows-[1fr_auto] px-6 pt-12 pb-6 max-[900px]:px-4.5 max-[900px]:pt-9 max-[900px]:pb-4.5 max-[560px]:px-3 max-[560px]:pt-7 max-[560px]:pb-3"
+          class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
+          role="status"
         >
-          <div class="w-[min(780px,100%)] place-self-center pb-6 text-center max-[560px]:pb-4.5">
-            <h1
-              class="m-0 text-[clamp(24px,2.4vw,32px)] font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
-            >
-              What should we build in <strong class="font-medium">{workspace.name}</strong>?
-            </h1>
-          </div>
-          <div class="w-full self-end">
-            <div
-              class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
-            >
-              <textarea
-                class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
-                bind:this={promptInput}
-                bind:value={draft}
-                oninput={draftInput}
-                onkeydown={keydown}
-                rows="2"
-                placeholder={`Ask Pi to work on ${workspace.name}…`}
-                aria-label="Prompt"></textarea>
-              <div
-                class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
-              >
-                <div
-                  class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-                >
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Model"
-                    value={selectedNewChatModel}
-                    onchange={(event) => (newChatModel = event.currentTarget.value)}
-                    disabled={!workspace.models.length || chatLoading}
-                  >
-                    {#each workspace.models as model (model.id)}<option value={model.id}
-                        >{model.name}</option
-                      >{/each}
-                  </select>
-                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Thinking level"
-                    bind:value={newChatThinkingLevel}
-                    disabled={chatLoading}
-                  >
-                    {#each ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as level (level)}<option
-                        value={level}>{level} thinking</option
-                      >{/each}
-                  </select>
-                  <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-                  <select
-                    class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                    aria-label="Tool access"
-                    bind:value={newChatToolMode}
-                    disabled={chatLoading}
-                  >
-                    <option value="read-only">Read only</option><option value="full"
-                      >Full access</option
-                    >
-                  </select>
-                </div>
-                <div class="flex min-w-0 flex-none items-center gap-1">
-                  <button
-                    class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
-                    onclick={startChat}
-                    disabled={!draft.trim() || !workspace.models.length || chatLoading}
-                    aria-label="Send"><Icon name="send" /></button
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
+          <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
+            Pick a thread to continue
+          </h1>
+          <p class="mt-2 text-sm leading-relaxed text-muted">
+            Select an existing thread or create a new one to get started.
+          </p>
         </div>
       {:else}
         <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-12.5 max-[900px]:px-4 max-[350px]:px-3">
@@ -1429,11 +1412,9 @@
               >{/if}
           </div>
         {/if}
-        <div
-          class="mx-auto w-full max-w-3xl overflow-hidden rounded-[21px] border border-border-strong bg-card shadow-[var(--shadow)] transition-[border-color,box-shadow] duration-150 focus-within:border-primary/40 focus-within:shadow-[0_20px_50px_rgb(24_24_27/10%),0_0_0_3px_color-mix(in_srgb,var(--primary)_6%,transparent)] dark:bg-[#111113] max-[560px]:rounded-[18px]"
-        >
+        <div class="chat-composer mx-auto" data-testid="chat-composer">
           <textarea
-            class="block max-h-52 min-h-18.5 w-full resize-none border-0 bg-transparent px-4.5 pt-4 pb-2 text-sm leading-normal text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16.5 max-[560px]:px-3.5 max-[560px]:pt-3 max-[560px]:pb-1.5"
+            class="chat-composer__input"
             bind:this={promptInput}
             bind:value={draft}
             oninput={draftInput}
@@ -1445,50 +1426,44 @@
                 ? "Add guidance while Pi works…"
                 : "Ask Pi to work on this project…"}
             aria-label="Prompt"></textarea>
-          <div
-            class="flex min-w-0 items-center justify-between gap-2.5 pt-1 pr-2 pb-[9px] pl-[11px] max-[560px]:items-end max-[560px]:pt-1 max-[560px]:pr-[7px] max-[560px]:pb-[7px] max-[560px]:pl-2"
-          >
-            <div
-              class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-            >
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Model"
-                value={snapshot.model}
-                onchange={(e) => configure({ model: e.currentTarget.value })}
-                disabled={active || !workspace?.models.length}
-              >
-                {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
-                    >{model.name}</option
-                  >{/each}
-              </select>
-              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-23 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-19.5 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Thinking level"
-                value={snapshot.thinkingLevel}
-                onchange={(e) =>
-                  configure({
-                    thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                  })}
-                disabled={active}
-              >
-                {#each ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as level (level)}<option
-                    value={level}>{level} thinking</option
-                  >{/each}
-              </select>
-              <span class="mx-0.5 h-3.5 w-px flex-none bg-border max-[350px]:hidden"></span>
-              <select
-                class="h-7 max-w-48 flex-none rounded-lg border-0 bg-transparent pr-5 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground disabled:opacity-40 max-[560px]:max-w-27 max-[560px]:pr-4 max-[560px]:text-[10px] max-[350px]:max-w-20 max-[350px]:pr-3 max-[350px]:text-[9px]"
-                aria-label="Tool access"
-                value={snapshot.toolMode}
-                onchange={(e) =>
-                  configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })}
-                disabled={active}
-              >
-                <option value="read-only">Read only</option><option value="full">Full access</option
+          <div class="chat-composer__toolbar">
+            <div class="chat-composer__controls">
+              <label class="chat-composer__control">
+                <select
+                  class="chat-composer__select"
+                  aria-label="Model"
+                  value={selectedModel}
+                  onchange={(e) => stageConfiguration({ model: e.currentTarget.value })}
+                  disabled={!workspace?.models.length}
                 >
-              </select>
+                  {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
+                      >{model.name}</option
+                    >{/each}
+                </select>
+              </label>
+              <span class="chat-composer__divider" aria-hidden="true"></span>
+              <label class="chat-composer__control">
+                <span class="chat-composer__control-icon" aria-hidden="true"
+                  ><Icon name="activity" size={14} /></span
+                >
+                <select
+                  class="chat-composer__select"
+                  aria-label="Thinking level"
+                  value={selectedThinkingLevel}
+                  onchange={(e) =>
+                    stageConfiguration({
+                      thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
+                    })}
+                >
+                  <option value="off">Off</option><option value="minimal">Minimal</option><option
+                    value="low">Low</option
+                  ><option value="medium">Medium</option><option value="high">High</option><option
+                    value="xhigh">Extra high</option
+                  ><option value="max">Max</option>
+                </select>
+              </label>
+              {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span
+                >{/if}
             </div>
             <div class="flex min-w-0 flex-none items-center gap-1">
               {#if active}
@@ -1513,7 +1488,7 @@
                 >
               {:else}
                 <button
-                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-primary text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  class="chat-composer__send"
                   onclick={send}
                   disabled={!draft.trim() ||
                     !workspace?.models.length ||
@@ -1526,16 +1501,12 @@
           </div>
         </div>
         <div
-          class="mx-auto flex w-full max-w-3xl justify-between gap-3 px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
+          class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
         >
           <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
             >{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(
               4,
             )}</span
-          >
-          <span
-            class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-right max-[560px]:hidden"
-            >{snapshot.activeTools.join(" · ")}</span
           >
         </div>
       </footer>
