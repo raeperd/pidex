@@ -107,7 +107,7 @@
   .chat-composer {
     width: 100%;
     max-width: 48rem;
-    overflow: hidden;
+    overflow: visible;
     border: 1px solid var(--border-strong);
     border-radius: 22px;
     background: color-mix(in srgb, var(--card) 96%, transparent);

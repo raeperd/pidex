@@ -1,4 +1,11 @@
-import type { ExtensionDialog, ModelInfo, SessionSummary, TextItem, ToolItem } from "@pidex/api";
+import type {
+  ContextUsage,
+  ExtensionDialog,
+  ModelInfo,
+  SessionSummary,
+  TextItem,
+  ToolItem,
+} from "@pidex/api";
 
 export type AdapterEvent =
   | { type: "message"; item: TextItem }
@@ -6,6 +13,7 @@ export type AdapterEvent =
   | { type: "tool"; item: ToolItem; output?: { text: string; sourceTruncated: boolean } }
   | { type: "queue"; steering: string[]; followUp: string[] }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
+  | { type: "context_usage"; usage: ContextUsage }
   | { type: "settled" }
   | { type: "dialog"; dialog?: ExtensionDialog };
 
@@ -28,6 +36,7 @@ export interface AdapterSession {
   readonly model: string | undefined;
   readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly sessionName: string | undefined;
+  readonly contextUsage: ContextUsage | undefined;
   readonly isIdle: boolean;
   subscribe(listener: (event: AdapterEvent) => void): () => void;
   prompt(text: string): Promise<void>;

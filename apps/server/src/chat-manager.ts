@@ -210,6 +210,7 @@ export class ChatManager {
 
   snapshot(chat: ChatRecord): ChatSnapshot {
     const transcript = this.transcriptPage(chat, chat.items.length, 200);
+    const contextUsage = chat.session.contextUsage;
     return {
       chatId: chat.id,
       workspaceId: chat.workspaceId,
@@ -226,6 +227,7 @@ export class ChatManager {
       steeringQueue: chat.steering,
       followUpQueue: chat.followUp,
       stats: chat.session.getStats(),
+      ...(contextUsage ? { contextUsage } : {}),
       ...(chat.extensionDialog ? { extensionDialog: chat.extensionDialog } : {}),
     };
   }
@@ -327,6 +329,8 @@ export class ChatManager {
       };
       chat.items.push(item);
       this.broadcast(chat, { type: "notice", item });
+    } else if (event.type === "context_usage") {
+      this.broadcast(chat, { type: "context_usage", usage: event.usage });
     } else if (event.type === "dialog") {
       chat.extensionDialog = event.dialog;
       this.broadcast(chat, {
