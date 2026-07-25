@@ -18,7 +18,7 @@ The SDK is exact-pinned and the dependency tree is committed in `pnpm-lock.yaml`
 ## Commands
 
 ```sh
-pnpm dev          # Pi SDK server + Vite client
+pnpm dev          # API + Vite client on 127.0.0.1:4783 or the next free port
 pnpm typecheck
 pnpm test         # deterministic; never calls a paid model
 pnpm test:e2e     # deterministic Playwright Chromium suite
@@ -33,7 +33,7 @@ Production restart command:
 pnpm build && pnpm start
 ```
 
-`PORT` may be an integer from 1024 through 65535. The host is fixed at literal `127.0.0.1` and cannot be widened. `WORKSPACE_ROOTS` is a platform-delimited security allowlist and defaults to the current user’s home directory. The name-first project picker discovers immediate child folders under `~/Projects`; `PIDEX_PROJECT_ROOTS` can replace that with a platform-delimited list of catalog roots. Catalog roots and discovered projects must still be inside `WORKSPACE_ROOTS`. `PIDEX_STATE_DIR` can relocate Pidex’s metadata database. `PIDEX_TAILSCALE_HOST` may name one explicitly allowed Tailscale Serve hostname; forwarded headers are not trusted from non-loopback peers.
+In development, Vite owns the HTTP server, starts at `4783`, and automatically tries the next port when it is occupied. Production startup continues to fail clearly on a port conflict. `PORT` may be an integer from 1024 through 65535. The host is fixed at literal `127.0.0.1` and cannot be widened. `WORKSPACE_ROOTS` is a platform-delimited security allowlist and defaults to the current user’s home directory. The name-first project picker discovers immediate child folders under `~/Projects`; `PIDEX_PROJECT_ROOTS` can replace that with a platform-delimited list of catalog roots. Catalog roots and discovered projects must still be inside `WORKSPACE_ROOTS`. `PIDEX_STATE_DIR` can relocate Pidex’s metadata database. `PIDEX_TAILSCALE_HOST` may name one explicitly allowed Tailscale Serve hostname; forwarded headers are not trusted from non-loopback peers.
 
 ## Architecture
 
@@ -48,6 +48,8 @@ apps/desktop ───────────> packages/api
 - `apps/server`: Node host with native oRPC, custom WebSocket, Pi, and Drizzle SQLite.
 - `apps/web`: responsive Svelte client with typed native oRPC and WebSocket transports.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
+
+During development, `apps/web/vite.config.ts` is the composition root: it mounts the server's API and WebSocket handlers into Vite's HTTP server. Browser code under `apps/web/src` remains independent from the server implementation.
 
 The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.
 
@@ -91,7 +93,7 @@ Serve provides a private Tailnet HTTPS URL; both devices must be in the intended
 
 ## Troubleshooting
 
-- `PORT ... already in use`: stop the other listener or choose a valid unprivileged port.
+- `pnpm start` reports `PORT ... already in use`: stop the other listener or choose a valid unprivileged port. `pnpm dev` selects another port automatically.
 - Project rejected: add its canonical ancestor to `WORKSPACE_ROOTS`; symlink escapes and prefix lookalikes are intentionally blocked.
 - No models: authenticate in the local Pi TUI with `/login`.
 - Project resources skipped: review and save the trust decision in Pi locally.
