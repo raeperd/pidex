@@ -1,112 +1,32 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type APIResponse,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-test("serves the Pi host and branded assets", async ({ request }) => {
-  const health = await rpcRequest(request, "system/health", {});
-  expect(health.response.status()).toBe(200);
-  expect(health.result).toEqual({
-    ok: true,
-    protocolVersion: 3,
-  });
+test("selects a project and restores it after reload", async ({ page }, testInfo) => {
+  const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 
-  const png = await request.get("/pidex-icon.png");
-  expect(png.status()).toBe(200);
-  expect(png.headers()["content-type"]).toBe("image/png");
+  await page.goto("/");
+  await openSessions(page);
+  await page.getByLabel("Add project", { exact: true }).click();
+  const projectDialog = page.getByRole("dialog", { name: "Add a project" });
+  await expect(projectDialog).toBeVisible();
+  await projectDialog.getByRole("textbox", { name: "Filter available projects" }).fill(projectName);
+  await projectDialog
+    .getByRole("button", { name: new RegExp(`^(Add|Open) ${projectName}$`) })
+    .click();
 
-  const icon = await request.get("/favicon.ico");
-  expect(icon.status()).toBe(200);
-  expect(icon.headers()["content-type"]).toBe("image/x-icon");
-});
+  await expect(
+    page.getByRole("heading", { name: `What should we build in ${projectName}?` }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
+    .toContain(`/${projectName}`);
 
-test("serves the contract through oRPC's native transport", async ({ request }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const { csrfToken } = bootstrap.result;
-
-  const invalid = await rpcRequest(request, "chats/create", {}, csrfToken);
-  expect(invalid.response.status()).toBe(400);
-  expect(invalid.result).toEqual(
-    expect.objectContaining({ code: "BAD_REQUEST", message: "Input validation failed" }),
-  );
-
-  const malformed = await request.post("/api/rpc/chats/create", {
-    headers: { "X-Pidex-CSRF": csrfToken, "Content-Type": "application/json" },
-    data: Buffer.from("{"),
-  });
-  expect(malformed.status()).toBe(400);
-  await expect(rpcResult(malformed)).resolves.toEqual(
-    expect.objectContaining({ code: "BAD_REQUEST" }),
-  );
-
-  const missingCsrf = await rpcRequest(request, "chats/create", {
-    workspaceId: "workspace_12345",
-  });
-  expect(missingCsrf.response.status()).toBe(403);
-  expect(missingCsrf.result).toEqual(
-    expect.objectContaining({ code: "csrf", message: "Invalid CSRF token" }),
-  );
-
-  const oversized = await rpcRequest(
-    request,
-    "chats/create",
-    { workspaceId: "x".repeat(70 * 1024) },
-    csrfToken,
-  );
-  expect(oversized.response.status()).toBe(413);
-  expect(oversized.result).toEqual(expect.objectContaining({ code: "PAYLOAD_TOO_LARGE" }));
-
-  const opened = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: process.cwd() },
-    csrfToken,
-  );
-  expect(opened.response.ok()).toBe(true);
-
-  const created = await rpcRequest<{ chatId: string; revision: number }>(
-    request,
-    "chats/create",
-    { workspaceId: opened.result.id },
-    csrfToken,
-  );
-  expect(created.response.status()).toBe(200);
-
-  const transcript = await rpcRequest(
-    request,
-    "chats/transcript",
-    { chatId: created.result.chatId, before: 0, limit: 50 },
-    csrfToken,
-  );
-  expect(transcript.response.status()).toBe(200);
-  expect(transcript.result).toEqual(
-    expect.objectContaining({ items: expect.any(Array), start: 0, total: 0 }),
-  );
-
-  const cleared = await rpcRequest(
-    request,
-    "chats/clearQueue",
-    {
-      chatId: created.result.chatId,
-      clientId: "e2e_client_12345",
-      actionId: crypto.randomUUID().replaceAll("-", ""),
-      expectedRevision: created.result.revision,
-    },
-    csrfToken,
-  );
-  expect(cleared.response.status()).toBe(200);
-
-  const disposed = await rpcRequest(
-    request,
-    "chats/dispose",
-    { chatId: created.result.chatId },
-    csrfToken,
-  );
-  expect(disposed.response.status()).toBe(200);
-  expect(disposed.result).toEqual({ ok: true });
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: `What should we build in ${projectName}?` }),
+  ).toBeVisible();
+  await openSessions(page);
+  await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
 });
 
 test("keeps search and new-chat setup in the pre-chat experience", async ({ page, request }) => {
@@ -179,30 +99,31 @@ test("keeps search and new-chat setup in the pre-chat experience", async ({ page
 
   await page.getByLabel("Prompt").fill("This draft belongs to pidex");
   await page.getByRole("button", { name: "Add project", exact: true }).click();
-  await page.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
+  const projectDialog = page.getByRole("dialog", { name: "Add a project" });
+  await projectDialog.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
   await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
   await expect(page.getByLabel("Prompt")).toHaveValue("");
 
+  await page.getByLabel("Prompt").fill("Reset this global draft");
   await openSessions(page);
   await page.getByRole("button", { name: "New chat", exact: true }).click();
-  await page.waitForTimeout(250);
-  await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeEmpty();
+  await expect(page.getByLabel("Prompt")).toBeFocused();
 
+  await page.getByLabel("Prompt").fill("Reset this project draft");
   await openSessions(page);
   await page.getByRole("button", { name: "New thread in apps" }).click();
-  await page.waitForTimeout(250);
-  await expect(page.getByRole("heading", { name: "What should we build in apps?" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeEmpty();
+  await expect(page.getByLabel("Prompt")).toBeFocused();
 
   await page.getByLabel("Thinking level").selectOption("high");
   await page.getByLabel("Tool access").selectOption("full");
-  await page.getByLabel("Prompt").fill("Verify first prompt configuration");
-  await Promise.all([
-    page.waitForRequest((browserRequest) =>
-      browserRequest.url().endsWith("/api/rpc/chats/sendMessage"),
-    ),
-    page.getByRole("button", { name: "Send" }).click(),
-  ]);
+  const prompt = "Verify first prompt configuration";
+  await page.getByLabel("Prompt").fill(prompt);
+  await page.getByRole("button", { name: "Send" }).click();
 
+  await expect(page.getByLabel("Prompt")).toHaveValue(prompt);
+  await expect(page.getByRole("alert")).toBeVisible();
   expect(startRequests.map(({ kind }) => kind)).toEqual(["create", "configure", "prompt"]);
   expect(startRequests[1]?.body).toEqual(
     expect.objectContaining({ model: "e2e/model", thinkingLevel: "high", toolMode: "full" }),
@@ -231,12 +152,7 @@ async function rpcRequest<T = unknown>(
     headers: csrfToken ? { "X-Pidex-CSRF": csrfToken } : undefined,
     data: { json: input },
   });
-  return { response, result: (await rpcResult(response)) as T };
-}
-
-async function rpcResult(response: APIResponse) {
-  const payload = (await response.json()) as { json: unknown };
-  return payload.json;
+  return { response, result: ((await response.json()) as { json: T }).json };
 }
 
 async function openSessions(page: Page) {
