@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
+import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { wsClientMessageSchema } from "@pidex/api";
 import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
@@ -20,6 +21,22 @@ import {
 } from "./security.js";
 
 export async function createPidexServer() {
+  const application = await createPidexApplication();
+  const server = createServer((req, res) => void application.handleRequest(req, res));
+  server.on("upgrade", (req, socket, head) => {
+    if (!application.handleUpgrade(req, socket, head)) rejectUpgrade(socket);
+  });
+  return {
+    server,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await application.close();
+    },
+    manager: application.manager,
+  };
+}
+
+export async function createPidexApplication() {
   const csrf = randomBytes(32).toString("base64url");
   const roots = await allowedRoots();
   const metadata = new MetadataStore();
@@ -50,20 +67,18 @@ export async function createPidexServer() {
       });
     }
   };
-
-  const server = createServer((req, res) => void handler(req, res));
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-  server.on("upgrade", (req, socket, head) => {
+  const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
     try {
       validateRequest(req, false, csrf);
-      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws")
-        throw new HttpError(404, "WebSocket route not found");
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
     } catch {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
     }
-  });
+    return true;
+  };
   wss.on("connection", (socket) => {
     let connected = false;
     let alive = true;
@@ -88,12 +103,14 @@ export async function createPidexServer() {
     }, 20_000);
     socket.once("close", () => clearInterval(timer));
   });
-
+  let closed = false;
   return {
-    server,
+    handleRequest: handler,
+    handleUpgrade,
     close: async () => {
+      if (closed) return;
+      closed = true;
       for (const socket of wss.clients) socket.close(1001, "Server stopping");
-      await new Promise<void>((resolve) => server.close(() => resolve()));
       manager.shutdown();
       metadata.close();
     },
@@ -153,6 +170,11 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
+}
+
+function rejectUpgrade(socket: Duplex) {
+  socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+  socket.destroy();
 }
 
 async function main() {
