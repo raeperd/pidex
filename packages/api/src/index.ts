@@ -1,7 +1,7 @@
 import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const idSchema = z
   .string()
   .min(8)
@@ -131,6 +131,13 @@ const statsSchema = z.object({
   tokens: z.number(),
   cost: z.number(),
 });
+export const contextUsageSchema = z.object({
+  tokens: z.number().int().nonnegative().nullable(),
+  contextWindow: z.number().int().positive(),
+  percent: z.number().nonnegative().nullable(),
+  totalProcessedTokens: z.number().int().nonnegative(),
+  compactsAutomatically: z.boolean(),
+});
 export const chatSnapshotSchema = z.object({
   chatId: idSchema,
   workspaceId: idSchema,
@@ -147,6 +154,7 @@ export const chatSnapshotSchema = z.object({
   steeringQueue: z.array(z.string().max(20_000)),
   followUpQueue: z.array(z.string().max(20_000)),
   stats: statsSchema,
+  contextUsage: contextUsageSchema.optional(),
   extensionDialog: extensionDialogSchema.optional(),
 });
 const eventBase = z.object({ eventId: z.number().int().positive(), chatId: idSchema });
@@ -173,6 +181,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   }),
   eventBase.extend({ type: z.literal("notice"), item: noticeItemSchema }),
   eventBase.extend({ type: z.literal("session"), name: z.string().optional(), stats: statsSchema }),
+  eventBase.extend({ type: z.literal("context_usage"), usage: contextUsageSchema }),
   eventBase.extend({
     type: z.literal("extension_dialog"),
     dialog: extensionDialogSchema.optional(),
@@ -315,6 +324,7 @@ export type ToolItem = z.infer<typeof toolItemSchema>;
 export type NoticeItem = z.infer<typeof noticeItemSchema>;
 export type ExtensionDialog = z.infer<typeof extensionDialogSchema>;
 export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>;
+export type ContextUsage = z.infer<typeof contextUsageSchema>;
 export type ActionOutcome = z.infer<typeof actionOutcomeSchema>;
 export type RunOutcome = z.infer<typeof runOutcomeSchema>;
 export type ToolOutputChunk = z.infer<typeof toolOutputChunkSchema>;

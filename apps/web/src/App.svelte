@@ -14,6 +14,7 @@
   } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
   import { ChatConnection, type ConnectionState } from "./chat-connection";
+  import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
 
@@ -438,6 +439,7 @@
       if (event.status === "idle") void refreshSessions();
     } else if (event.type === "queue")
       snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp };
+    else if (event.type === "context_usage") snapshot = { ...snapshot, contextUsage: event.usage };
     else if (event.type === "session") {
       snapshot = {
         ...snapshot,
@@ -1466,6 +1468,7 @@
                 >{/if}
             </div>
             <div class="flex min-w-0 flex-none items-center gap-1">
+              {#if snapshot.contextUsage}<ContextWindowMeter usage={snapshot.contextUsage} />{/if}
               {#if active}
                 <select
                   class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"

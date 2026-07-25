@@ -13,7 +13,7 @@ import {
   type AgentSessionEvent,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
+import type { ContextUsage, ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
 import {
   bounded,
   boundedResource,
@@ -122,6 +122,15 @@ class PiSession implements AdapterSession {
   get sessionName() {
     return this.session.sessionName;
   }
+  get contextUsage(): ContextUsage | undefined {
+    const usage = this.session.getContextUsage();
+    if (!usage) return undefined;
+    return {
+      ...usage,
+      totalProcessedTokens: this.session.getSessionStats().tokens.total,
+      compactsAutomatically: this.session.settingsManager.getCompactionSettings().enabled,
+    };
+  }
   get isIdle() {
     return this.session.isIdle;
   }
@@ -183,6 +192,7 @@ class PiSession implements AdapterSession {
           timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
         },
       });
+      if (event.message.role === "assistant") this.scheduleContextUsage();
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800);
       this.emit({
@@ -218,13 +228,14 @@ class PiSession implements AdapterSession {
     else if (event.type === "agent_settled") this.emit({ type: "settled" });
     else if (event.type === "compaction_start")
       this.emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
-    else if (event.type === "compaction_end")
+    else if (event.type === "compaction_end") {
       this.emit({
         type: "notice",
         level: event.errorMessage ? "error" : "info",
         text: event.errorMessage ?? "Compaction complete.",
       });
-    else if (event.type === "auto_retry_start")
+      this.scheduleContextUsage();
+    } else if (event.type === "auto_retry_start")
       this.emit({
         type: "notice",
         level: "warning",
@@ -232,6 +243,12 @@ class PiSession implements AdapterSession {
       });
     else if (event.type === "auto_retry_end" && !event.success)
       this.emit({ type: "notice", level: "error", text: event.finalError ?? "Retry failed." });
+  }
+  private scheduleContextUsage() {
+    queueMicrotask(() => {
+      const usage = this.contextUsage;
+      if (usage) this.emit({ type: "context_usage", usage });
+    });
   }
   private uiContext(): ExtensionUIContext {
     const ask = (dialog: Omit<ExtensionDialog, "id">) =>

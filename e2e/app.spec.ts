@@ -173,6 +173,30 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
 
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "context_usage",
+    eventId: 1,
+    chatId,
+    usage: {
+      tokens: 87_000,
+      contextWindow: 258_000,
+      percent: 33.72093023255814,
+      totalProcessedTokens: 2_500_000,
+      compactsAutomatically: true,
+    },
+  });
+  const contextMeter = page.getByRole("button", { name: "Context window 34% used" });
+  await expect(contextMeter).toBeVisible();
+  await contextMeter.hover();
+  const contextDetails = page.getByRole("tooltip");
+  await expect(contextDetails).toHaveCSS("opacity", "1");
+  await expect(contextDetails).toContainText("Context Window");
+  await expect(contextDetails).toContainText("34% · 87k/258k");
+  await expect(contextDetails).toContainText("Total processed2.5m");
+  await expect(contextDetails).toContainText("Pi automatically compacts its context when needed.");
+  await expect(contextDetails.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "34");
+
   const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
   await thinking.selectOption(nextThinking);
   await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
@@ -193,10 +217,9 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   await expect(prompt).toHaveValue("Draft the next turn while configuration is pending");
 
   mutations.length = 0;
-  const chatId = String(snapshot?.chatId);
   await emitServerEvent(page, {
     type: "run_status",
-    eventId: 1,
+    eventId: 2,
     chatId,
     status: "running",
     revision: 40,
@@ -230,7 +253,7 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   mutations.length = 0;
   await emitServerEvent(page, {
     type: "run_status",
-    eventId: 2,
+    eventId: 3,
     chatId,
     status: "idle",
     revision: 50,
