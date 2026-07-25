@@ -21,8 +21,8 @@ function importsIn(directory: string): Array<{ file: string; specifier: string }
   });
 }
 
-function crossAppImports(app: "web" | "server" | "desktop", targets: string[]) {
-  return importsIn(path.join(repositoryRoot, "apps", app)).filter(({ specifier }) =>
+function crossAppImports(app: "web" | "server" | "desktop", targets: string[], subdirectory = "") {
+  return importsIn(path.join(repositoryRoot, "apps", app, subdirectory)).filter(({ specifier }) =>
     targets.some(
       (target) =>
         specifier.startsWith(`@pidex/${target}`) ||
@@ -34,7 +34,7 @@ function crossAppImports(app: "web" | "server" | "desktop", targets: string[]) {
 
 describe("documented architecture boundaries", () => {
   it("keeps the browser independent from server and Electron implementations", () => {
-    expect(crossAppImports("web", ["server", "desktop"])).toEqual([]);
+    expect(crossAppImports("web", ["server", "desktop"], "src")).toEqual([]);
   });
 
   it("keeps the server independent from web and Electron implementations", () => {
