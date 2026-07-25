@@ -6,13 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ActionOutcome, RunOutcome } from "@pidex/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
-import {
-  actions,
-  sessionState,
-  workspaces,
-  type ActionKind,
-  type ActionStatus,
-} from "./metadata-schema.js";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 interface ActionInput {
   actionId: string;
@@ -488,6 +482,60 @@ function createMetadataDatabase(sqlite: DatabaseSync) {
 type MetadataDatabase = ReturnType<typeof createMetadataDatabase>;
 type MetadataTransaction = Parameters<Parameters<MetadataDatabase["transaction"]>[0]>[0];
 type MetadataExecutor = MetadataDatabase | MetadataTransaction;
+
+type ActionStatus = ActionOutcome["status"];
+type PersistedRunStatus = ActionStatus | "stopping";
+
+type ActionKind =
+  | "prompt"
+  | "stop"
+  | "steer"
+  | "follow-up"
+  | "clear-queue"
+  | "compact"
+  | "config"
+  | "dialog"
+  | "rename"
+  | "acknowledge";
+
+const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    path: text("path").notNull().unique(),
+    openedAt: text("opened_at").notNull(),
+  },
+  (table) => [index("workspaces_recent_idx").on(desc(table.openedAt), table.id)],
+);
+
+const sessionState = sqliteTable("session_state", {
+  sessionKey: text("session_key").primaryKey(),
+  revision: integer("revision").notNull().default(0),
+  runId: text("run_id"),
+  promptActionId: text("prompt_action_id"),
+  runStatus: text("run_status").$type<PersistedRunStatus>(),
+  requiresAcknowledgement: integer("requires_acknowledgement", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  updatedAt: text("updated_at").notNull(),
+});
+
+const actions = sqliteTable(
+  "actions",
+  {
+    actionId: text("action_id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    sessionKey: text("session_key").notNull(),
+    kind: text("kind").$type<ActionKind>().notNull(),
+    requestDigest: text("request_digest").notNull(),
+    runId: text("run_id").notNull(),
+    status: text("status").$type<ActionStatus>().notNull(),
+    revision: integer("revision").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("actions_prompt_idx").on(table.sessionKey, table.runId, table.kind)],
+);
 
 const METADATA_SCHEMA_SQL = `
   PRAGMA journal_mode=WAL;
