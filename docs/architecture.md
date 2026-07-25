@@ -9,7 +9,7 @@ apps/
 └── server/    # HTTP, WebSocket, Pi, SQLite, auth, and Tailscale
 
 packages/
-└── api/       # Browser-safe Zod schemas and inferred types
+└── api/       # Browser-safe Zod schemas, oRPC contract, and inferred types
 ```
 
 - Keep the web connection code inside `apps/web`.
@@ -42,7 +42,7 @@ apps/desktop ───────────> packages/api
 apps/desktop ──spawns at runtime──> apps/server executable
 ```
 
-- `packages/api` contains Zod schemas, DTOs, and protocol versions.
+- `packages/api` contains Zod schemas, the oRPC contract, DTOs, and protocol versions.
 - `packages/api` contains no Electron, browser, or Node implementation.
 - `apps/web` never imports from `apps/server` or `apps/desktop`.
 - `apps/server` runs independently from the Electron process.
@@ -61,4 +61,5 @@ Browser storage  unsent drafts and local UI preferences
 - Electron 41 with a supervised Node child process.
 - Svelte 5, Vite, and Tailwind CSS 4.
 - Zod 4 for API and persisted-data validation.
+- oRPC 1 native RPC for contract-first request/response calls.
 - Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `apps/server`.

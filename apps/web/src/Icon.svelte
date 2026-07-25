@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let name:
+  type IconName =
     | "activity"
     | "check"
     | "chevron"
@@ -16,7 +16,8 @@
     | "stop"
     | "tool"
     | "x";
-  export let size = 16;
+
+  let { name, size = 16 }: { name: IconName; size?: number } = $props();
 </script>
 
 <svg

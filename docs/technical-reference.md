@@ -20,7 +20,7 @@ These are design references, not source dependencies. Pidex will not import thei
 | Workspace               | pnpm 11.13.0; `apps/desktop`, `apps/web`, `apps/server`, `apps/mobile`; shared `client-runtime`, `contracts`, and `shared` packages | npm workspaces; `packages/app`, `desktop`, `server`, `client`, and `protocol`              | Use a small pnpm workspace with three apps and one shared API package; keep the other boundaries as internal modules initially. |
 | Desktop                 | Electron 41.5.0, electron-builder 26.15.6, context-isolated preload                                                                 | Electron 41.2.0, electron-builder 26.8.1, context-isolated preload                         | Electron 41 is demonstrated by both; exact-pin a compatible patch and preserve the narrow preload boundary.                     |
 | Web UI                  | React/React DOM 19.2.6, Vite-based DOM app, Tailwind 4, TanStack Router, Zustand                                                    | React 19.1, Expo 54, React Native 0.81.5, React Native Web 0.21, Expo Router, Zustand      | Keep the DOM/Vite/Tailwind lesson, but implement it with Svelte 5. Expo's value is native reuse, which Pidex does not need.     |
-| Transport and contracts | Node HTTP/WebSocket host, Effect schemas and runtime, browser-safe contracts and connection runtime                                 | Express, `ws`, Zod 4.4.3, separate protocol and client packages                            | Use built-in Node HTTP, `ws`, and Zod; keep reconnect and snapshot logic out of Svelte components.                              |
+| Transport and contracts | Node HTTP/WebSocket host, Effect schemas and runtime, browser-safe contracts and connection runtime                                 | Express, `ws`, Zod 4.4.3, separate protocol and client packages                            | Use native oRPC over Node HTTP, `ws` for replay, and Zod for both boundaries.                                                   |
 | Persistence             | SQLite, including a `node:sqlite` adapter, plus migrations                                                                          | Atomic JSON replacement for several small stores                                           | Pidex's durable prompt acceptance and revisions justify Drizzle ORM over `node:sqlite`; initialize the current schema directly. |
 | Broader dependencies    | Effect, Clerk, provider SDKs, SSH/Tailscale packages, Git/terminal/diff tooling, native Expo app                                    | Expo/native modules, daemon/CLI/relay, multiple agent SDKs, ACP, Git/terminal/file tooling | Do not carry these dependency families into the Pi-only desktop/mobile-web scope.                                               |
 
@@ -98,14 +98,16 @@ Electron's `BrowserWindow` must use `contextIsolation: true`, `sandbox: true`, a
 - Use Svelte's built-in runes and stores for client-local UI state such as the selected session and connection presentation. Do not add a general state-management library initially. Authoritative projects, sessions, transcript, run state, and settings are replaced from host snapshots rather than treated as local truth.
 - Tailwind CSS 4 through `@tailwindcss/vite`, Bits UI primitives, `clsx`, and `tailwind-merge` provide the responsive interface.
 - `svelte-exmarkdown` plus `remark-gfm` renders assistant text. Raw HTML stays disabled, remote images are disabled by default, and links use an explicit safe-scheme policy.
-- Native `fetch`, `WebSocket`, Clipboard, Web Crypto, and storage APIs where available. No Electron or Node package may enter the browser bundle.
+- oRPC's browser-safe `RPCLink` over `fetch` for typed request/response calls.
+- Native WebSocket, Clipboard, Web Crypto, and storage APIs remain browser-owned.
 
 The same production web build is served by the loopback host to Electron and by the verified Tailscale Serve origin to paired mobile browsers. Desktop-only controls are capability-gated by host authorization, not merely hidden by responsive CSS.
 
 ### Contracts, persistence, and tests
 
-- Zod 4 schemas are the source for runtime validation and inferred TypeScript protocol types. Network input is parsed at the host boundary and untrusted persisted metadata is parsed when loaded.
-- Drizzle ORM over `node:sqlite` stores Pidex metadata, durable action IDs, revisions, pairing verifiers, and bounded security events. Pi JSONL remains the only transcript store.
+- Zod 4 schemas drive runtime validation and inferred protocol types.
+- The shared oRPC contract maps procedure inputs and outputs without REST metadata.
+- Drizzle ORM over `node:sqlite` stores Pidex metadata and durable action IDs.
 - Vitest covers pure units, protocol parsing, host services, persistence, the client connection state machine, and Svelte behavior.
 - Svelte Testing Library covers focused browser interactions without asserting component internals.
 - Playwright Chromium covers the built responsive web client and packaged Electron flows. Host contract tests use real HTTP and WebSocket transports with the deterministic Pi adapter described in the PRD.
@@ -121,7 +123,7 @@ pidex/
 │   └── server/                # Child-process HTTP/WS host, Pi, SQLite, auth, Tailscale
 │       └── src/pi/            # Matched-SDK adapter
 ├── packages/
-│   └── api/                   # Browser-safe Zod schemas, DTOs, protocol version
+│   └── api/                   # Browser-safe Zod schemas, oRPC contract, DTOs, protocol version
 ├── tests/
 │   ├── contract/              # Real host transport and recovery matrix
 │   ├── e2e/                   # Responsive web and packaged Electron Playwright tests
@@ -147,7 +149,7 @@ Electron has a runtime supervision relationship, not a server-code import:
 apps/desktop ──spawns and supervises──> apps/server executable
 ```
 
-`packages/api` must remain browser-safe and contain schemas and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Pi SDK integration remains internal to the server. The web connection runtime stays under `apps/web/src/lib/client`.
+`packages/api` must remain browser-safe and contain schemas, the oRPC contract, and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Pi SDK integration remains internal to the server. The web connection runtime stays under `apps/web/src/lib/client`.
 
 This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`, or persistence packages later only if they gain a second consumer or need independent testing, ownership, or versioning that cannot be maintained cleanly in their app.
 
@@ -155,12 +157,12 @@ This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`
 
 The first scaffold should include only dependencies needed for the first vertical slice.
 
-| Workspace      | Runtime dependencies                                                                                                                                |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop` | `electron`; packaging includes the compiled server and web artifacts                                                                                |
-| `apps/web`     | `svelte`, `svelte-exmarkdown`, `remark-gfm`, `bits-ui`, `clsx`, `tailwind-merge`, `@pidex/api`                                                      |
-| `apps/server`  | exact-matched Pi SDK, `@pidex/api`, `drizzle-orm`, `ws`, `qrcode`; prefer Node built-ins for HTTP, crypto, the SQLite driver, and process execution |
-| `packages/api` | `zod`                                                                                                                                               |
+| Workspace      | Runtime dependencies                                                               |
+| -------------- | ---------------------------------------------------------------------------------- |
+| `apps/desktop` | `electron`, oRPC client; packaging includes the server and web artifacts           |
+| `apps/web`     | `svelte`, oRPC client/contract, and `@pidex/api`                                   |
+| `apps/server`  | exact-matched Pi SDK, `@pidex/api`, oRPC server, `drizzle-orm`, `ws`, and `qrcode` |
+| `packages/api` | `zod`, `@orpc/contract`                                                            |
 
 Build and test dependencies live at the narrowest workspace that uses them. `apps/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. Root tooling may coordinate TypeScript, Playwright, Oxlint, and Oxfmt, but production packages must not depend on test runners or Electron development tooling.
 

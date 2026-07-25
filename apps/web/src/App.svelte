@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { MediaQuery } from "svelte/reactivity";
   import type {
     Bootstrap,
     ChatSnapshot,
@@ -17,60 +18,62 @@
   import Markdown from "./Markdown.svelte";
 
   const THREAD_PREVIEW_COUNT = 6;
-  let bootstrap: Bootstrap | undefined;
-  let workspace: Workspace | undefined;
-  let snapshot: ChatSnapshot | undefined;
-  let workspaceCache: Record<string, Workspace> = {};
-  let expandedProjectIds: string[] = [];
-  let threadLimits: Record<string, number> = {};
-  let projectPath = "";
-  let projectQuery = "";
-  let draft = "";
-  let newChatModel = "";
-  let newChatThinkingLevel: ChatSnapshot["thinkingLevel"] = "medium";
-  let newChatToolMode: ChatSnapshot["toolMode"] = "read-only";
-  let search = "";
-  let searchOpen = false;
-  let connection: ConnectionState = "disconnected";
-  let error = "";
-  let bootstrapError = "";
-  let drawerOpen = false;
-  let projectLoading = false;
-  let projectLoadingId = "";
-  let projectBatchLoading = false;
-  let projectBatchProgress = 0;
-  let chatLoading = false;
-  let retryingConnection = false;
-  let loadingEarlier = false;
-  let delivery: "normal" | "steer" | "follow-up" = "normal";
-  let pendingPrompt:
-    | { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" }
-    | undefined;
-  let copyState: Record<string, "copied" | "failed"> = {};
-  let toolOutputs: Record<
-    string,
-    {
-      text: string;
-      nextOffset: number;
-      total: number;
-      complete: boolean;
-      loading: boolean;
-      sourceTruncated: boolean;
-      error?: string;
-    }
-  > = {};
-  // oxlint-disable no-unassigned-vars -- Assigned by Svelte's bind:this directive.
-  let transcript: HTMLElement;
-  let searchInput: HTMLInputElement;
-  let promptInput: HTMLTextAreaElement;
-  let nearBottom = true;
-  let dialogValue: string | boolean = "";
-  let dialogElement: HTMLDialogElement;
-  let projectDialogElement: HTMLDialogElement;
-  let renameDialogElement: HTMLDialogElement;
-  let renameValue = "";
-  let compactDialogElement: HTMLDialogElement;
-  // oxlint-enable no-unassigned-vars
+  let bootstrap = $state.raw<Bootstrap>();
+  let workspace = $state.raw<Workspace>();
+  let snapshot = $state.raw<ChatSnapshot>();
+  let workspaceCache = $state.raw<Record<string, Workspace>>({});
+  let expandedProjectIds = $state.raw<string[]>([]);
+  let threadLimits = $state.raw<Record<string, number>>({});
+  let projectPath = $state("");
+  let projectQuery = $state("");
+  let draft = $state("");
+  let newChatModel = $state("");
+  let newChatThinkingLevel = $state<ChatSnapshot["thinkingLevel"]>("medium");
+  let newChatToolMode = $state<ChatSnapshot["toolMode"]>("read-only");
+  let search = $state("");
+  let searchOpen = $state(false);
+  let connection = $state<ConnectionState>("disconnected");
+  let error = $state("");
+  let bootstrapError = $state("");
+  let drawerOpen = $state(false);
+  let projectLoading = $state(false);
+  let projectLoadingId = $state("");
+  let projectBatchLoading = $state(false);
+  let projectBatchProgress = $state(0);
+  let chatLoading = $state(false);
+  let retryingConnection = $state(false);
+  let loadingEarlier = $state(false);
+  let delivery = $state<"normal" | "steer" | "follow-up">("normal");
+  let pendingPrompt = $state.raw<
+    { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
+  >();
+  let copyState = $state.raw<Record<string, "copied" | "failed">>({});
+  let toolOutputs = $state.raw<
+    Record<
+      string,
+      {
+        text: string;
+        nextOffset: number;
+        total: number;
+        complete: boolean;
+        loading: boolean;
+        sourceTruncated: boolean;
+        error?: string;
+      }
+    >
+  >({});
+  let transcript = $state<HTMLElement>();
+  let searchInput = $state<HTMLInputElement>();
+  let promptInput = $state<HTMLTextAreaElement>();
+  let nearBottom = $state(true);
+  let relativeNow = $state(Date.now());
+  let dialogValue = $state<string | boolean>("");
+  let dialogElement = $state<HTMLDialogElement>();
+  let projectDialogElement = $state<HTMLDialogElement>();
+  let renameDialogElement = $state<HTMLDialogElement>();
+  let renameValue = $state("");
+  let compactDialogElement = $state<HTMLDialogElement>();
+  const mobileViewport = new MediaQuery("max-width: 900px");
   const api = new PidexApiClient();
   const chatConnection = new ChatConnection({
     onEvent: applyEvent,
@@ -78,7 +81,9 @@
     onStateChange: (state) => (connection = state),
   });
 
-  const active = () => snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error";
+  let active = $derived(
+    Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
+  );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   function projectLabel(project: RecentWorkspace) {
     const name = projectName(project.path);
@@ -100,7 +105,7 @@
       `${session.name ?? ""} ${session.firstMessage}`.toLowerCase().includes(query),
     );
   }
-  function visibleProjects() {
+  let visibleProjects = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return (bootstrap?.recentWorkspaces ?? []).filter(
       (project) =>
@@ -108,25 +113,25 @@
         projectName(project.path).toLowerCase().includes(query) ||
         sessionsFor(project).length > 0,
     );
-  }
-  function availableProjects() {
+  });
+  let availableProjects = $derived.by(() => {
     const query = projectQuery.trim().toLowerCase();
     return (bootstrap?.projectCandidates ?? []).filter(
       (candidate) => !query || candidate.name.toLowerCase().includes(query),
     );
-  }
+  });
   function projectAdded(candidate: ProjectCandidate) {
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
-  function currentTitle() {
+  let currentTitle = $derived.by(() => {
     if (snapshot?.sessionName) return snapshot.sessionName;
     const firstUser = snapshot?.items.find((item) => item.type === "user");
     if (firstUser?.type === "user")
       return firstUser.text.split("\n")[0]?.slice(0, 64) || workspace?.name || "Pidex";
     return workspace?.name ?? "Pidex";
-  }
+  });
   const relativeTime = (value: string) => {
-    const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
+    const seconds = Math.round((new Date(value).getTime() - relativeNow) / 1000);
     const absolute = Math.abs(seconds);
     const [amount, unit] =
       absolute < 60
@@ -232,7 +237,7 @@
   }
   async function addProject(candidate: ProjectCandidate) {
     const loaded = await openProject(candidate.path);
-    if (loaded) projectDialogElement.close();
+    if (loaded) projectDialogElement?.close();
   }
   async function addAllProjects() {
     const pending = (bootstrap?.projectCandidates ?? []).filter(
@@ -258,7 +263,7 @@
       localStorage.setItem("pidex:last-project", first.path);
     }
     projectBatchLoading = false;
-    projectDialogElement.close();
+    projectDialogElement?.close();
   }
   async function browseProject() {
     try {
@@ -316,10 +321,11 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  function selectedNewChatModel() {
-    if (workspace?.models.some((model) => model.id === newChatModel)) return newChatModel;
-    return workspace?.models[0]?.id ?? "";
-  }
+  let selectedNewChatModel = $derived(
+    workspace?.models.some((model) => model.id === newChatModel)
+      ? newChatModel
+      : (workspace?.models[0]?.id ?? ""),
+  );
   function prepareNewChat(target = workspace) {
     if (!target || chatLoading) return;
     persistDraft();
@@ -399,7 +405,7 @@
     await tick();
     if (snapshot?.extensionDialog) {
       initializeDialogValue(snapshot.extensionDialog);
-      if (!dialogElement.open) dialogElement.showModal();
+      if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
     resizePrompt();
     scrollLatest();
@@ -454,11 +460,16 @@
       };
       void refreshSessions();
     } else if (event.type === "extension_dialog") {
-      snapshot = { ...snapshot, ...(event.dialog ? { extensionDialog: event.dialog } : {}) };
       if (event.dialog) {
+        snapshot = { ...snapshot, extensionDialog: event.dialog };
         initializeDialogValue(event.dialog);
         void tick().then(() => dialogElement?.showModal());
-      } else dialogElement?.close();
+      } else {
+        const nextSnapshot = { ...snapshot };
+        delete nextSnapshot.extensionDialog;
+        snapshot = nextSnapshot;
+        dialogElement?.close();
+      }
     }
     if (nearBottom) requestAnimationFrame(scrollLatest);
   }
@@ -481,14 +492,14 @@
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
     const text = draft.trim();
-    const mode = active() ? delivery : "normal";
+    const mode = active ? delivery : "normal";
     await submitPrompt(text, mode);
   }
   async function startChat() {
     if (!workspace || !draft.trim() || !workspace.models.length || chatLoading) return;
     const text = draft.trim();
     const created = await newChat(workspace, text, {
-      model: selectedNewChatModel(),
+      model: selectedNewChatModel,
       thinkingLevel: newChatThinkingLevel,
       toolMode: newChatToolMode,
     });
@@ -509,7 +520,7 @@
         text,
         mode,
         snapshot.revision,
-        active() ? snapshot.run?.runId : undefined,
+        active ? snapshot.run?.runId : undefined,
         pendingPrompt.actionId,
       );
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
@@ -548,14 +559,14 @@
   }
   function openRename() {
     if (!snapshot) return;
-    renameValue = snapshot.sessionName ?? currentTitle();
+    renameValue = snapshot.sessionName ?? currentTitle;
     void tick().then(() => renameDialogElement?.showModal());
   }
   async function rename() {
     if (!snapshot || !renameValue.trim()) return;
     try {
       snapshot = await api.rename(snapshot.chatId, renameValue.trim(), snapshot.revision);
-      renameDialogElement.close();
+      renameDialogElement?.close();
       await refreshSessions();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Rename failed";
@@ -568,7 +579,7 @@
     if (!snapshot) return;
     try {
       snapshot = await api.compact(snapshot.chatId, snapshot.revision);
-      compactDialogElement.close();
+      compactDialogElement?.close();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Compaction failed";
     }
@@ -582,7 +593,7 @@
         resolveDialogValue(dialog, dialogValue, cancelled),
         snapshot.revision,
       );
-      dialogElement.close();
+      dialogElement?.close();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Extension response failed";
     }
@@ -658,6 +669,8 @@
   }
   async function loadEarlier() {
     if (!snapshot || snapshot.transcriptStart === 0 || loadingEarlier) return;
+    const previousScrollHeight = transcript?.scrollHeight;
+    const previousScrollTop = transcript?.scrollTop;
     loadingEarlier = true;
     try {
       const page = await api.transcript(snapshot.chatId, snapshot.transcriptStart);
@@ -668,6 +681,10 @@
         transcriptStart: page.start,
         transcriptTotal: page.total,
       };
+      if (transcript && previousScrollHeight !== undefined && previousScrollTop !== undefined) {
+        await tick();
+        transcript.scrollTop = previousScrollTop + transcript.scrollHeight - previousScrollHeight;
+      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded";
     } finally {
@@ -762,17 +779,15 @@
   onMount(() => {
     projectPath = localStorage.getItem("pidex:last-project") ?? "";
     void loadBootstrap();
-    window.addEventListener("keydown", globalKeydown);
-    window.addEventListener("offline", wentOffline);
-    window.addEventListener("online", cameOnline);
+    const relativeTimeInterval = window.setInterval(() => (relativeNow = Date.now()), 60_000);
     return () => {
-      window.removeEventListener("keydown", globalKeydown);
-      window.removeEventListener("offline", wentOffline);
-      window.removeEventListener("online", cameOnline);
+      window.clearInterval(relativeTimeInterval);
       chatConnection.close();
     };
   });
 </script>
+
+<svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
 
 <svelte:head>
   <title>Pidex</title>
@@ -785,12 +800,15 @@
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
     aria-label="Close sessions"
+    tabindex={drawerOpen ? 0 : -1}
     onclick={() => (drawerOpen = false)}
   ></button>
 
   <aside
+    id="sessions-drawer"
     class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Sessions"
+    inert={mobileViewport.current && !drawerOpen}
   >
     <div class="flex min-h-14 items-center gap-2 px-1 pt-2 pr-1 pb-1.5 pl-2">
       <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -856,7 +874,7 @@
         aria-label="Projects"
         aria-busy={chatLoading || projectLoading}
       >
-        {#if visibleProjects().length === 0}
+        {#if visibleProjects.length === 0}
           <div class="flex flex-col items-center gap-2 px-4.5 py-7 text-center text-faint">
             <Icon name={search ? "search" : "folder"} size={18} />
             <p class="m-0 max-w-45 text-[11.5px] leading-relaxed">
@@ -868,7 +886,7 @@
               >{/if}
           </div>
         {:else}
-          {#each visibleProjects() as project (project.id)}
+          {#each visibleProjects as project (project.id)}
             {@const loaded =
               workspaceCache[project.id] ?? (workspace?.id === project.id ? workspace : undefined)}
             {@const expanded =
@@ -936,7 +954,7 @@
                       {search ? "No matching threads." : "No threads yet."}
                     </p>
                   {:else if loaded}
-                    {#each shownSessions as session}
+                    {#each shownSessions as session (session.id)}
                       {@const current = snapshot?.sessionId === session.id}
                       <button
                         class={`group/thread mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
@@ -951,7 +969,7 @@
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{session.name ?? (session.firstMessage || "Untitled session")}</strong
                         >
-                        {#if current && active()}<span
+                        {#if current && active}<span
                             class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
@@ -994,7 +1012,10 @@
     </div>
   </aside>
 
-  <main class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+  <main
+    class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background"
+    inert={mobileViewport.current && drawerOpen}
+  >
     <header
       class="z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13"
     >
@@ -1002,6 +1023,7 @@
         class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
         aria-label="Open sessions"
         aria-expanded={drawerOpen}
+        aria-controls="sessions-drawer"
         onclick={() => (drawerOpen = true)}
       >
         <Icon name="menu" size={19} />
@@ -1009,7 +1031,7 @@
       <div class="min-w-0 flex-1">
         <strong
           class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
-          >{currentTitle()}</strong
+          >{currentTitle}</strong
         >
         <div class="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-faint capitalize">
           <span class="max-[560px]:hidden">{workspace?.name ?? "No project"}</span>
@@ -1025,7 +1047,7 @@
           <button
             class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
             onclick={openRename}
-            disabled={active()}
+            disabled={active}
             aria-label="Rename"
             title="Rename session"
             ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
@@ -1033,7 +1055,7 @@
           <button
             class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
             onclick={openCompact}
-            disabled={active()}
+            disabled={active}
             aria-label="Compact"
             title="Compact session"
             ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
@@ -1122,7 +1144,9 @@
       class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
       bind:this={transcript}
       onscroll={onScroll}
+      role="log"
       aria-live="polite"
+      aria-relevant="additions text"
     >
       {#if bootstrapError && !bootstrap}
         <div
@@ -1214,11 +1238,12 @@
                     <select
                       class="chat-composer__select"
                       aria-label="Model"
-                      value={selectedNewChatModel()}
+                      value={selectedNewChatModel}
                       onchange={(event) => (newChatModel = event.currentTarget.value)}
                       disabled={!workspace.models.length || chatLoading}
                     >
-                      {#each workspace.models as model}<option value={model.id}>{model.name}</option
+                      {#each workspace.models as model (model.id)}<option value={model.id}
+                          >{model.name}</option
                         >{/each}
                     </select>
                   </label>
@@ -1400,7 +1425,7 @@
       <footer
         class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
       >
-        {#if active()}
+        {#if active}
           <div
             class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-[10.5px] text-faint"
           >
@@ -1425,7 +1450,7 @@
             rows="2"
             placeholder={connection !== "connected"
               ? "Draft locally while the host reconnects…"
-              : active()
+              : active
                 ? "Add guidance while Pi works…"
                 : "Ask Pi to work on this project…"}
             aria-label="Prompt"></textarea>
@@ -1441,9 +1466,9 @@
                   aria-label="Model"
                   value={snapshot.model}
                   onchange={(e) => configure({ model: e.currentTarget.value })}
-                  disabled={active() || !workspace?.models.length}
+                  disabled={active || !workspace?.models.length}
                 >
-                  {#each workspace?.models ?? [] as model}<option value={model.id}
+                  {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
                       >{model.name}</option
                     >{/each}
                 </select>
@@ -1461,7 +1486,7 @@
                     configure({
                       thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
                     })}
-                  disabled={active()}
+                  disabled={active}
                 >
                   <option value="off">Off</option><option value="minimal">Minimal</option><option
                     value="low">Low</option
@@ -1481,7 +1506,7 @@
                   value={snapshot.toolMode}
                   onchange={(e) =>
                     configure({ toolMode: e.currentTarget.value as ChatSnapshot["toolMode"] })}
-                  disabled={active()}
+                  disabled={active}
                 >
                   <option value="read-only">Read only</option><option value="full"
                     >Full access</option
@@ -1490,7 +1515,7 @@
               </label>
             </div>
             <div class="flex min-w-0 flex-none items-center gap-1">
-              {#if active()}
+              {#if active}
                 <select
                   class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"
                   bind:value={delivery}
@@ -1548,7 +1573,7 @@
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
-    if (!projectBatchLoading) projectDialogElement.close();
+    if (!projectBatchLoading) projectDialogElement?.close();
   }}
 >
   <form class="p-5 pb-3.5" method="dialog" onsubmit={(event) => event.preventDefault()}>
@@ -1580,7 +1605,7 @@
     <div class="flex min-h-12 items-center justify-between gap-3 px-0.5 pt-2.5 pb-2">
       <span class="grid gap-0.5"
         ><strong class="text-[11.5px] font-semibold text-foreground">Projects</strong><small
-          class="text-[10px] text-faint">{availableProjects().length} folders discovered</small
+          class="text-[10px] text-faint">{availableProjects.length} folders discovered</small
         ></span
       >
       {#if (bootstrap?.projectCandidates ?? []).some((candidate) => !projectAdded(candidate))}
@@ -1596,7 +1621,7 @@
     <div
       class="max-h-[min(430px,52vh)] overflow-y-auto rounded-xl border border-border bg-background/70 p-1 [scrollbar-width:thin]"
     >
-      {#if availableProjects().length === 0}
+      {#if availableProjects.length === 0}
         <div
           class="flex min-h-33 flex-col items-center justify-center gap-2 text-[11.5px] text-faint"
         >
@@ -1605,7 +1630,7 @@
           >
         </div>
       {:else}
-        {#each availableProjects() as candidate, candidateIndex (candidate.path)}
+        {#each availableProjects as candidate, candidateIndex (candidate.path)}
           <button
             type="button"
             class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
@@ -1644,7 +1669,7 @@
       <button
         class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
         type="button"
-        onclick={() => projectDialogElement.close()}
+        onclick={() => projectDialogElement?.close()}
         disabled={projectBatchLoading}>Done</button
       >
     </div>
@@ -1654,9 +1679,10 @@
 <dialog
   bind:this={renameDialogElement}
   class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  aria-labelledby="rename-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
-    renameDialogElement.close();
+    renameDialogElement?.close();
   }}
 >
   <form
@@ -1674,7 +1700,7 @@
         <Icon name="rename" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold">Rename thread</h2>
+        <h2 class="m-0 text-[15px] font-semibold" id="rename-dialog-title">Rename thread</h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
           Give this Pi session a concise, memorable name.
         </p>
@@ -1693,7 +1719,7 @@
       <button
         class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
         type="button"
-        onclick={() => renameDialogElement.close()}>Cancel</button
+        onclick={() => renameDialogElement?.close()}>Cancel</button
       ><button
         class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
         type="submit"
@@ -1706,9 +1732,10 @@
 <dialog
   bind:this={compactDialogElement}
   class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  aria-labelledby="compact-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
-    compactDialogElement.close();
+    compactDialogElement?.close();
   }}
 >
   <form
@@ -1726,7 +1753,9 @@
         <Icon name="compact" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold">Compact this thread?</h2>
+        <h2 class="m-0 text-[15px] font-semibold" id="compact-dialog-title">
+          Compact this thread?
+        </h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
           Pi will summarize older context to free space in the active context window.
         </p>
@@ -1736,7 +1765,7 @@
       <button
         class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
         type="button"
-        onclick={() => compactDialogElement.close()}>Cancel</button
+        onclick={() => compactDialogElement?.close()}>Cancel</button
       ><button
         class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
         type="submit">Compact thread</button
@@ -1749,6 +1778,7 @@
   <dialog
     bind:this={dialogElement}
     class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+    aria-labelledby="extension-dialog-title"
     oncancel={(event) => {
       event.preventDefault();
       void answerDialog(snapshot!.extensionDialog!, true);
@@ -1769,7 +1799,9 @@
           <Icon name="activity" />
         </div>
         <div>
-          <h2 class="m-0 text-[15px] font-semibold">{snapshot.extensionDialog.title}</h2>
+          <h2 class="m-0 text-[15px] font-semibold" id="extension-dialog-title">
+            {snapshot.extensionDialog.title}
+          </h2>
           {#if snapshot.extensionDialog.message}<p
               class="mt-1 mb-0 text-xs leading-relaxed text-muted"
             >
@@ -1781,7 +1813,8 @@
         <select
           class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
           bind:value={dialogValue}
-          >{#each snapshot.extensionDialog.options ?? [] as option}<option value={option}
+          aria-label="Response"
+          >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
               >{option}</option
             >{/each}</select
         >
@@ -1797,11 +1830,13 @@
         <textarea
           class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
           bind:value={dialogValue}
+          aria-label="Response"
           rows="8"></textarea>
       {:else}
         <input
           class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
           bind:value={dialogValue}
+          aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}
         />
       {/if}

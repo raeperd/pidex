@@ -44,9 +44,9 @@ apps/desktop ───────────> packages/api
      └── supervises compiled apps/server child ──> Pi SDK 0.80.10
 ```
 
-- `packages/api`: browser-safe Zod schemas and inferred protocol types.
-- `apps/server`: Node HTTP/WebSocket host, request security, replay buffers, durable run/action state, paged resources, native Pi adapter, and Drizzle-backed SQLite metadata.
-- `apps/web`: responsive Svelte 5/Tailwind 4 client, name-first project picker, bounded nested task previews, WebSocket replay/reconnect, stable-item reconciliation, drafts, response copying, offline recovery, bounded transcript/tool paging, safe GFM, mobile drawer, and extension dialogs.
+- `packages/api`: browser-safe Zod schemas, the oRPC contract, and protocol types.
+- `apps/server`: Node host with native oRPC, custom WebSocket, Pi, and Drizzle SQLite.
+- `apps/web`: responsive Svelte client with typed native oRPC and WebSocket transports.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
 The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.

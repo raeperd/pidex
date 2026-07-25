@@ -123,21 +123,15 @@ Bind extensions using the SDK’s documented non-TUI/RPC-style UI context. Bridg
 
 Discover extension commands, prompt templates, and skills through Pi and expose a lightweight `/` autocomplete menu. Send them through Pi’s normal prompt expansion. Do not pretend built-in TUI-only commands work; implement New, Resume, Rename, Compact, model, thinking, and tools as web actions.
 
-SERVER AND SSE CONTRACT
+SERVER AND STREAMING CONTRACT
 
-Implement typed, Zod-validated equivalents of:
+Expose the typed, Zod-validated contract through native oRPC under `/api/rpc`:
 
-- `GET /api/health`
-- `GET /api/bootstrap` — non-secret app/Pi status and recent/known workspace hints
-- `POST /api/workspaces/open` with `{ path }` — validate once and return an opaque `workspaceId` plus workspace-scoped trust/resource diagnostics, authenticated models, and session summaries
-- `GET /api/workspaces/:workspaceId/sessions`
-- `POST /api/chats` with `workspaceId` and `POST /api/chats/resume` with an opaque listed `sessionId`
-- `GET /api/chats/:id` — full snapshot
-- `GET /api/chats/:id/events` — SSE
-- `POST /api/chats/:id/messages` with `normal | steer | followUp`
-- `POST /api/chats/:id/abort`
-- `PATCH /api/chats/:id/config`
-- rename, compact, extension-dialog response, and dispose routes.
+- `system.health` and `system.bootstrap` for host readiness and app status.
+- `workspaces.open`, `workspaces.sessions`, and `workspaces.trust`.
+- `chats.create`, `chats.resume`, `chats.get`, and `chats.dispose`.
+- Chat actions for messages, abort, configuration, queues, and compaction.
+- Transcript, tool output, rename, and extension-dialog procedures.
 
 Apply small explicit request-body limits. Use a consistent JSON error shape and no production stack traces.
 
@@ -227,7 +221,7 @@ For any installed service:
 - execute the absolute Node binary and compiled server entry directly rather than relying on `npm`, a version-manager shell, or an interactive `PATH`;
 - preserve required non-secret configuration such as `PORT`, workspace roots, and Pi directory overrides, but do not copy or embed API keys, OAuth tokens, or arbitrary shell environment values in the service definition. Before installation, determine without printing values whether Pi authentication depends on shell-only environment variables; if it does, explain that the service will not inherit an interactive shell and ask the user to use Pi's stored `/login` auth or a deliberate OS-native secret mechanism rather than copying secrets automatically;
 - write logs to a documented app-local or user-state log directory with bounded rotation where practical;
-- verify the service by restarting it, checking `/api/health`, and confirming that the same non-secret model availability status is present;
+- verify restart through `system.health` and confirm the same model status;
 - provide exact status, stop, restart, disable, and uninstall commands;
 - leave the manual `npm start` workflow working.
 
@@ -248,7 +242,7 @@ DEFINITION OF DONE
 Do not hand off until:
 
 1. strict typecheck, tests, Playwright, and production build pass;
-2. the production app starts on literal host `127.0.0.1` and the validated effective port (`4783` by default), reports that URL, fails clearly when the port is occupied, and `/api/health` works;
+2. the app starts on `127.0.0.1`, reports its URL, and `system.health` works;
 3. desktop and mobile layouts are manually checked;
 4. native Pi sessions can be listed, created, resumed, and survive server restart;
 5. stream, tools, steer, follow-up, stop, retry/compaction, settled state, and extension dialogs work through the Pi SDK;

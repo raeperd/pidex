@@ -1,3 +1,4 @@
+import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 3;
@@ -86,9 +87,6 @@ export const bootstrapSchema = z.object({
 export const sessionsResponseSchema = z.object({ sessions: z.array(sessionSummarySchema) });
 export const okResponseSchema = z.object({ ok: z.literal(true) });
 export const acceptedResponseSchema = z.object({ accepted: z.literal(true) });
-export const apiErrorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
-});
 export const textItemSchema = z.object({
   type: z.enum(["user", "assistant"]),
   id: z.string().max(200),
@@ -258,6 +256,59 @@ export const transcriptPageSchema = z.object({
   start: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
 });
+
+const emptyInputSchema = z.object({});
+const chatIdInputSchema = z.object({ chatId: idSchema });
+const workspaceIdInputSchema = z.object({ workspaceId: idSchema });
+const toolOutputInputSchema = z.object({
+  chatId: idSchema,
+  resourceId: idSchema,
+  offset: z.number().int().nonnegative().default(0),
+  limit: z.number().int().positive().default(16_384),
+});
+const transcriptInputSchema = z.object({
+  chatId: idSchema,
+  before: z.number().int().nonnegative().default(0),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const pidexApiContract = {
+  system: {
+    health: oc.input(emptyInputSchema).output(healthSchema),
+    bootstrap: oc.input(emptyInputSchema).output(bootstrapSchema),
+  },
+  workspaces: {
+    open: oc.input(openWorkspaceSchema).output(workspaceSchema),
+    sessions: oc.input(workspaceIdInputSchema).output(sessionsResponseSchema),
+    trust: oc.input(trustWorkspaceSchema.extend({ workspaceId: idSchema })).output(workspaceSchema),
+  },
+  chats: {
+    create: oc.input(createChatSchema).output(chatSnapshotSchema),
+    resume: oc.input(resumeChatSchema).output(chatSnapshotSchema),
+    get: oc.input(chatIdInputSchema).output(chatSnapshotSchema),
+    dispose: oc.input(chatIdInputSchema).output(okResponseSchema),
+    sendMessage: oc
+      .input(messageRequestSchema.extend({ chatId: idSchema }))
+      .output(actionOutcomeSchema),
+    abort: oc.input(abortRequestSchema.extend({ chatId: idSchema })).output(actionOutcomeSchema),
+    acknowledgeInterrupted: oc
+      .input(acknowledgeInterruptedRequestSchema.extend({ chatId: idSchema }))
+      .output(actionOutcomeSchema),
+    toolOutput: oc.input(toolOutputInputSchema).output(toolOutputChunkSchema),
+    transcript: oc.input(transcriptInputSchema).output(transcriptPageSchema),
+    clearQueue: oc
+      .input(actionRequestSchema.extend({ chatId: idSchema }))
+      .output(chatSnapshotSchema),
+    configure: oc.input(configRequestSchema.and(chatIdInputSchema)).output(chatSnapshotSchema),
+    rename: oc.input(renameRequestSchema.extend({ chatId: idSchema })).output(chatSnapshotSchema),
+    compact: oc.input(compactRequestSchema.extend({ chatId: idSchema })).output(chatSnapshotSchema),
+    answerDialog: oc
+      .input(dialogResponseSchema.extend({ chatId: idSchema }))
+      .output(okResponseSchema),
+  },
+};
+
+export type PidexApiContractClient = ContractRouterClient<typeof pidexApiContract>;
 
 export type ModelInfo = z.infer<typeof modelSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
