@@ -47,7 +47,7 @@ export class MetadataStore {
   constructor() {
     const dir = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"), { timeout: 5_000 });
+    this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
     try {
       this.sqlite.exec(METADATA_SCHEMA_SQL);
       this.db = createMetadataDatabase(this.sqlite);

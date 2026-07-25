@@ -1,10 +1,8 @@
-import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Worker } from "node:worker_threads";
 import { and, eq, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -60,21 +58,6 @@ describe("metadata store", () => {
     expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
     expect(store.workspaceId("/tmp/example-project")).toBe(id);
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
-  });
-
-  it("waits for temporary SQLite write contention", async () => {
-    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-contention-"));
-    process.env.PIDEX_STATE_DIR = stateDir;
-    store = new MetadataStore();
-    const worker = holdWriteLock(path.join(stateDir, "pidex.sqlite"));
-    const exited = once(worker, "exit");
-    await once(worker, "message");
-
-    const id = store.rememberWorkspace("/tmp/contended-project");
-
-    expect(id).toHaveLength(32);
-    expect(await exited).toEqual([0]);
-    expect(store.workspaceId("/tmp/contended-project")).toBe(id);
   });
 
   it("persists action transitions and replays through Drizzle transactions", async () => {
@@ -235,23 +218,6 @@ describe("metadata store", () => {
     });
   });
 });
-
-function holdWriteLock(databasePath: string) {
-  return new Worker(
-    `
-      const { DatabaseSync } = require("node:sqlite");
-      const { parentPort, workerData } = require("node:worker_threads");
-      const database = new DatabaseSync(workerData.databasePath);
-      database.exec("BEGIN IMMEDIATE");
-      parentPort.postMessage("locked");
-      setTimeout(() => {
-        database.exec("COMMIT");
-        database.close();
-      }, 100);
-    `,
-    { eval: true, workerData: { databasePath } },
-  );
-}
 
 const sqliteMaster = sqliteTable("sqlite_master", {
   type: text("type").notNull(),
