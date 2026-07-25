@@ -3,4 +3,6 @@
   export let text: string;
 </script>
 
-<div class="markdown">{@html safeMarkdown(text)}</div>
+<div class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]">
+  {@html safeMarkdown(text)}
+</div>
