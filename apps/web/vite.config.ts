@@ -13,7 +13,7 @@ const backendClient: PidexApiContractClient = createORPCClient(
 function waitForBackend(): Plugin {
   return {
     name: "wait-for-pidex-backend",
-    apply: "serve",
+    apply: (_config, environment) => environment.command === "serve" && environment.mode !== "test",
     async configureServer() {
       const deadline = Date.now() + 30_000;
       while (Date.now() < deadline) {

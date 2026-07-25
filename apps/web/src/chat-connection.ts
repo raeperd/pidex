@@ -55,6 +55,10 @@ export class ChatConnection {
     previous?.close();
 
     socket.addEventListener("open", () => {
+      if (this.socket !== socket || this.chatId !== chatId) {
+        socket.close();
+        return;
+      }
       this.handlers.onStateChange("connected");
       socket.send(
         JSON.stringify({
@@ -88,7 +92,12 @@ export class ChatConnection {
 
   private receive(socket: WebSocket, data: unknown) {
     if (this.socket !== socket) return;
-    const raw: unknown = JSON.parse(String(data));
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(data));
+    } catch {
+      return;
+    }
     if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "ping") {
       socket.send(JSON.stringify({ type: "pong" }));
       return;
