@@ -7,6 +7,9 @@ import type { ActionOutcome, RunOutcome } from "@pidex/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { ActionProtocolError } from "./errors.js";
+
+export { ActionProtocolError } from "./errors.js";
 
 interface ActionInput {
   actionId: string;
@@ -14,21 +17,6 @@ interface ActionInput {
   expectedRevision: number;
   requestDigest: string;
   sessionKey: string;
-}
-
-export class ActionProtocolError extends Error {
-  readonly status = 409;
-  constructor(
-    readonly code:
-      | "action_conflict"
-      | "stale_revision"
-      | "session_busy"
-      | "run_mismatch"
-      | "interrupted_run",
-    message: string,
-  ) {
-    super(message);
-  }
 }
 
 export const requestDigest = (value: unknown) =>
@@ -144,12 +132,15 @@ export class MetadataStore {
         const state = this.readSessionState(tx, input.sessionKey);
         this.assertCurrentRevision(state.revision, input.expectedRevision);
         if (state.run?.requiresAcknowledgement)
-          throw new ActionProtocolError(
-            "interrupted_run",
-            "A crash-interrupted run must be acknowledged before starting new work",
-          );
+          throw ActionProtocolError.make({
+            code: "interrupted_run",
+            message: "A crash-interrupted run must be acknowledged before starting new work",
+          });
         if (state.run && (state.run.status === "accepted" || state.run.status === "running"))
-          throw new ActionProtocolError("session_busy", "A run is already active for this session");
+          throw ActionProtocolError.make({
+            code: "session_busy",
+            message: "A run is already active for this session",
+          });
 
         const runId = randomUUID().replaceAll("-", "");
         const revision = state.revision + 1;
@@ -200,9 +191,15 @@ export class MetadataStore {
         const state = this.readSessionState(tx, input.sessionKey);
         this.assertCurrentRevision(state.revision, input.expectedRevision);
         if (!state.run || state.run.runId !== input.runId)
-          throw new ActionProtocolError("run_mismatch", "Stop no longer targets the active run");
+          throw ActionProtocolError.make({
+            code: "run_mismatch",
+            message: "Stop no longer targets the active run",
+          });
         if (state.run.status !== "accepted" && state.run.status !== "running")
-          throw new ActionProtocolError("run_mismatch", "The targeted run is no longer active");
+          throw ActionProtocolError.make({
+            code: "run_mismatch",
+            message: "The targeted run is no longer active",
+          });
 
         const revision = state.revision + 1;
         const now = new Date().toISOString();
@@ -251,10 +248,10 @@ export class MetadataStore {
           state.run.runId !== input.runId ||
           (state.run.status !== "accepted" && state.run.status !== "running")
         ) {
-          throw new ActionProtocolError(
-            "run_mismatch",
-            "The queued instruction no longer targets an active run",
-          );
+          throw ActionProtocolError.make({
+            code: "run_mismatch",
+            message: "The queued instruction no longer targets an active run",
+          });
         }
         const revision = state.revision + 1;
         const now = new Date().toISOString();
@@ -340,10 +337,10 @@ export class MetadataStore {
         const state = this.readSessionState(tx, input.sessionKey);
         this.assertCurrentRevision(state.revision, input.expectedRevision);
         if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
-          throw new ActionProtocolError(
-            "run_mismatch",
-            "There is no interrupted run awaiting acknowledgement",
-          );
+          throw ActionProtocolError.make({
+            code: "run_mismatch",
+            message: "There is no interrupted run awaiting acknowledgement",
+          });
 
         const revision = state.revision + 1;
         const now = new Date().toISOString();
@@ -481,10 +478,10 @@ export class MetadataStore {
       row.kind !== kind ||
       row.requestDigest !== input.requestDigest
     ) {
-      throw new ActionProtocolError(
-        "action_conflict",
-        "This action ID was already used for a different request",
-      );
+      throw ActionProtocolError.make({
+        code: "action_conflict",
+        message: "This action ID was already used for a different request",
+      });
     }
     return {
       accepted: true,
@@ -498,10 +495,10 @@ export class MetadataStore {
 
   private assertCurrentRevision(currentRevision: number, expectedRevision: number) {
     if (currentRevision !== expectedRevision)
-      throw new ActionProtocolError(
-        "stale_revision",
-        `Session changed (expected revision ${expectedRevision}, current revision ${currentRevision})`,
-      );
+      throw ActionProtocolError.make({
+        code: "stale_revision",
+        message: `Session changed (expected revision ${expectedRevision}, current revision ${currentRevision})`,
+      });
   }
 }
 
