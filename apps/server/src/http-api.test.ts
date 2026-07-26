@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +47,7 @@ describe.sequential("HTTP API endpoints", () => {
   let workspacePath: string;
   let workspaceId: string;
   let chatId: string;
+  let httpUrl: string;
   let websocketUrl: string;
   const originalEnvironment = preserveEnvironment([
     "PIDEX_PROJECT_ROOTS",
@@ -71,7 +73,8 @@ describe.sequential("HTTP API endpoints", () => {
     app = await createPidexServer();
     await listen(app);
     const address = app.server.address() as AddressInfo;
-    const rpcUrl = `http://127.0.0.1:${address.port}/api/rpc`;
+    httpUrl = `http://127.0.0.1:${address.port}`;
+    const rpcUrl = `${httpUrl}/api/rpc`;
     websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
@@ -111,6 +114,22 @@ describe.sequential("HTTP API endpoints", () => {
       warning: expect.any(String),
     });
     expect(result.csrfToken).toHaveLength(43);
+  });
+
+  it("preserves typed errors at the Node HTTP boundary", async () => {
+    const unknownApiRoute = await fetch(`${httpUrl}/api/missing`);
+    expect(unknownApiRoute.status).toBe(404);
+    await expect(unknownApiRoute.json()).resolves.toMatchObject({
+      error: { code: "not_found", message: "API route not found" },
+    });
+
+    const forbiddenHost = await requestJson(`${httpUrl}/api/missing`, {
+      host: "example.com",
+    });
+    expect(forbiddenHost.status).toBe(403);
+    expect(forbiddenHost.body).toMatchObject({
+      error: { code: "bad_host", message: "Host is not allowed" },
+    });
   });
 
   it("workspaces.open", async () => {
@@ -390,6 +409,23 @@ async function listen(app: Awaited<ReturnType<typeof createPidexServer>>) {
   await new Promise<void>((resolve, reject) => {
     app.server.once("error", reject);
     app.server.listen(0, "127.0.0.1", resolve);
+  });
+}
+
+async function requestJson(url: string, headers: Record<string, string>) {
+  return new Promise<{ status: number | undefined; body: unknown }>((resolve, reject) => {
+    const req = request(url, { headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () =>
+        resolve({
+          status: res.statusCode,
+          body: JSON.parse(Buffer.concat(chunks).toString()) as unknown,
+        }),
+      );
+    });
+    req.once("error", reject);
+    req.end();
   });
 }
 
