@@ -221,6 +221,7 @@ test("blocks project additions while saving the manual order", async ({ page, re
   await expect.poll(() => reorderStarted).toBe(true);
   try {
     await expect(page.getByLabel("Add project", { exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "New task in apps" })).toBeDisabled();
   } finally {
     releaseReorder?.();
   }

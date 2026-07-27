@@ -1180,7 +1180,7 @@
                 <button
                   class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={() => newTaskInProject(project)}
-                  disabled={chatLoading || projectLoadingId === project.id}
+                  disabled={chatLoading || projectOrderSaving || projectLoadingId === project.id}
                   aria-label={`New task in ${projectLabel(project)}`}
                   title="New task"
                 >
