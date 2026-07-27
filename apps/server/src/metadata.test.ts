@@ -78,6 +78,19 @@ describe("metadata store", () => {
     ]);
   });
 
+  it("keeps a newly remembered workspace inside the 100-project ordering boundary", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-limit-"));
+    store = new MetadataStore();
+    for (let index = 0; index < 100; index += 1) store.rememberWorkspace(`/tmp/project-${index}`);
+
+    const newestId = store.rememberWorkspace("/tmp/project-100");
+    const recent = store.recent();
+
+    expect(recent).toHaveLength(100);
+    expect(recent.at(-1)).toEqual({ id: newestId, path: "/tmp/project-100" });
+    expect(() => store!.reorderWorkspaces(recent.map(({ id }) => id).toReversed())).not.toThrow();
+  });
+
   it("rolls back a failed legacy workspace-order migration", async () => {
     store = undefined;
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-migration-"));

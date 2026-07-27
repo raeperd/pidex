@@ -11,6 +11,8 @@ import { ActionProtocolError } from "./errors.js";
 
 export { ActionProtocolError } from "./errors.js";
 
+const MAX_RECENT_WORKSPACES = 100;
+
 interface ActionInput {
   actionId: string;
   clientId: string;
@@ -33,6 +35,7 @@ export class MetadataStore {
     try {
       this.sqlite.exec(METADATA_SCHEMA_SQL);
       this.ensureWorkspaceSortOrder();
+      this.pruneWorkspaceHistory();
       this.sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
       this.db = createMetadataDatabase(this.sqlite);
 
@@ -71,6 +74,20 @@ export class MetadataStore {
         .where(eq(workspaces.path, canonicalPath))
         .get();
       if (existing) return existing.id;
+      const retained = tx
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .limit(MAX_RECENT_WORKSPACES)
+        .all();
+      if (retained.length === MAX_RECENT_WORKSPACES) {
+        const oldest = tx
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .orderBy(workspaces.openedAt, workspaces.id)
+          .limit(1)
+          .get();
+        if (oldest) tx.delete(workspaces).where(eq(workspaces.id, oldest.id)).run();
+      }
       const last = tx
         .select({ sortOrder: workspaces.sortOrder })
         .from(workspaces)
@@ -105,7 +122,7 @@ export class MetadataStore {
       .select({ id: workspaces.id, path: workspaces.path })
       .from(workspaces)
       .orderBy(workspaces.sortOrder, workspaces.id)
-      .limit(100)
+      .limit(MAX_RECENT_WORKSPACES)
       .all();
   }
 
@@ -505,6 +522,18 @@ export class MetadataStore {
         WHERE ranked.id = workspaces.id
       );
       COMMIT;
+    `);
+  }
+
+  private pruneWorkspaceHistory() {
+    this.sqlite.exec(`
+      DELETE FROM workspaces
+      WHERE id NOT IN (
+        SELECT id
+        FROM workspaces
+        ORDER BY opened_at DESC, id
+        LIMIT ${MAX_RECENT_WORKSPACES}
+      );
     `);
   }
 
