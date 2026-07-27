@@ -1,4 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { basename } from "node:path";
+
+// The workspace the tests open is this checkout, whose directory name varies between worktrees.
+const WORKSPACE_NAME = basename(process.cwd());
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
@@ -150,7 +154,7 @@ test("renders assistant markdown as safe interactive components", async ({ page,
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "New task in pidex" }).click();
+  await page.getByRole("button", { name: `New task in ${WORKSPACE_NAME}` }).click();
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
 
@@ -203,6 +207,65 @@ const answer = 42;
   await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
   expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+});
+
+test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${WORKSPACE_NAME}` }).click();
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  const toolItem = {
+    type: "tool",
+    id: "tool_bash_e2e",
+    name: "bash",
+    argumentSummary: JSON.stringify({ command: "ls -la" }),
+    preview: "",
+    truncated: false,
+  };
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 1,
+    chatId,
+    item: { ...toolItem, state: "running" },
+  });
+  const toolBlock = page.getByRole("button", { name: "$ ls -la" });
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByText(/^Elapsed \d+\.\d+s$/)).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 2,
+    chatId,
+    item: {
+      ...toolItem,
+      state: "success",
+      preview: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+    },
+  });
+
+  const hint = page.getByText("earlier lines, click to expand");
+  await expect(hint).toContainText("2 earlier lines");
+  await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
+  await expect(page.locator(".tool-call__output")).not.toContainText("one");
+  await expect(page.locator(".tool-call__output")).toContainText("seven");
+
+  await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
+  await toolBlock.click();
+  await expect(page.locator(".tool-call__output")).toContainText("one");
+  await expect(hint).toHaveCount(0);
 });
 
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
@@ -275,7 +338,7 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "New task in pidex" }).click();
+  await page.getByRole("button", { name: `New task in ${WORKSPACE_NAME}` }).click();
 
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");

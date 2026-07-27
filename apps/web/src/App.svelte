@@ -24,6 +24,7 @@
     applyPendingTextDeltas,
     type PendingTextDeltas,
   } from "./text-deltas";
+  import ToolCall from "./ToolCall.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
@@ -61,7 +62,8 @@
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
   let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
-  let copyState = $state.raw<Record<string, "copied" | "failed">>({});
+  let toolTimings = $state.raw<Record<string, { startedAt: number; endedAt?: number }>>({});
+  let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<
     Record<
       string,
@@ -507,6 +509,17 @@
     else items.push(item);
     snapshot = { ...snapshot, items };
   }
+  /** Times tool calls in the client, the way the Pi TUI does; the transcript carries no duration. */
+  function recordToolTiming(item: ToolItem) {
+    const current = toolTimings[item.id];
+    if (current?.endedAt !== undefined) return;
+    toolElapsedNow = Date.now();
+    const startedAt = current?.startedAt ?? toolElapsedNow;
+    toolTimings = {
+      ...toolTimings,
+      [item.id]: item.state === "running" ? { startedAt } : { startedAt, endedAt: toolElapsedNow },
+    };
+  }
   function queueTextDelta(event: Extract<ServerEvent, { type: "text_delta" }>) {
     if (pendingTextDeltaChatId && pendingTextDeltaChatId !== event.chatId)
       flushScheduledTextDeltas();
@@ -541,9 +554,10 @@
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();
-    } else if (event.type === "message" || event.type === "tool" || event.type === "notice")
+    } else if (event.type === "message" || event.type === "tool" || event.type === "notice") {
+      if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
-    else if (event.type === "run_status") {
+    } else if (event.type === "run_status") {
       snapshot = {
         ...snapshot,
         runStatus: event.status,
@@ -785,19 +799,6 @@
       error = cause instanceof Error ? cause.message : "Could not acknowledge interrupted run";
     }
   }
-  async function copyResponse(id: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      copyState = { ...copyState, [id]: "copied" };
-    } catch {
-      copyState = { ...copyState, [id]: "failed" };
-    }
-    window.setTimeout(() => {
-      const next = { ...copyState };
-      delete next[id];
-      copyState = next;
-    }, 2200);
-  }
   async function loadToolOutput(item: ToolItem) {
     if (!snapshot || !item.resourceId) return;
     const current = toolOutputs[item.resourceId];
@@ -967,6 +968,11 @@
       if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
       chatConnection.close();
     };
+  });
+  $effect(() => {
+    if (!snapshot?.items.some((item) => item.type === "tool" && item.state === "running")) return;
+    const interval = window.setInterval(() => (toolElapsedNow = Date.now()), 1_000);
+    return () => window.clearInterval(interval);
   });
 </script>
 
@@ -1424,27 +1430,6 @@
               </article>
             {:else if item.type === "assistant"}
               <article class="mb-5 min-w-0 px-1 pt-0.5 pb-1">
-                <div class="mb-2 flex items-center gap-1.5 text-[10.5px] font-medium text-faint">
-                  <span
-                    class="grid size-4.5 place-items-center rounded bg-foreground font-serif text-[11px] leading-none font-bold text-background"
-                    >π</span
-                  ><span>Pi</span>{#if !item.complete}<span
-                      class="inline-flex items-center gap-1 text-primary before:size-1.5 before:animate-pulse before:rounded-full before:bg-current before:content-['']"
-                      >streaming</span
-                    >{:else}<button
-                      class={`ml-auto inline-flex min-h-6.5 items-center gap-1 rounded-md border-0 bg-transparent px-2 text-[10px] text-faint hover:bg-secondary hover:text-foreground ${copyState[item.id] === "failed" ? "text-danger" : ""}`}
-                      onclick={() => copyResponse(item.id, item.text)}
-                      aria-label="Copy response"
-                      ><Icon
-                        name={copyState[item.id] === "copied" ? "check" : "copy"}
-                        size={13}
-                      />{copyState[item.id] === "copied"
-                        ? "Copied"
-                        : copyState[item.id] === "failed"
-                          ? "Copy failed"
-                          : "Copy"}</button
-                    >{/if}
-                </div>
                 {#if item.thinking}
                   <details class="mb-2.5 border-b border-border/70">
                     <summary
@@ -1464,35 +1449,18 @@
                 <Markdown text={item.text} streaming={!item.complete} />
               </article>
             {:else if item.type === "tool"}
-              <details class="group/tool mx-1 mt-1 mb-2 text-[11.5px]">
-                <summary
-                  class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-muted [list-style:none] hover:bg-secondary/55"
-                >
-                  <span class="grid size-5 flex-none place-items-center text-faint"
-                    ><Icon name="tool" size={14} /></span
-                  >
-                  <strong class="font-medium text-foreground/80">{item.name}</strong>
-                  <code
-                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] leading-snug text-faint"
-                    >{item.argumentSummary}</code
-                  >
-                  <span
-                    class={`text-[10px] lowercase ${item.state === "error" ? "text-danger" : "text-success"}`}
-                    >{item.state === "success" ? "done" : item.state}</span
-                  >
-                  <span
-                    class="flex-none opacity-50 transition-transform duration-150 group-open/tool:rotate-90"
-                    ><Icon name="chevron" size={13} /></span
-                  >
-                </summary>
-                {#if item.resourceId && toolOutputs[item.resourceId]?.text}<pre
-                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{toolOutputs[
-                      item.resourceId
-                    ]?.text}</pre>{:else if item.preview}<pre
-                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{item.preview}</pre>{/if}
+              <ToolCall
+                name={item.name}
+                argumentSummary={item.argumentSummary}
+                status={item.state}
+                output={(item.resourceId ? toolOutputs[item.resourceId]?.text : "") || item.preview}
+                startedAt={toolTimings[item.id]?.startedAt}
+                endedAt={toolTimings[item.id]?.endedAt}
+                now={toolElapsedNow}
+              >
                 {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
                   <button
-                    class="mr-0 mb-2 ml-7 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
+                    class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
                     onclick={() => loadToolOutput(item)}
                     disabled={toolOutputs[item.resourceId]?.loading}
                     >{toolOutputs[item.resourceId]?.loading
@@ -1503,16 +1471,16 @@
                   >
                 {/if}
                 {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-                    class="mr-0 mb-2 ml-7 text-[10px] text-faint"
+                    class="mt-2 text-[10px] text-faint"
                   >
                     The host bounded this output at its safety limit.
                   </p>{/if}
                 {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-                    class="mr-0 mb-2 ml-7 text-[10px] text-danger"
+                    class="mt-2 text-[10px] text-danger"
                   >
                     {toolOutputs[item.resourceId]?.error}
                   </p>{/if}
-              </details>
+              </ToolCall>
             {:else if item.type === "notice"}
               <div
                 class={`mx-1 my-2.5 flex items-start gap-2 rounded-lg border bg-secondary/45 px-3 py-2 text-[11.5px] leading-relaxed ${item.level === "error" ? "border-danger/25 text-danger" : "border-border text-muted"}`}
