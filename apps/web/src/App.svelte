@@ -433,17 +433,22 @@
     try {
       error = "";
       chatLoading = true;
-      created = await api.createChat(target.id);
+      const rememberedTarget = await openProject(target.path, {
+        activate: false,
+        expand: false,
+      });
+      if (!rememberedTarget) return;
+      created = await api.createChat(rememberedTarget.id);
       if (sequence !== routeSequence) {
         await disposeCreatedTask(created);
         return;
       }
       persistDraft();
       chatConnection.close();
-      workspace = target;
-      projectPath = target.path;
-      rememberWorkspace(target);
-      localStorage.setItem("pidex:last-project", target.path);
+      workspace = rememberedTarget;
+      projectPath = rememberedTarget.path;
+      rememberWorkspace(rememberedTarget);
+      localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
       draft = "";
       await afterChat("", true);

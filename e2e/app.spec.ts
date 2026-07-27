@@ -340,11 +340,17 @@ test("keeps search and task creation in the no-active-task experience", async ({
   request,
 }) => {
   const createRequests: unknown[] = [];
+  const taskCreationRequests: string[] = [];
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
     const body = (browserRequest.postDataJSON() as { json?: unknown } | null)?.json;
     if (browserRequest.method() === "POST" && path === "/api/rpc/chats/create")
       createRequests.push(body);
+    if (
+      browserRequest.method() === "POST" &&
+      (path === "/api/rpc/workspaces/open" || path === "/api/rpc/chats/create")
+    )
+      taskCreationRequests.push(path);
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     const response = await route.fetch();
@@ -388,6 +394,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toHaveCount(0);
 
   await openTasks(page);
+  taskCreationRequests.length = 0;
   await Promise.all([
     page.waitForRequest(
       (browserRequest) =>
@@ -402,6 +409,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Thinking level")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
+  expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const taskUrl = page.url();
