@@ -274,7 +274,11 @@
       const persisted = await api.reorderWorkspaces(recentWorkspaces.map(({ id }) => id));
       bootstrap = { ...bootstrap, recentWorkspaces: persisted };
     } catch (cause) {
-      bootstrap = { ...bootstrap, recentWorkspaces: previous };
+      try {
+        bootstrap = await api.bootstrap();
+      } catch {
+        bootstrap = { ...bootstrap, recentWorkspaces: previous };
+      }
       error = cause instanceof Error ? cause.message : "Project order could not be saved";
     } finally {
       projectOrderSaving = false;

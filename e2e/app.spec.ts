@@ -137,6 +137,45 @@ test("moves against the next visible project while filtering", async ({ page, re
   await expect.poll(visibleOrder).toEqual(["visible-c project", "visible-a project"]);
 });
 
+test("refreshes stale project membership after a reorder conflict", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  const initial = [
+    { id: "workspace_a", path: "/tmp/project-a" },
+    { id: "workspace_b", path: "/tmp/project-b" },
+  ];
+  const canonical = [
+    { id: "workspace_b", path: "/tmp/project-b" },
+    { id: "workspace_c", path: "/tmp/project-c" },
+  ];
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: bootstrapCalls++ === 0 ? initial : canonical,
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/reorder", (route) => route.abort("failed"));
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: "Expand project-a" }).press("ArrowDown");
+
+  const projectOrder = () =>
+    page
+      .getByRole("navigation", { name: "Projects" })
+      .getByRole("group")
+      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
+  await expect.poll(projectOrder).toEqual(["project-b project", "project-c project"]);
+  expect(bootstrapCalls).toBe(2);
+});
+
 test("blocks project additions while saving the manual order", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const apps = await rpcRequest<{ id: string }>(
