@@ -86,6 +86,57 @@ test("manually reorders projects and preserves their order after reload", async 
   await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
 });
 
+test("moves against the next visible project while filtering", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  const projects = [
+    { id: "workspace_a", path: "/tmp/visible-a" },
+    { id: "workspace_b", path: "/tmp/hidden-b" },
+    { id: "workspace_c", path: "/tmp/visible-c" },
+  ];
+  let reorderedIds: string[] = [];
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: projects,
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/reorder", async (route) => {
+    reorderedIds = (route.request().postDataJSON() as { json: { workspaceIds: string[] } }).json
+      .workspaceIds;
+    const recentWorkspaces = reorderedIds.map((id) => {
+      const project = projects.find((candidate) => candidate.id === id);
+      if (!project) throw new Error(`Unexpected workspace ID ${id}`);
+      return project;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { recentWorkspaces } },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: "Search projects and tasks" }).click();
+  await page.getByRole("textbox", { name: "Search projects and tasks" }).fill("visible");
+  await page.getByRole("button", { name: "Expand visible-a" }).press("ArrowDown");
+
+  await expect.poll(() => reorderedIds).toEqual(["workspace_b", "workspace_c", "workspace_a"]);
+  const visibleOrder = () =>
+    page
+      .getByRole("navigation", { name: "Projects" })
+      .getByRole("group")
+      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
+  await expect.poll(visibleOrder).toEqual(["visible-c project", "visible-a project"]);
+});
+
 test("blocks project additions while saving the manual order", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const apps = await rpcRequest<{ id: string }>(

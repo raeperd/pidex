@@ -259,16 +259,11 @@
     void saveProjectOrder(reordered);
   }
   function moveProjectBy(projectId: string, offset: -1 | 1) {
-    if (!bootstrap || projectOrderSaving) return;
-    const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === projectId);
-    const target = bootstrap.recentWorkspaces[sourceIndex + offset];
+    if (projectOrderSaving) return;
+    const sourceIndex = visibleProjects.findIndex(({ id }) => id === projectId);
+    const target = visibleProjects[sourceIndex + offset];
     if (!target) return;
-    const reordered = [...bootstrap.recentWorkspaces];
-    [reordered[sourceIndex], reordered[sourceIndex + offset]] = [
-      reordered[sourceIndex + offset],
-      reordered[sourceIndex],
-    ];
-    void saveProjectOrder(reordered);
+    moveProjectTo(projectId, target.id);
   }
   async function saveProjectOrder(recentWorkspaces: RecentWorkspace[]) {
     if (!bootstrap) return;
