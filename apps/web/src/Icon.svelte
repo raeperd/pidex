@@ -8,6 +8,7 @@
     ChevronsDownUp,
     Copy,
     Folder,
+    FolderOpen,
     FolderPlus,
     Menu,
     PencilLine,
@@ -29,6 +30,7 @@
     | "compose"
     | "copy"
     | "folder"
+    | "folder-open"
     | "folder-plus"
     | "menu"
     | "rename"
@@ -48,6 +50,7 @@
     compose: SquarePen,
     copy: Copy,
     folder: Folder,
+    "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
     menu: Menu,
     rename: PencilLine,

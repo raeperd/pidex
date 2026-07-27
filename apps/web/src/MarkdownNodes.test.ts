@@ -57,6 +57,17 @@ describe("parseMarkdown", () => {
     expect(node).toMatchObject({ type: "code", language: "ts", code: "const value = 1;" });
   });
 
+  it("decodes entities in text while preserving code spans", () => {
+    const [paragraph] = parseMarkdown("AT&amp;T &copy; &#169; &copy `&amp; &copy;`");
+    expect(paragraph?.type).toBe("paragraph");
+    if (paragraph?.type !== "paragraph") throw new Error("Expected a paragraph");
+
+    expect(paragraph.children).toEqual([
+      expect.objectContaining({ type: "text", text: "AT&T © © &copy " }),
+      expect.objectContaining({ type: "codespan", text: "&amp; &copy;" }),
+    ]);
+  });
+
   it("never stores raw markup in ordinary text nodes", () => {
     const nodes = parseMarkdown("Text <img src=x onerror=alert(1)> after");
     const text = flattenText(nodes);

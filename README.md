@@ -1,105 +1,104 @@
-# Pidex
+<p align="center">
+  <img src="apps/desktop/assets/icon.png" width="96" alt="pidex icon">
+</p>
 
-Pidex is a local, private control surface for the installed Pi coding agent. The browser and Electron renderer are clients only: Pi’s SDK owns authentication, models, resources, tools, agent execution, and native JSONL conversation sessions. Drizzle ORM over `node:sqlite` stores only Pidex metadata, durable client actions, run outcomes, and session revisions—never transcripts or credentials.
+# pidex
 
-## Requirements and setup
+**Use Pi from a focused desktop or browser interface.**
 
-- Node.js 24 LTS (`^24.13.1`; the matched Pi SDK requires at least `22.19.0`)
-- pnpm `11.16.0`
-- Pi CLI and SDK `@earendil-works/pi-coding-agent@0.80.10`
+pidex works with the Pi you already use. Pick a project, start or resume a task, follow Pi's work, and keep your credentials and conversations on your machine.
+
+- **Your Pi setup:** Use your existing login, models, tools, project context, and saved conversations.
+- **Tasks by project:** Find recent work quickly and return to the task you left open.
+- **Work in view:** Follow streaming replies and tool activity, change the model or thinking level, copy a response, or stop a run.
+- **Reliable reconnects:** Pi keeps working if the browser disconnects. pidex restores the latest state when you return.
+- **Local by default:** pidex listens only on `127.0.0.1`, with no account, telemetry, public sharing, or transcript database.
+
+## Get started
+
+You need Node.js 24 LTS, pnpm `11.16.0`, and a working Pi login.
 
 ```sh
 pnpm install
 pnpm exec playwright install chromium
+pnpm dev
 ```
 
-The SDK is exact-pinned and the dependency tree is committed in `pnpm-lock.yaml`. Pidex reuses Pi’s existing local login; it does not display, copy, or store credentials. If no model appears, run `pi`, use `/login`, then reopen the project.
+Open the URL printed in the terminal. pidex starts at `http://127.0.0.1:4783` and uses the next free port when needed.
 
-## Commands
+If no models appear, run `pi`, enter `/login`, then restart pidex.
 
-```sh
-pnpm dev          # API + Vite client on 127.0.0.1:4783 or the next free port
-pnpm typecheck
-pnpm test         # deterministic; never calls a paid model
-pnpm test:e2e     # deterministic Playwright Chromium suite
-pnpm build
-pnpm start        # compiled browser app and API on 127.0.0.1:4783
-pnpm start:desktop
-```
+## Use pidex
 
-Production restart command:
+1. Add a project from the task sidebar.
+2. Start a new task or open a recent one.
+3. Choose a model and thinking level, then send a prompt.
+4. Follow the response and tool activity. You can leave and reconnect without stopping Pi.
 
-```sh
-pnpm build && pnpm start
-```
+pidex records a prompt before sending it to Pi, so reconnecting cannot accidentally repeat accepted work. If pidex stops during a run, it asks you to review and acknowledge the uncertain result before continuing.
 
-In development, Vite owns the HTTP server, starts at `4783`, and automatically tries the next port when it is occupied. Production startup continues to fail clearly on a port conflict. `PORT` may be an integer from 1024 through 65535. The host is fixed at literal `127.0.0.1` and cannot be widened. `WORKSPACE_ROOTS` is a platform-delimited security allowlist and defaults to the current user’s home directory. The name-first project picker discovers immediate child folders under `~/Projects`; `PIDEX_PROJECT_ROOTS` can replace that with a platform-delimited list of catalog roots. Catalog roots and discovered projects must still be inside `WORKSPACE_ROOTS`. `PIDEX_STATE_DIR` can relocate Pidex’s metadata database. `PIDEX_TAILSCALE_HOST` may name one explicitly allowed Tailscale Serve hostname; forwarded headers are not trusted from non-loopback peers.
+## Open pidex from another device
 
-## Architecture
+You can use Tailscale Serve to reach pidex privately from another device on your Tailnet.
 
-```text
-apps/web ───────────────> packages/api <────────────── apps/server
-apps/desktop ───────────> packages/api
-     │
-     └── supervises compiled apps/server child ──> Pi SDK 0.80.10
-```
-
-- `packages/api`: browser-safe Zod schemas, the oRPC contract, and protocol types.
-- `apps/server`: Node host with native oRPC, custom WebSocket, Pi, and Drizzle SQLite.
-- `apps/web`: responsive Svelte client with typed native oRPC and WebSocket transports.
-- `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
-
-During development, `apps/web/vite.config.ts` is the composition root: it mounts the server's API and WebSocket handlers into Vite's HTTP server. Browser code under `apps/web/src` remains independent from the server implementation.
-
-The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.
-
-Authoritative snapshots and transcript pages are bounded. Older Pi JSONL items are loaded explicitly, and large tool results stay out of WebSocket events and are fetched in chunks of at most 16 KiB. Completed assistant responses have a one-action Copy control with visible clipboard-denial feedback. While disconnected, the composer remains a local draft only and the UI says that host data is unavailable rather than implying it was deleted.
-
-## Pi state, trust, and safety
-
-Pidex resolves the Pi agent directory with `getAgentDir()`. Session placement follows `PI_CODING_AGENT_SESSION_DIR`, then Pi’s `sessionDir` setting, then the SDK default. It lists and opens only exact paths freshly returned by `SessionManager.list()`, and rebuilds resumed transcripts from `buildContextEntries()` so abandoned branches are not flattened.
-
-Project-local Pi resources are loaded only when Pi has a saved trust decision or global `defaultProjectTrust` is `always`. Otherwise protected resources are skipped and the UI shows a notice; Pidex never silently approves trust. Pidex Desktop can save an explicit approval through Pi’s own trust store after confirmation. Context files that Pi treats as unprotected continue to follow SDK behavior, and bounded SDK resource diagnostics are visible in the workspace UI.
-
-**Pi has no built-in sandbox.** Read-only mode is a real model-tool allowlist (`read`, `grep`, `find`, `ls`), not an operating-system security boundary, and extensions still run with the host user’s permissions. Full mode exposes Pi’s configured tool registry. Use a VM, container, or OS sandbox for untrusted or unattended work.
-
-Completed assistant Markdown is parsed as GFM with raw HTML escaped, remote images disabled, DOM sanitization, and an explicit `http:`, `https:`, and `mailto:` link allowlist. Tool output, bodies, WebSocket messages, and replay history are bounded. Mutations require a random per-process CSRF header; cross-site origins, cross-site fetches, and unapproved Host values are rejected. There is no CORS, shell endpoint, telemetry, analytics, public share, credential form, or transcript database.
-
-## Optional Pi SDK smoke check
-
-This inspection uses the Pi SDK but sends no model request:
-
-```sh
-pnpm build
-pnpm smoke:pi -- /absolute/project/path
-```
-
-An explicitly opt-in paid turn is available with `--prompt`:
-
-```sh
-pnpm smoke:pi -- /absolute/project/path --prompt "Reply with OK"
-```
-
-## Optional Tailscale Serve (not automated or verified)
-
-After Pidex is running locally:
+Start pidex, then run:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:4783
 tailscale serve status
 ```
 
-Serve provides a private Tailnet HTTPS URL; both devices must be in the intended Tailnet and ACLs/grants should restrict access to the owner. Do not enable Funnel. `--bg` persists the proxy configuration but does not start Pidex. If the port changes, substitute it in the command. Pidex deliberately does not automate Serve, pairing, device credentials, revocation, autostart, or OS services.
+Use the private HTTPS URL shown by Tailscale. Both devices must be on the intended Tailnet, and the computer running pidex must stay awake and connected. Restrict access with Tailscale ACLs or grants. Do not enable Funnel.
+
+pidex does not configure or verify Tailscale for you. If pidex uses another port, update the Serve command to match it.
+
+## Privacy and safety
+
+Pi remains the source of truth for models, tools, authentication, and conversation files. pidex stores only the metadata and run state needed to operate the interface; it does not copy credentials or transcripts into its database.
+
+Project resources load only after Pi trusts the project. Assistant Markdown is sanitized, raw HTML and remote images are disabled, and requests from unapproved hosts or cross-site origins are rejected.
+
+**Pi has no built-in sandbox.** Read-only mode limits the tools available to the model, but Pi extensions still run with your user permissions. Use a VM, container, or OS sandbox for untrusted or unattended work.
+
+## Configuration
+
+| Variable               | Purpose                                                                | Default        |
+| ---------------------- | ---------------------------------------------------------------------- | -------------- |
+| `PORT`                 | Server port from 1024 to 65535                                         | `4783`         |
+| `WORKSPACE_ROOTS`      | Allowed workspace roots, separated with your platform's path delimiter | Home directory |
+| `PIDEX_PROJECT_ROOTS`  | Folders searched by the project picker                                 | `~/Projects`   |
+| `PIDEX_STATE_DIR`      | Location of the pidex metadata database                                | App default    |
+| `PIDEX_TAILSCALE_HOST` | One allowed Tailscale Serve hostname                                   | Disabled       |
+
+Projects discovered through `PIDEX_PROJECT_ROOTS` must also be inside `WORKSPACE_ROOTS`. Production startup stops with an error if its port is busy.
 
 ## Troubleshooting
 
-- `pnpm start` reports `PORT ... already in use`: stop the other listener or choose a valid unprivileged port. `pnpm dev` selects another port automatically.
-- Project rejected: add its canonical ancestor to `WORKSPACE_ROOTS`; symlink escapes and prefix lookalikes are intentionally blocked.
-- No models: authenticate in the local Pi TUI with `/login`.
-- Project resources skipped: review and save the trust decision in Pi locally.
-- Run interrupted: review the restored Pi transcript, then acknowledge the ambiguous run before sending another prompt; Pidex will never rerun it automatically.
-- Large tool output: expand the tool card and load additional bounded chunks. Output beyond the host safety ceiling is marked explicitly.
-- Reconnecting: confirm `pnpm start` is still active; the browser will replay or resnapshot automatically.
-- Electron cannot become ready: run `pnpm build` first and check for a port conflict.
+- **No models:** Run `pi`, enter `/login`, and restart pidex.
+- **Project rejected:** Add its canonical parent directory to `WORKSPACE_ROOTS`.
+- **Project resources skipped:** Review and save the project's trust decision in Pi.
+- **Run interrupted:** Review the Pi conversation, then acknowledge the uncertain run.
+- **Port already in use:** Stop the other listener or choose another `PORT`.
+- **Desktop app does not start:** Run `pnpm build` and check for a port conflict.
 
-Intentionally omitted: public/LAN/Funnel hosting, automatic Tailscale setup, pairing/device authentication, OS services, generic providers, profiles, voice, side agents, terminal/Git/file editors, worktrees, scheduling/orchestration, provider credential editing, telemetry, and other non-coding-agent remote administration.
+## Development
+
+```sh
+pnpm typecheck      # Check types
+pnpm test           # Run deterministic tests; no paid model calls
+pnpm test:e2e       # Run Playwright tests in Chromium
+pnpm build          # Build all packages
+pnpm start          # Run the built browser app and server
+pnpm start:desktop  # Run the built desktop app
+```
+
+To inspect the Pi SDK without sending a model request:
+
+```sh
+pnpm build
+pnpm smoke:pi -- /absolute/project/path
+```
+
+Add `--prompt "Reply with OK"` only when you intend to make a paid model request.
+
+See [Architecture](docs/architecture.md) for the runtime, package boundaries, storage, and stack.
