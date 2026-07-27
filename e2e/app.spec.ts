@@ -67,14 +67,71 @@ test("manually reorders projects and preserves their order after reload", async 
       .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
   await expect.poll(projectOrder).toEqual(["Reorder apps", "Reorder packages"]);
 
-  await page
-    .getByRole("button", { name: "Reorder packages" })
-    .dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
+  const packagesHandle = page.getByRole("button", { name: "Reorder packages" });
+  await packagesHandle.focus();
+  await packagesHandle.press("ArrowUp");
+  await expect(packagesHandle).toBeFocused();
+  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+  await expect(packagesHandle).toHaveAttribute("aria-disabled", "false");
+  await packagesHandle.press("ArrowDown");
+  await expect.poll(projectOrder).toEqual(["Reorder apps", "Reorder packages"]);
+
+  await packagesHandle.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
 
   await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
   await page.reload();
   await openTasks(page);
   await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+});
+
+test("blocks project additions while saving the manual order", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const apps = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps` },
+    bootstrap.result.csrfToken,
+  );
+  const packages = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/packages` },
+    bootstrap.result.csrfToken,
+  );
+  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const otherIds = remembered.result.recentWorkspaces
+    .map(({ id }) => id)
+    .filter((id) => id !== apps.result.id && id !== packages.result.id);
+  await rpcRequest(
+    request,
+    "workspaces/reorder",
+    { workspaceIds: [apps.result.id, packages.result.id, ...otherIds] },
+    bootstrap.result.csrfToken,
+  );
+  let releaseReorder: (() => void) | undefined;
+  const reorderHeld = new Promise<void>((resolve) => {
+    releaseReorder = resolve;
+  });
+  let reorderStarted = false;
+  await page.route("**/api/rpc/workspaces/reorder", async (route) => {
+    reorderStarted = true;
+    await reorderHeld;
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: "Reorder packages" }).press("ArrowUp");
+  await expect.poll(() => reorderStarted).toBe(true);
+  try {
+    await expect(page.getByLabel("Add project", { exact: true })).toBeDisabled();
+  } finally {
+    releaseReorder?.();
+  }
 });
 
 test("reconciles the manual order when adding project 101", async ({ page, request }) => {

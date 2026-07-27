@@ -296,13 +296,17 @@
     } = {},
   ) {
     const activate = options.activate ?? true;
+    const remember = options.remember ?? true;
+    const addsWorkspace = Boolean(
+      remember && !bootstrap?.recentWorkspaces.some((project) => project.path === path),
+    );
+    if (addsWorkspace && projectOrderSaving) return undefined;
     const knownId =
       bootstrap?.recentWorkspaces.find((project) => project.path === path)?.id ?? projectName(path);
     try {
       error = "";
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
-      const remember = options.remember ?? true;
       const reconcilesWorkspaceHistory = Boolean(
         remember &&
         bootstrap &&
@@ -336,10 +340,12 @@
     }
   }
   function openProjectPicker() {
+    if (projectOrderSaving) return;
     projectQuery = "";
     void tick().then(() => projectDialogElement?.showModal());
   }
   async function addProject(candidate: ProjectCandidate) {
+    if (projectOrderSaving) return;
     const loaded = await openProject(candidate.path);
     if (loaded) projectDialogElement?.close();
   }
@@ -347,7 +353,7 @@
     const pending = (bootstrap?.projectCandidates ?? []).filter(
       (candidate) => !projectAdded(candidate),
     );
-    if (!pending.length || projectBatchLoading) return;
+    if (!pending.length || projectBatchLoading || projectOrderSaving) return;
     projectBatchLoading = true;
     projectBatchProgress = 0;
     for (const candidate of pending) {
@@ -370,6 +376,7 @@
     projectDialogElement?.close();
   }
   async function browseProject() {
+    if (projectOrderSaving) return;
     try {
       const selected = await window.pidexDesktop?.pickProject();
       if (selected) {
@@ -1078,8 +1085,9 @@
           ></span
         >
         <button
-          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground"
+          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           onclick={openProjectPicker}
+          disabled={projectOrderSaving}
           aria-label="Add project"
           title="Add project"><Icon name="folder-plus" size={15} /></button
         >
@@ -1125,9 +1133,9 @@
             >
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class="grid size-6 flex-none cursor-grab place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                  class="grid size-6 flex-none cursor-grab place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
                   draggable={!projectOrderSaving}
-                  disabled={projectOrderSaving}
+                  aria-disabled={projectOrderSaving}
                   aria-label={`Reorder ${projectLabel(project)}`}
                   title="Drag to reorder projects; use arrow keys for precise movement"
                   ondragstart={(event) => startProjectDrag(event, project.id)}
@@ -1762,7 +1770,7 @@
           class="min-h-7 rounded-lg border border-border bg-transparent px-2 text-[10.5px] font-semibold text-muted hover:border-border-strong hover:text-foreground disabled:opacity-40"
           type="button"
           onclick={addAllProjects}
-          disabled={projectBatchLoading}
+          disabled={projectBatchLoading || projectOrderSaving}
           >{projectBatchLoading ? `Adding ${projectBatchProgress + 1}…` : "Add all"}</button
         >
       {/if}
@@ -1784,7 +1792,7 @@
             type="button"
             class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
             onclick={() => addProject(candidate)}
-            disabled={projectBatchLoading || projectLoading}
+            disabled={projectBatchLoading || projectLoading || projectOrderSaving}
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
             <span
@@ -1812,7 +1820,7 @@
           type="button"
           class="mr-auto inline-flex min-h-8.5 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
           onclick={browseProject}
-          disabled={projectBatchLoading}
+          disabled={projectBatchLoading || projectOrderSaving}
           ><Icon name="folder" size={14} /> Browse another folder</button
         >{/if}
       <button
