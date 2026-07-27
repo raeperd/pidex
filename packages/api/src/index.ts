@@ -2,6 +2,7 @@ import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 6;
+export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = z
   .string()
   .min(8)
@@ -79,7 +80,7 @@ export const bootstrapSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   csrfToken: z.string().min(32),
   piVersion: z.string().max(100),
-  recentWorkspaces: z.array(recentWorkspaceSchema),
+  recentWorkspaces: z.array(recentWorkspaceSchema).max(MAX_RECENT_WORKSPACES),
   projectCandidates: z.array(projectCandidateSchema).max(200),
   warning: z.string().max(1000),
 });
@@ -202,10 +203,10 @@ export const openWorkspaceSchema = z.object({
   remember: z.boolean().optional(),
 });
 export const reorderWorkspacesSchema = z.object({
-  workspaceIds: z.array(idSchema).max(100),
+  workspaceIds: z.array(idSchema).max(MAX_RECENT_WORKSPACES),
 });
 export const recentWorkspacesResponseSchema = z.object({
-  recentWorkspaces: z.array(recentWorkspaceSchema).max(100),
+  recentWorkspaces: z.array(recentWorkspaceSchema).max(MAX_RECENT_WORKSPACES),
 });
 export const trustWorkspaceSchema = z.object({ trusted: z.boolean() });
 export const createChatSchema = z.object({ workspaceId: idSchema });

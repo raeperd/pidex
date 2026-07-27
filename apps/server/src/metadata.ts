@@ -3,15 +3,13 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ActionOutcome, RunOutcome } from "@pidex/api";
+import { MAX_RECENT_WORKSPACES, type ActionOutcome, type RunOutcome } from "@pidex/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { ActionProtocolError } from "./errors.js";
 
 export { ActionProtocolError } from "./errors.js";
-
-const MAX_RECENT_WORKSPACES = 100;
 
 interface ActionInput {
   actionId: string;

@@ -13,6 +13,7 @@
     ToolItem,
     Workspace,
   } from "@pidex/api";
+  import { MAX_RECENT_WORKSPACES } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
   import { ChatConnection, type ConnectionState } from "./chat-connection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
@@ -301,7 +302,15 @@
       error = "";
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
-      const loaded = await api.openWorkspace(path, options.remember ?? true);
+      const remember = options.remember ?? true;
+      const reconcilesWorkspaceHistory = Boolean(
+        remember &&
+        bootstrap &&
+        bootstrap.recentWorkspaces.length === MAX_RECENT_WORKSPACES &&
+        !bootstrap.recentWorkspaces.some((project) => project.path === path),
+      );
+      const loaded = await api.openWorkspace(path, remember);
+      if (reconcilesWorkspaceHistory) bootstrap = await api.bootstrap();
       rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
         chatConnection.close();

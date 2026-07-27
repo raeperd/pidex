@@ -77,6 +77,65 @@ test("manually reorders projects and preserves their order after reload", async 
   await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
 });
 
+test("reconciles the manual order when adding project 101", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const existing = Array.from({ length: 100 }, (_, index) => ({
+    id: `workspace_${String(index).padStart(3, "0")}`,
+    path: `${process.cwd()}/apps/project-${String(index).padStart(3, "0")}`,
+  }));
+  const added = { id: "workspace_new", path: `${process.cwd()}/packages` };
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    const recentWorkspaces = bootstrapCalls++ === 0 ? existing : [...existing.slice(1), added];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces,
+          projectCandidates: [{ name: "new-project", path: added.path }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const remembered = input.path === added.path ? added : existing[0];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...workspaceTemplate.result,
+          ...remembered,
+          name: remembered.path.split("/").at(-1),
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: "Add project", exact: true }).click();
+  await page.getByRole("button", { name: "Add new-project", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(100);
+  await expect(page.getByRole("button", { name: "Reorder project-000" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reorder packages" })).toBeVisible();
+  expect(bootstrapCalls).toBe(2);
+});
+
 test("retries a deep-linked task without replacing its route", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const opened = await rpcRequest<{ id: string }>(
