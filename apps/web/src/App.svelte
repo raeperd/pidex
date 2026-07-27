@@ -349,26 +349,32 @@
     if (!pending.length || projectBatchLoading || projectOrderSaving) return;
     projectBatchLoading = true;
     projectBatchProgress = 0;
-    for (const candidate of pending) {
-      await openProject(candidate.path, {
-        activate: false,
-        expand: false,
-        reconcileHistory: false,
-      });
-      projectBatchProgress += 1;
+    try {
+      for (const candidate of pending) {
+        await openProject(candidate.path, {
+          activate: false,
+          expand: false,
+          reconcileHistory: false,
+        });
+        projectBatchProgress += 1;
+      }
+      bootstrap = await api.bootstrap();
+      const initialWorkspace = bootstrap.recentWorkspaces
+        .map(({ id }) => workspaceFor(id))
+        .find((loaded) => loaded !== undefined);
+      if (!workspace && initialWorkspace) {
+        workspace = initialWorkspace;
+        projectPath = initialWorkspace.path;
+        rememberWorkspace(initialWorkspace, true);
+        localStorage.setItem("pidex:last-project", initialWorkspace.path);
+      }
+      projectDialogElement?.close();
+    } catch (cause) {
+      const detail = cause instanceof Error ? `: ${cause.message}` : "";
+      error = `Project history could not be refreshed${detail}`;
+    } finally {
+      projectBatchLoading = false;
     }
-    bootstrap = await api.bootstrap();
-    const initialWorkspace = (bootstrap?.recentWorkspaces ?? [])
-      .map(({ id }) => workspaceFor(id))
-      .find((loaded) => loaded !== undefined);
-    if (!workspace && initialWorkspace) {
-      workspace = initialWorkspace;
-      projectPath = initialWorkspace.path;
-      rememberWorkspace(initialWorkspace, true);
-      localStorage.setItem("pidex:last-project", initialWorkspace.path);
-    }
-    projectBatchLoading = false;
-    projectDialogElement?.close();
   }
   async function browseProject() {
     if (projectOrderSaving) return;
