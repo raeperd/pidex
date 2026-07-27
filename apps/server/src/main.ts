@@ -4,16 +4,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
-import { wsClientMessageSchema } from "@pidex/api";
+import { NodeRuntime } from "@effect/platform-node";
 import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
+import { wsClientMessageSchema } from "@pidex/api";
+import { Effect } from "effect";
 import { WebSocketServer, type RawData } from "ws";
-import { ChatManager } from "./chat-manager.js";
+import { Chats, makeApplicationRuntime } from "./app-runtime.js";
+import { applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
-import { MetadataStore } from "./metadata.js";
-import { PiSdk } from "./pi-sdk.js";
 import {
   allowedRoots,
-  HttpError,
   parsePort,
   safeError,
   securityHeaders,
@@ -22,101 +22,119 @@ import {
 
 export async function createPidexServer() {
   const application = await createPidexApplication();
-  const server = createServer((req, res) => void application.handleRequest(req, res));
-  server.on("upgrade", (req, socket, head) => {
-    if (!application.handleUpgrade(req, socket, head)) rejectUpgrade(socket);
-  });
-  return {
-    server,
-    close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await application.close();
-    },
-    manager: application.manager,
-  };
+  try {
+    const server = createServer((req, res) => void application.handleRequest(req, res));
+    server.on("upgrade", (req, socket, head) => {
+      if (!application.handleUpgrade(req, socket, head)) rejectUpgrade(socket);
+    });
+    return {
+      server,
+      close: async () => {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await application.close();
+      },
+      manager: application.manager,
+    };
+  } catch (error) {
+    await application.close();
+    throw error;
+  }
 }
 
 export async function createPidexApplication() {
-  const csrf = randomBytes(32).toString("base64url");
-  const roots = await allowedRoots();
-  const metadata = new MetadataStore();
-  const pi = new PiSdk();
-  const manager = new ChatManager(pi, metadata);
-  const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
-  const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
-  const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots, metadata, pi, manager }), {
-    plugins: [new BodyLimitPlugin({ maxBodySize: 64 * 1024 })],
-  });
-
-  const handler = async (req: IncomingMessage, res: ServerResponse) => {
-    securityHeaders(res, webScriptHashes);
-    try {
-      validateRequest(req, false, csrf);
-      const route = new URL(req.url ?? "/", "http://localhost").pathname;
-      const { matched } = await apiHandler.handle(req, res, {
-        prefix: "/api/rpc",
-        context: { req },
-      });
-      if (matched) return;
-      if (route.startsWith("/api/")) throw new HttpError(404, "API route not found", "not_found");
-      serveWebApp(req, res, route, webRoot);
-    } catch (error) {
-      if (res.headersSent) return res.end();
-      const protocolError = error instanceof HttpError ? error : undefined;
-      json(res, protocolError?.status ?? 500, {
-        error: { code: protocolError?.code ?? "internal_error", message: safeError(error) },
-      });
-    }
-  };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-  const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
-    try {
-      validateRequest(req, false, csrf);
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-    } catch {
-      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-    }
-    return true;
-  };
-  wss.on("connection", (socket) => {
-    let connected = false;
-    let alive = true;
-    socket.on("message", (data) => {
-      const message = parseClientMessage(data);
-      if (!message) return socket.close(1008, "Invalid protocol message");
-      if (!connected && message.type !== "hello") return socket.close(1008, "Hello required");
-      if (message.type === "hello") {
-        if (connected) return socket.close(1008, "Already connected");
-        connected = true;
-        try {
-          manager.connect(manager.chat(message.chatId), socket, message.lastEventId);
-        } catch {
-          socket.close(1008, "Chat not found");
-        }
-      } else if (message.type === "pong") alive = true;
+  const runtime = makeApplicationRuntime();
+  try {
+    const manager = await runtime.runPromise(Chats);
+    const csrf = await runtime.runPromise(
+      attemptOperation("security.csrf", () => randomBytes(32).toString("base64url")),
+    );
+    const roots = await runtime.runPromise(allowedRoots());
+    const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
+    const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
+    const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots, runtime }), {
+      plugins: [new BodyLimitPlugin({ maxBodySize: 64 * 1024 })],
     });
-    const timer = setInterval(() => {
-      if (!alive) return socket.terminate();
-      alive = false;
-      socket.send(JSON.stringify({ type: "ping" }));
-    }, 20_000);
-    socket.once("close", () => clearInterval(timer));
-  });
-  let closed = false;
-  return {
-    handleRequest: handler,
-    handleUpgrade,
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      for (const socket of wss.clients) socket.close(1001, "Server stopping");
-      manager.shutdown();
-      metadata.close();
-    },
-    manager,
-  };
+
+    const handler = async (req: IncomingMessage, res: ServerResponse) => {
+      securityHeaders(res, webScriptHashes);
+      try {
+        await runtime.runPromise(validateRequest(req, false, csrf));
+        const route = new URL(req.url ?? "/", "http://localhost").pathname;
+        const { matched } = await runtime.runPromise(
+          attemptOperation("orpc.handle", () =>
+            apiHandler.handle(req, res, { prefix: "/api/rpc", context: { req } }),
+          ),
+        );
+        if (matched) return;
+        if (route.startsWith("/api/"))
+          await runtime.runPromise(
+            Effect.fail(
+              HttpError.make({ status: 404, code: "not_found", message: "API route not found" }),
+            ),
+          );
+        await runtime.runPromise(
+          attemptOperation("web.serve", () => serveWebApp(res, route, webRoot)),
+        );
+      } catch (error) {
+        if (res.headersSent) return res.end();
+        const protocolError = error instanceof HttpError ? error : undefined;
+        json(res, protocolError?.status ?? 500, {
+          error: { code: protocolError?.code ?? "internal_error", message: safeError(error) },
+        });
+      }
+    };
+    const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+    const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
+      try {
+        runtime.runSync(validateRequest(req, false, csrf));
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      } catch {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+      }
+      return true;
+    };
+    wss.on("connection", (socket) => {
+      let connected = false;
+      let alive = true;
+      socket.on("message", (data) => {
+        const message = parseClientMessage(data);
+        if (!message) return socket.close(1008, "Invalid protocol message");
+        if (!connected && message.type !== "hello") return socket.close(1008, "Hello required");
+        if (message.type === "hello") {
+          if (connected) return socket.close(1008, "Already connected");
+          connected = true;
+          try {
+            manager.connect(manager.chat(message.chatId), socket, message.lastEventId);
+          } catch {
+            socket.close(1008, "Chat not found");
+          }
+        } else if (message.type === "pong") alive = true;
+      });
+      const timer = setInterval(() => {
+        if (!alive) return socket.terminate();
+        alive = false;
+        socket.send(JSON.stringify({ type: "ping" }));
+      }, 20_000);
+      socket.once("close", () => clearInterval(timer));
+    });
+    let closed = false;
+    return {
+      handleRequest: handler,
+      handleUpgrade,
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        for (const socket of wss.clients) socket.close(1001, "Server stopping");
+        await runtime.dispose();
+      },
+      manager,
+    };
+  } catch (error) {
+    await runtime.dispose();
+    throw error;
+  }
 }
 
 function inlineScriptHashes(indexFile: string) {
@@ -128,9 +146,13 @@ function inlineScriptHashes(indexFile: string) {
     .map((script) => createHash("sha256").update(script).digest("base64"));
 }
 
-function serveWebApp(_req: IncomingMessage, res: ServerResponse, route: string, webRoot: string) {
+function serveWebApp(res: ServerResponse, route: string, webRoot: string) {
   if (!existsSync(webRoot))
-    throw new HttpError(503, "Web build is missing; run pnpm build", "web_build_missing");
+    throw HttpError.make({
+      status: 503,
+      code: "web_build_missing",
+      message: "Web build is missing; run pnpm build",
+    });
   const requested = route === "/" ? "index.html" : route.slice(1);
   let file = path.resolve(webRoot, requested);
   if (!file.startsWith(`${webRoot}${path.sep}`) || !existsSync(file) || !statSync(file).isFile())
@@ -187,25 +209,50 @@ function rejectUpgrade(socket: Duplex) {
   socket.destroy();
 }
 
-async function main() {
-  const port = parsePort();
-  const app = await createPidexServer();
-  app.server.once("error", (error: NodeJS.ErrnoException) => {
-    if (error.code === "EADDRINUSE")
-      console.error(`Pidex cannot start: 127.0.0.1:${port} is already in use.`);
-    else console.error(`Pidex cannot start: ${safeError(error)}`);
-    process.exitCode = 1;
-  });
-  app.server.listen(port, "127.0.0.1", () =>
-    console.log(`Pidex ready at http://127.0.0.1:${port}`),
+const main = Effect.scoped(
+  Effect.gen(function* () {
+    const port = yield* Effect.try({
+      try: () => parsePort(),
+      catch: (cause) => applicationError("server.port", cause),
+    });
+    const app = yield* Effect.acquireRelease(
+      attemptOperation("server.create", createPidexServer),
+      (server) =>
+        Effect.promise(() =>
+          server.close().catch((error) => {
+            console.error(`Pidex shutdown failed: ${safeError(error)}`);
+          }),
+        ),
+    );
+    yield* listen(app.server, port);
+    yield* Effect.logInfo(`Pidex ready at http://127.0.0.1:${port}`);
+    return yield* Effect.never;
+  }),
+).pipe(
+  Effect.tapError((error) =>
+    Effect.sync(() => console.error(`Pidex cannot start: ${safeError(error)}`)),
+  ),
+);
+
+function listen(server: ReturnType<typeof createServer>, port: number) {
+  return attemptOperation(
+    "server.listen",
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          server.off("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(port, "127.0.0.1");
+      }),
   );
-  const stop = () => void app.close().finally(() => process.exit(0));
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  void main().catch((error) => {
-    console.error(`Pidex cannot start: ${safeError(error)}`);
-    process.exit(1);
-  });
+  NodeRuntime.runMain(main, { disableErrorReporting: true });

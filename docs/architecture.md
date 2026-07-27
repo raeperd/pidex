@@ -62,4 +62,12 @@ Browser storage  unsent drafts and local UI preferences
 - Svelte 5, Vite, and Tailwind CSS 4.
 - Zod 4 for API and persisted-data validation.
 - oRPC 1 native RPC for contract-first request/response calls.
+- Effect 4 beta for server workflows, dependency injection, and resource lifecycles.
 - Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `apps/server`.
+
+## Server composition
+
+`apps/server/src/app-runtime.ts` is the server composition root. One managed runtime builds
+the Pi SDK, metadata, and chat services. SQLite and live chat sessions are scoped resources,
+so runtime disposal closes them in dependency order. oRPC handlers and Node callbacks are
+the only Promise and callback boundaries.
