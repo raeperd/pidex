@@ -1095,7 +1095,7 @@
       <nav
         class="min-h-0 flex-1 overflow-y-auto pt-px pb-2 [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
         aria-label="Projects"
-        aria-busy={chatLoading || projectLoading}
+        aria-busy={chatLoading || projectLoading || projectOrderSaving}
       >
         {#if visibleProjects.length === 0}
           <div class="flex flex-col items-center gap-2 px-4.5 py-7 text-center text-faint">
@@ -1133,11 +1133,11 @@
             >
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class="grid size-6 flex-none cursor-grab place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing ${workspace?.id === project.id ? "text-foreground" : ""}`}
                   draggable={!projectOrderSaving}
-                  aria-disabled={projectOrderSaving}
-                  aria-label={`Reorder ${projectLabel(project)}`}
-                  title="Drag to reorder projects; use arrow keys for precise movement"
+                  aria-expanded={expanded}
+                  aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
+                  title={`${projectLabel(project)} — drag to reorder; use arrow keys for precise movement`}
                   ondragstart={(event) => startProjectDrag(event, project.id)}
                   ondragend={finishProjectDrag}
                   onkeydown={(event) => {
@@ -1145,14 +1145,6 @@
                     event.preventDefault();
                     moveProjectBy(project.id, event.key === "ArrowUp" ? -1 : 1);
                   }}
-                >
-                  <Icon name="grip" size={14} />
-                </button>
-                <button
-                  class={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground ${workspace?.id === project.id ? "text-foreground" : ""}`}
-                  aria-expanded={expanded}
-                  aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
-                  title={projectLabel(project)}
                   onclick={() => toggleProject(project)}
                 >
                   <span

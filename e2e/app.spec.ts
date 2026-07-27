@@ -61,27 +61,29 @@ test("manually reorders projects and preserves their order after reload", async 
 
   await page.goto("/");
   await openTasks(page);
+  const projects = page.getByRole("navigation", { name: "Projects" });
   const projectOrder = () =>
-    page
-      .getByRole("button", { name: /^Reorder / })
-      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
-  await expect.poll(projectOrder).toEqual(["Reorder apps", "Reorder packages"]);
+    projects
+      .getByRole("group")
+      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
+  await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
+  await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(0);
 
-  const packagesHandle = page.getByRole("button", { name: "Reorder packages" });
-  await packagesHandle.focus();
-  await packagesHandle.press("ArrowUp");
-  await expect(packagesHandle).toBeFocused();
-  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
-  await expect(packagesHandle).toHaveAttribute("aria-disabled", "false");
-  await packagesHandle.press("ArrowDown");
-  await expect.poll(projectOrder).toEqual(["Reorder apps", "Reorder packages"]);
+  const packagesRow = page.getByRole("button", { name: /^(Collapse|Expand) packages$/ });
+  await packagesRow.focus();
+  await packagesRow.press("ArrowUp");
+  await expect(packagesRow).toBeFocused();
+  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
+  await expect(page.getByLabel("Add project", { exact: true })).toBeEnabled();
+  await packagesRow.press("ArrowDown");
+  await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
 
-  await packagesHandle.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
+  await packagesRow.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
 
-  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
   await page.reload();
   await openTasks(page);
-  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
 });
 
 test("blocks project additions while saving the manual order", async ({ page, request }) => {
@@ -125,7 +127,7 @@ test("blocks project additions while saving the manual order", async ({ page, re
 
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "Reorder packages" }).press("ArrowUp");
+  await page.getByRole("button", { name: /^(Collapse|Expand) packages$/ }).press("ArrowUp");
   await expect.poll(() => reorderStarted).toBe(true);
   try {
     await expect(page.getByLabel("Add project", { exact: true })).toBeDisabled();
@@ -187,9 +189,10 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   await page.getByLabel("Add project", { exact: true }).click();
   await page.getByRole("button", { name: "Add new-project", exact: true }).click();
 
-  await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(100);
-  await expect(page.getByRole("button", { name: "Reorder project-000" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Reorder packages" })).toBeVisible();
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group")).toHaveCount(100);
+  await expect(projects.getByRole("group", { name: "project-000 project" })).toHaveCount(0);
+  await expect(projects.getByRole("group", { name: "packages project" })).toBeVisible();
   expect(bootstrapCalls).toBe(2);
 });
 
@@ -243,9 +246,10 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
   await page.getByLabel("Add project", { exact: true }).click();
   await page.getByRole("button", { name: "Add all", exact: true }).click();
 
-  await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(100);
-  await expect(page.getByRole("button", { name: "Reorder project-000" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Reorder project-001" })).toBeVisible();
+  const projectsNav = page.getByRole("navigation", { name: "Projects" });
+  await expect(projectsNav.getByRole("group")).toHaveCount(100);
+  await expect(projectsNav.getByRole("group", { name: "project-000 project" })).toHaveCount(0);
+  await expect(projectsNav.getByRole("group", { name: "project-001 project" })).toBeVisible();
   expect(bootstrapCalls).toBe(2);
 });
 
