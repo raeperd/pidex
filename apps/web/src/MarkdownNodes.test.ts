@@ -22,6 +22,8 @@ describe("parseMarkdown", () => {
     expect(list?.type).toBe("list");
     if (list?.type !== "list") throw new Error("Expected a list");
     expect(list.items.map((item) => item.checked)).toEqual([true, false]);
+    // The rendered checkbox replaces marked's "[x] " marker token.
+    expect(flattenText(list.items[0]?.children ?? [])).toBe("shipped");
   });
 
   it("keeps raw HTML as text-only nodes", () => {
@@ -43,12 +45,13 @@ describe("parseMarkdown", () => {
     expect(image).not.toHaveProperty("href");
   });
 
-  it("keeps completed block keys stable while a later block streams", () => {
+  it("keeps block keys stable while a later block streams", () => {
     const before = parseMarkdown("Stable paragraph.\n\nStreaming");
     const after = parseMarkdown("Stable paragraph.\n\nStreaming response");
 
-    expect(before[0]?.key).toBe(after[0]?.key);
-    expect(before[1]?.key).not.toBe(after[1]?.key);
+    // The growing tail keeps its key so Svelte patches it instead of remounting,
+    // which would discard the code block's wrap and copy state mid-stream.
+    expect(before.map((node) => node.key)).toEqual(after.map((node) => node.key));
   });
 
   it("represents incomplete fences as code", () => {

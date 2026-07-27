@@ -642,6 +642,7 @@ summary::-webkit-details-marker {
 
 .markdown-raw-html {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.9em;

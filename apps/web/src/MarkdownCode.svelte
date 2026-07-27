@@ -15,9 +15,10 @@
     lines: HighlightToken[][];
   }
 
-  const MAX_CACHE_ENTRIES = 200;
+  const MAX_CACHE_CHARACTERS = 200_000;
   const MAX_HIGHLIGHT_CHARACTERS = 100_000;
   const highlightCache = new Map<string, Promise<HighlightedCode | null>>();
+  let cachedCharacters = 0;
   const languageLoads = new Map<string, Promise<void>>();
   let highlighterPromise: Promise<HighlighterCore> | undefined;
 
@@ -42,19 +43,12 @@
 
   const languageAliases: Record<string, keyof typeof languageLoaders> = {
     bash: "shellscript",
-    html: "html",
     js: "javascript",
-    javascript: "javascript",
-    json: "json",
-    jsx: "jsx",
     md: "markdown",
     py: "python",
     sh: "shellscript",
     shell: "shellscript",
-    shellscript: "shellscript",
     ts: "typescript",
-    tsx: "tsx",
-    typescript: "typescript",
     yml: "yaml",
   };
 
@@ -76,10 +70,12 @@
 
     const highlighted = tokenize(code, normalizedLanguage, theme);
     highlightCache.set(key, highlighted);
-    while (highlightCache.size > MAX_CACHE_ENTRIES) {
+    cachedCharacters += key.length;
+    while (cachedCharacters > MAX_CACHE_CHARACTERS) {
       const oldest = highlightCache.keys().next().value;
       if (oldest === undefined) break;
       highlightCache.delete(oldest);
+      cachedCharacters -= oldest.length;
     }
     return highlighted;
   }
@@ -220,7 +216,7 @@
     </span>
   </div>
   <pre><code
-      >{#await highlighted}{code}{:then result}{#if result}{#each result.lines as line, lineIndex (`${lineIndex}:${line.map((token) => token.content).join("")}`)}{#each line as token, tokenIndex (`${tokenIndex}:${token.content}`)}<span
+      >{#await highlighted}{code}{:then result}{#if result}{#each result.lines as line, lineIndex (lineIndex)}{#each line as token, tokenIndex (tokenIndex)}<span
                 style:color={token.color}
                 style:font-style={token.italic ? "italic" : undefined}
                 style:font-weight={token.bold ? "700" : undefined}

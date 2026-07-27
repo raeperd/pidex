@@ -196,6 +196,9 @@ const answer = 42;
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
   await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
+  await expect(page.getByRole("listitem").filter({ hasText: "component renderer" })).toHaveText(
+    "component renderer",
+  );
   await expect(page.getByRole("region", { name: "Scrollable table" })).toContainText(
     "Markdownready",
   );

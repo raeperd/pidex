@@ -92,10 +92,13 @@
   }
 
   function parseToken(token: MarkedToken, position: string): MarkdownNode[] {
-    const key = tokenKey(position, token.type, token.raw);
+    const key = `${position}:${token.type}`;
     switch (token.type) {
       case "space":
       case "def":
+        return [];
+      // The list item renders its own checkbox from `checked`; drop marked's marker token.
+      case "checkbox":
         return [];
       case "blockquote":
         return [{ type: "blockquote", key, children: parseTokens(token.tokens, key) }];
@@ -157,7 +160,7 @@
       ordered: token.ordered,
       start: typeof token.start === "number" ? token.start : 1,
       items: token.items.map((item, index) => ({
-        key: tokenKey(`${key}.${index}`, item.type, item.raw),
+        key: `${key}.${index}:${item.type}`,
         children: parseTokens(item.tokens, `${key}.${index}`),
         ...(item.task ? { checked: item.checked ?? false } : {}),
         loose: item.loose,
@@ -178,7 +181,7 @@
 
   function parseTableCell(cell: Tokens.TableCell, position: string): MarkdownTableCell {
     return {
-      key: tokenKey(position, "cell", cell.text),
+      key: `${position}:cell`,
       align: cell.align,
       children: parseTokens(cell.tokens, position),
     };
@@ -188,15 +191,6 @@
     if ("tokens" in token && token.tokens?.length) return parseTokens(token.tokens, key);
     const text = "text" in token && typeof token.text === "string" ? token.text : token.raw;
     return text ? [{ type: "text", key, text }] : [];
-  }
-
-  function tokenKey(position: string, type: string, raw: string): string {
-    let hash = 2_166_136_261;
-    for (let index = 0; index < raw.length; index += 1) {
-      hash ^= raw.charCodeAt(index);
-      hash = Math.imul(hash, 16_777_619);
-    }
-    return `${position}:${type}:${(hash >>> 0).toString(36)}`;
   }
 
   function inferredFileName(metadata: string[]): string | undefined {
@@ -261,7 +255,9 @@
   {:else if node.type === "break"}
     <br />
   {:else if node.type === "html"}
-    {#if node.block}<p class="markdown-raw-html">{node.text}</p>{:else}{node.text}{/if}
+    <svelte:element this={node.block ? "p" : "span"} class="markdown-raw-html"
+      >{node.text}</svelte:element
+    >
   {:else if node.type === "image"}
     <span class="image-blocked">[remote image disabled: {node.alt}]</span>
   {:else if node.type === "link"}
@@ -274,49 +270,24 @@
       <MarkdownNodes nodes={node.children} {streaming} {theme} />
     {/if}
   {:else if node.type === "list"}
-    {#if node.ordered}
-      <ol start={node.start === 1 ? undefined : node.start}>
-        {#each node.items as item (item.key)}
-          <li class={item.checked !== undefined ? "task-list-item" : undefined}>
-            {#if item.checked !== undefined}
-              <input
-                type="checkbox"
-                checked={item.checked}
-                disabled
-                aria-label={item.checked ? "Completed task" : "Incomplete task"}
-              />
-            {/if}
-            <MarkdownNodes
-              nodes={item.children}
-              {streaming}
-              {theme}
-              unwrapParagraphs={!item.loose}
+    <svelte:element
+      this={node.ordered ? "ol" : "ul"}
+      start={node.ordered && node.start !== 1 ? node.start : undefined}
+    >
+      {#each node.items as item (item.key)}
+        <li class={item.checked !== undefined ? "task-list-item" : undefined}>
+          {#if item.checked !== undefined}
+            <input
+              type="checkbox"
+              checked={item.checked}
+              disabled
+              aria-label={item.checked ? "Completed task" : "Incomplete task"}
             />
-          </li>
-        {/each}
-      </ol>
-    {:else}
-      <ul>
-        {#each node.items as item (item.key)}
-          <li class={item.checked !== undefined ? "task-list-item" : undefined}>
-            {#if item.checked !== undefined}
-              <input
-                type="checkbox"
-                checked={item.checked}
-                disabled
-                aria-label={item.checked ? "Completed task" : "Incomplete task"}
-              />
-            {/if}
-            <MarkdownNodes
-              nodes={item.children}
-              {streaming}
-              {theme}
-              unwrapParagraphs={!item.loose}
-            />
-          </li>
-        {/each}
-      </ul>
-    {/if}
+          {/if}
+          <MarkdownNodes nodes={item.children} {streaming} {theme} unwrapParagraphs={!item.loose} />
+        </li>
+      {/each}
+    </svelte:element>
   {:else if node.type === "table"}
     <div class="markdown-table" role="region" aria-label="Scrollable table">
       <table>
