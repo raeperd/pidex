@@ -72,7 +72,11 @@ export class MetadataStore {
         .from(workspaces)
         .where(eq(workspaces.path, canonicalPath))
         .get();
-      if (existing?.listed) return existing.id;
+      const openedAt = new Date().toISOString();
+      if (existing?.listed) {
+        tx.update(workspaces).set({ openedAt }).where(eq(workspaces.id, existing.id)).run();
+        return existing.id;
+      }
       const retained = tx
         .select({ id: workspaces.id })
         .from(workspaces)
@@ -97,7 +101,6 @@ export class MetadataStore {
         .orderBy(desc(workspaces.sortOrder))
         .limit(1)
         .get();
-      const openedAt = new Date().toISOString();
       const sortOrder = (last?.sortOrder ?? -1) + 1;
       if (existing) {
         tx.update(workspaces)

@@ -6,12 +6,15 @@ import { DatabaseSync } from "node:sqlite";
 import { and, eq, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActionProtocolError, MetadataStore, requestDigest } from "./metadata.js";
 
 describe("metadata store", () => {
   let store: MetadataStore | undefined;
-  afterEach(() => store?.close());
+  afterEach(() => {
+    store?.close();
+    vi.useRealTimers();
+  });
 
   it("marks an accepted run interrupted after restart and requires acknowledgement", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-metadata-"));
@@ -89,6 +92,30 @@ describe("metadata store", () => {
     expect(recent).toHaveLength(100);
     expect(recent.at(-1)).toEqual({ id: newestId, path: "/tmp/project-100" });
     expect(() => store!.reorderWorkspaces(recent.map(({ id }) => id).toReversed())).not.toThrow();
+  });
+
+  it("refreshes recency without changing manual order when reopening a workspace", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-recency-"));
+    vi.useFakeTimers();
+    const metadata = new MetadataStore();
+    store = metadata;
+    const remembered = Array.from({ length: 100 }, (_, index) => {
+      vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
+      const workspacePath = `/tmp/recency-project-${index}`;
+      return { id: metadata.rememberWorkspace(workspacePath), path: workspacePath };
+    });
+    const first = remembered[0];
+    const second = remembered[1];
+    if (!first || !second) throw new Error("Expected at least two remembered workspaces");
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 1)));
+
+    expect(metadata.rememberWorkspace(first.path)).toBe(first.id);
+    expect(metadata.recent()[0]).toEqual(first);
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 2)));
+    metadata.rememberWorkspace("/tmp/recency-project-100");
+
+    expect(metadata.recent()).toContainEqual(first);
+    expect(metadata.recent()).not.toContainEqual(second);
   });
 
   it("preserves the durable ID of a project evicted from the sidebar", async () => {
