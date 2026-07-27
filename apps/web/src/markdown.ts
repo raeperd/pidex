@@ -1,32 +1,205 @@
-import DOMPurify from "dompurify";
-import { Marked, Renderer } from "marked";
+import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 
-const escape = (value: string) =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-const renderer = new Renderer();
-renderer.html = ({ text }) => escape(text);
-renderer.image = ({ text }) =>
-  `<span class="image-blocked">[remote image disabled: ${escape(text)}]</span>`;
-renderer.link = ({ href, title, tokens }) => {
-  let safe: URL;
+export type MarkdownAlignment = "center" | "left" | "right" | null;
+
+interface MarkdownNodeBase {
+  key: string;
+}
+
+interface MarkdownContainerNode extends MarkdownNodeBase {
+  children: MarkdownNode[];
+}
+
+export type MarkdownNode =
+  | (MarkdownContainerNode & { type: "blockquote" })
+  | (MarkdownContainerNode & { type: "delete" })
+  | (MarkdownContainerNode & { type: "emphasis" })
+  | (MarkdownContainerNode & { type: "paragraph" })
+  | (MarkdownContainerNode & { type: "strong" })
+  | (MarkdownContainerNode & { type: "heading"; depth: number })
+  | (MarkdownContainerNode & { type: "link"; href: string; title?: string })
+  | {
+      type: "list";
+      key: string;
+      ordered: boolean;
+      start: number;
+      items: MarkdownListItem[];
+    }
+  | {
+      type: "table";
+      key: string;
+      header: MarkdownTableCell[];
+      rows: MarkdownTableCell[][];
+    }
+  | { type: "code"; key: string; code: string; language: string; title?: string }
+  | { type: "codespan"; key: string; text: string }
+  | { type: "html"; key: string; text: string; block: boolean }
+  | { type: "image"; key: string; alt: string }
+  | { type: "text"; key: string; text: string }
+  | { type: "break"; key: string }
+  | { type: "rule"; key: string };
+
+export interface MarkdownListItem {
+  key: string;
+  children: MarkdownNode[];
+  checked?: boolean;
+  loose: boolean;
+}
+
+export interface MarkdownTableCell {
+  key: string;
+  align: MarkdownAlignment;
+  children: MarkdownNode[];
+}
+
+const marked = new Marked({ gfm: true, breaks: false });
+
+export function parseMarkdown(value: string): MarkdownNode[] {
+  return parseTokens(marked.lexer(value), "root");
+}
+
+export function safeMarkdownHref(value: string, baseHref = browserHref()): string | null {
   try {
-    safe = new URL(href, window.location.href);
+    const url = baseHref ? new URL(value, baseHref) : new URL(value);
+    return ["http:", "https:", "mailto:"].includes(url.protocol) ? url.href : null;
   } catch {
-    return escape(href);
+    return null;
   }
-  if (!["http:", "https:", "mailto:"].includes(safe.protocol)) return escape(href);
-  const label = renderer.parser.parseInline(tokens);
-  const titleAttr = title ? ` title="${escape(title)}"` : "";
-  return `<a href="${escape(safe.href)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${label}</a>`;
-};
-const marked = new Marked({ gfm: true, breaks: false, renderer });
-export function safeMarkdown(value: string): string {
-  return DOMPurify.sanitize(marked.parse(value) as string, {
-    FORBID_TAGS: ["img", "style", "iframe", "object", "embed"],
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):)/i,
-  });
+}
+
+export function parseCodeInfo(info: string | undefined): {
+  language: string;
+  title?: string;
+} {
+  const normalized = info?.trim() ?? "";
+  if (!normalized) return { language: "text" };
+
+  const [language = "text", ...metadata] = normalized.split(/\s+/);
+  const titleMatch = normalized.match(
+    /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i,
+  );
+  const title = titleMatch?.[1] ?? titleMatch?.[2] ?? titleMatch?.[3] ?? inferredFileName(metadata);
+  return { language: language.toLowerCase(), ...(title ? { title } : {}) };
+}
+
+function parseTokens(tokens: Token[], parentKey: string): MarkdownNode[] {
+  return tokens.flatMap((token, index) =>
+    parseToken(token as MarkedToken, `${parentKey}.${index}`),
+  );
+}
+
+function parseToken(token: MarkedToken, position: string): MarkdownNode[] {
+  const key = tokenKey(position, token.type, token.raw);
+  switch (token.type) {
+    case "space":
+    case "def":
+      return [];
+    case "blockquote":
+      return [{ type: "blockquote", key, children: parseTokens(token.tokens, key) }];
+    case "code": {
+      const info = parseCodeInfo(token.lang);
+      return [{ type: "code", key, code: token.text, ...info }];
+    }
+    case "heading":
+      return [
+        { type: "heading", key, depth: token.depth, children: parseTokens(token.tokens, key) },
+      ];
+    case "hr":
+      return [{ type: "rule", key }];
+    case "html":
+      return [{ type: "html", key, text: token.text, block: token.block }];
+    case "list":
+      return [parseList(token, key)];
+    case "paragraph":
+      return [{ type: "paragraph", key, children: parseTokens(token.tokens, key) }];
+    case "table":
+      return [parseTable(token, key)];
+    case "br":
+      return [{ type: "break", key }];
+    case "codespan":
+      return [{ type: "codespan", key, text: token.text }];
+    case "del":
+      return [{ type: "delete", key, children: parseTokens(token.tokens, key) }];
+    case "em":
+      return [{ type: "emphasis", key, children: parseTokens(token.tokens, key) }];
+    case "escape":
+      return [{ type: "text", key, text: token.text }];
+    case "image":
+      return [{ type: "image", key, alt: token.text }];
+    case "link":
+      return [
+        {
+          type: "link",
+          key,
+          href: token.href,
+          ...(token.title ? { title: token.title } : {}),
+          children: parseTokens(token.tokens, key),
+        },
+      ];
+    case "strong":
+      return [{ type: "strong", key, children: parseTokens(token.tokens, key) }];
+    case "text":
+      return token.tokens?.length
+        ? parseTokens(token.tokens, key)
+        : [{ type: "text", key, text: token.text }];
+    default:
+      return parseUnknownToken(token, key);
+  }
+}
+
+function parseList(token: Tokens.List, key: string): MarkdownNode {
+  return {
+    type: "list",
+    key,
+    ordered: token.ordered,
+    start: typeof token.start === "number" ? token.start : 1,
+    items: token.items.map((item, index) => ({
+      key: tokenKey(`${key}.${index}`, item.type, item.raw),
+      children: parseTokens(item.tokens, `${key}.${index}`),
+      ...(item.task ? { checked: item.checked ?? false } : {}),
+      loose: item.loose,
+    })),
+  };
+}
+
+function parseTable(token: Tokens.Table, key: string): MarkdownNode {
+  return {
+    type: "table",
+    key,
+    header: token.header.map((cell, index) => parseTableCell(cell, `${key}.head.${index}`)),
+    rows: token.rows.map((row, rowIndex) =>
+      row.map((cell, columnIndex) => parseTableCell(cell, `${key}.${rowIndex}.${columnIndex}`)),
+    ),
+  };
+}
+
+function parseTableCell(cell: Tokens.TableCell, position: string): MarkdownTableCell {
+  return {
+    key: tokenKey(position, "cell", cell.text),
+    align: cell.align,
+    children: parseTokens(cell.tokens, position),
+  };
+}
+
+function parseUnknownToken(token: Token, key: string): MarkdownNode[] {
+  if ("tokens" in token && token.tokens?.length) return parseTokens(token.tokens, key);
+  const text = "text" in token && typeof token.text === "string" ? token.text : token.raw;
+  return text ? [{ type: "text", key, text }] : [];
+}
+
+function tokenKey(position: string, type: string, raw: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash ^= raw.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `${position}:${type}:${(hash >>> 0).toString(36)}`;
+}
+
+function inferredFileName(metadata: string[]): string | undefined {
+  return metadata.find((candidate) => /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/.test(candidate));
+}
+
+function browserHref(): string | undefined {
+  return typeof window === "undefined" ? undefined : window.location.href;
 }

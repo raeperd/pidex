@@ -19,6 +19,11 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import { taskPath, TaskSnapshotCache } from "./task-navigation";
+  import {
+    appendPendingTextDelta,
+    applyPendingTextDeltas,
+    type PendingTextDeltas,
+  } from "./text-deltas";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
@@ -90,6 +95,9 @@
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),
   });
+  let pendingTextDeltas: PendingTextDeltas = new Map();
+  let pendingTextDeltaFrame: number | undefined;
+  let pendingTextDeltaChatId = "";
 
   let routePath = $derived(page.url.pathname);
   let routeTaskId = $derived(page.params.taskId ?? "");
@@ -499,28 +507,42 @@
     else items.push(item);
     snapshot = { ...snapshot, items };
   }
+  function queueTextDelta(event: Extract<ServerEvent, { type: "text_delta" }>) {
+    if (pendingTextDeltaChatId && pendingTextDeltaChatId !== event.chatId)
+      flushScheduledTextDeltas();
+    pendingTextDeltaChatId = event.chatId;
+    appendPendingTextDelta(pendingTextDeltas, event);
+    if (pendingTextDeltaFrame !== undefined) return;
+    pendingTextDeltaFrame = requestAnimationFrame(() => {
+      pendingTextDeltaFrame = undefined;
+      flushPendingTextDeltas();
+      if (nearBottom) requestAnimationFrame(scrollLatest);
+    });
+  }
+  function flushScheduledTextDeltas() {
+    if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
+    pendingTextDeltaFrame = undefined;
+    flushPendingTextDeltas();
+  }
+  function flushPendingTextDeltas() {
+    if (snapshot && snapshot.chatId === pendingTextDeltaChatId)
+      snapshot = applyPendingTextDeltas(snapshot, pendingTextDeltas);
+    pendingTextDeltas = new Map();
+    pendingTextDeltaChatId = "";
+  }
   function applyEvent(event: ServerEvent) {
     if (!snapshot) return;
+    if (event.type === "text_delta") {
+      queueTextDelta(event);
+      return;
+    }
+    flushScheduledTextDeltas();
     if (event.type === "snapshot") {
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();
     } else if (event.type === "message" || event.type === "tool" || event.type === "notice")
       replaceItem(event.item);
-    else if (event.type === "text_delta")
-      snapshot = {
-        ...snapshot,
-        items: snapshot.items.map((item) =>
-          item.id === event.itemId && item.type === "assistant"
-            ? {
-                ...item,
-                ...(event.channel === "text"
-                  ? { text: item.text + event.delta }
-                  : { thinking: (item.thinking ?? "") + event.delta }),
-              }
-            : item,
-        ),
-      };
     else if (event.type === "run_status") {
       snapshot = {
         ...snapshot,
@@ -942,6 +964,7 @@
     const relativeTimeInterval = window.setInterval(() => (relativeNow = Date.now()), 60_000);
     return () => {
       window.clearInterval(relativeTimeInterval);
+      if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
       chatConnection.close();
     };
   });
@@ -1438,7 +1461,7 @@
                       class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{item.thinking}</pre>
                   </details>
                 {/if}
-                <Markdown text={item.text} />
+                <Markdown text={item.text} streaming={!item.complete} />
               </article>
             {:else if item.type === "tool"}
               <details class="group/tool mx-1 mt-1 mb-2 text-[11.5px]">

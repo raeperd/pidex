@@ -137,6 +137,74 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeVisible();
 });
 
+test("renders assistant markdown as safe interactive components", async ({ page, request }) => {
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: "New task in pidex" }).click();
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_markdown_e2e",
+      text: `# Rendered result
+
+**Safe Markdown**
+
+- [x] component renderer
+
+| Name | State |
+| --- | --- |
+| Markdown | ready |
+
+\`\`\`ts title="src/example.ts"
+const answer = 42;
+\`\`\`
+
+<script>globalThis.compromised = true</script>
+
+![tracker](https://tracker.example/pixel.png)
+
+[unsafe](javascript:alert(1))`,
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
+  await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
+  await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
+  await expect(page.getByRole("region", { name: "Scrollable table" })).toContainText(
+    "Markdownready",
+  );
+  await expect(page.getByTitle("src/example.ts")).toBeVisible();
+  await expect(page.getByText("const answer = 42;", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Wrap lines" }).click();
+  await expect(page.getByRole("button", { name: "Disable line wrap" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("<script>globalThis.compromised = true</script>")).toBeVisible();
+  await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
+  expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+});
+
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];

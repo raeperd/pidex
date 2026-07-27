@@ -1,10 +1,15 @@
 <script lang="ts">
-  import { safeMarkdown } from "./markdown.js";
+  import { MediaQuery } from "svelte/reactivity";
+  import type { HighlightTheme } from "./highlight.js";
+  import { parseMarkdown } from "./markdown.js";
+  import MarkdownNodes from "./MarkdownNodes.svelte";
 
-  let { text }: { text: string } = $props();
-  let html = $derived(safeMarkdown(text));
+  let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
+  const darkMode = new MediaQuery("prefers-color-scheme: dark");
+  let nodes = $derived(parseMarkdown(text));
+  let theme = $derived<HighlightTheme>(darkMode.current ? "dark" : "light");
 </script>
 
 <div class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]">
-  {@html html}
+  <MarkdownNodes {nodes} {streaming} {theme} />
 </div>

@@ -16,8 +16,8 @@
     "@orpc/client": "1.14.8",
     "@orpc/contract": "1.14.8",
     "@pidex/api": "workspace:*",
-    "dompurify": "3.3.0",
     "marked": "17.0.1",
+    "shiki": "4.3.1",
     "svelte": "catalog:",
     "zod": "4.1.12"
   },
