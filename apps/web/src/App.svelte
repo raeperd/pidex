@@ -350,20 +350,21 @@
     if (!pending.length || projectBatchLoading) return;
     projectBatchLoading = true;
     projectBatchProgress = 0;
-    let first: Workspace | undefined;
     for (const candidate of pending) {
-      const loaded = await openProject(candidate.path, {
+      await openProject(candidate.path, {
         activate: false,
         expand: false,
       });
-      first ??= loaded;
       projectBatchProgress += 1;
     }
-    if (!workspace && first) {
-      workspace = first;
-      projectPath = first.path;
-      rememberWorkspace(first, true);
-      localStorage.setItem("pidex:last-project", first.path);
+    const initialWorkspace = (bootstrap?.recentWorkspaces ?? [])
+      .map(({ id }) => workspaceFor(id))
+      .find((loaded) => loaded !== undefined);
+    if (!workspace && initialWorkspace) {
+      workspace = initialWorkspace;
+      projectPath = initialWorkspace.path;
+      rememberWorkspace(initialWorkspace, true);
+      localStorage.setItem("pidex:last-project", initialWorkspace.path);
     }
     projectBatchLoading = false;
     projectDialogElement?.close();

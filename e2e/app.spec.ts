@@ -127,12 +127,68 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
 
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "Add project", exact: true }).click();
+  await page.getByLabel("Add project", { exact: true }).click();
   await page.getByRole("button", { name: "Add new-project", exact: true }).click();
 
   await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(100);
   await expect(page.getByRole("button", { name: "Reorder project-000" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reorder packages" })).toBeVisible();
+  expect(bootstrapCalls).toBe(2);
+});
+
+test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const projects = Array.from({ length: 101 }, (_, index) => {
+    const suffix = String(index).padStart(3, "0");
+    return {
+      id: `workspace_${suffix}`,
+      name: `project-${suffix}`,
+      path: `${process.cwd()}/apps/project-${suffix}`,
+    };
+  });
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: bootstrapCalls++ === 0 ? [] : projects.slice(1),
+          projectCandidates: projects.map(({ name, path }) => ({ name, path })),
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const project = projects.find(({ path }) => path === input.path);
+    if (!project) throw new Error(`Unexpected project path ${input.path}`);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ...workspaceTemplate.result, ...project } },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByLabel("Add project", { exact: true }).click();
+  await page.getByRole("button", { name: "Add all", exact: true }).click();
+
+  await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(100);
+  await expect(page.getByRole("button", { name: "Reorder project-000" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reorder project-001" })).toBeVisible();
   expect(bootstrapCalls).toBe(2);
 });
 

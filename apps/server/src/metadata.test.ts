@@ -91,6 +91,27 @@ describe("metadata store", () => {
     expect(() => store!.reorderWorkspaces(recent.map(({ id }) => id).toReversed())).not.toThrow();
   });
 
+  it("preserves the durable ID of a project evicted from the sidebar", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-id-"));
+    const metadata = new MetadataStore();
+    store = metadata;
+    const remembered = Array.from({ length: 100 }, (_, index) => {
+      const workspacePath = `/tmp/durable-project-${index}`;
+      return { id: metadata.rememberWorkspace(workspacePath), path: workspacePath };
+    });
+    metadata.rememberWorkspace("/tmp/durable-project-100");
+    const recentPaths = new Set(metadata.recent().map(({ path: workspacePath }) => workspacePath));
+    const evicted = remembered.find(({ path: workspacePath }) => !recentPaths.has(workspacePath));
+    if (!evicted) throw new Error("Expected one workspace to leave the sidebar history");
+    metadata.close();
+    const reopened = new MetadataStore();
+    store = reopened;
+
+    expect(reopened.workspaceId(evicted.path)).toBe(evicted.id);
+    expect(reopened.rememberWorkspace(evicted.path)).toBe(evicted.id);
+    expect(reopened.recent()).toContainEqual(evicted);
+  });
+
   it("rolls back a failed legacy workspace-order migration", async () => {
     store = undefined;
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-migration-"));
