@@ -1,3 +1,4 @@
+import { decodeHTMLStrict } from "entities";
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 
 export type MarkdownAlignment = "center" | "left" | "right" | null;
@@ -141,7 +142,7 @@ function parseToken(token: MarkedToken, position: string): MarkdownNode[] {
     case "text":
       return token.tokens?.length
         ? parseTokens(token.tokens, key)
-        : [{ type: "text", key, text: token.text }];
+        : [{ type: "text", key, text: decodeHTMLStrict(token.text) }];
     default:
       return parseUnknownToken(token, key);
   }

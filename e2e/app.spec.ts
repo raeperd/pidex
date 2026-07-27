@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { basename } from "node:path";
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
@@ -138,6 +139,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
 });
 
 test("renders assistant markdown as safe interactive components", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   let snapshot: Record<string, unknown> | undefined;
   await page.route("**/api/rpc/chats/create", async (route) => {
@@ -150,7 +152,7 @@ test("renders assistant markdown as safe interactive components", async ({ page,
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "New task in pidex" }).click();
+  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
 
@@ -165,6 +167,8 @@ test("renders assistant markdown as safe interactive components", async ({ page,
       text: `# Rendered result
 
 **Safe Markdown**
+
+Entity text: AT&amp;T &copy;
 
 - [x] component renderer
 
@@ -188,6 +192,7 @@ const answer = 42;
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
+  await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
   await expect(page.getByRole("region", { name: "Scrollable table" })).toContainText(
     "Markdownready",
