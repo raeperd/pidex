@@ -152,7 +152,9 @@ test("renders assistant markdown as safe interactive components", async ({ page,
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
 
