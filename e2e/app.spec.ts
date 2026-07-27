@@ -286,6 +286,66 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   expect(bootstrapCalls).toBe(2);
 });
 
+test("reconciles concurrent project additions after opening a new project", async ({
+  page,
+  request,
+}) => {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const initial = { id: "workspace_initial", path: "/tmp/project-initial" };
+  const concurrent = { id: "workspace_concurrent", path: "/tmp/project-concurrent" };
+  const added = { id: "workspace_added", path: "/tmp/project-added" };
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: bootstrapCalls++ === 0 ? [initial] : [concurrent, added],
+          projectCandidates: [{ name: "project-added", path: added.path }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const project = input.path === added.path ? added : initial;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...workspaceTemplate.result,
+          ...project,
+          name: project.path.split("/").at(-1),
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByLabel("Add project", { exact: true }).click();
+  await page.getByRole("button", { name: "Add project-added", exact: true }).click();
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group", { name: "project-initial project" })).toHaveCount(0);
+  await expect(projects.getByRole("group", { name: "project-concurrent project" })).toBeVisible();
+  await expect(projects.getByRole("group", { name: "project-added project" })).toBeVisible();
+  expect(bootstrapCalls).toBe(2);
+});
+
 test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{
     csrfToken: string;
