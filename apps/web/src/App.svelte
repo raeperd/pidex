@@ -1062,12 +1062,8 @@
                   onclick={() => toggleProject(project)}
                 >
                   <span
-                    class={`grid flex-none text-faint transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-                    ><Icon name="chevron" size={13} /></span
-                  >
-                  <span
                     class={`grid size-5 flex-none place-items-center rounded text-muted ${workspace?.id === project.id ? "bg-primary/15 text-primary" : ""}`}
-                    ><Icon name="folder" size={15} /></span
+                    ><Icon name={expanded ? "folder-open" : "folder"} size={15} /></span
                   >
                   <strong
                     class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium text-inherit"
@@ -1111,9 +1107,6 @@
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
                       >
-                        <span
-                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
-                        ></span>
                         <strong
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
@@ -1127,6 +1120,9 @@
                             class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
+                        <span
+                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
+                        ></span>
                       </button>
                     {/each}
                     {#if hiddenTasks > 0}
