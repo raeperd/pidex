@@ -17,7 +17,7 @@
   import { ChatConnection, type ConnectionState } from "./chat-connection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
-  import Markdown from "./Markdown.svelte";
+  import MarkdownNodes, { parseMarkdown } from "./MarkdownNodes.svelte";
   import { taskPath, TaskSnapshotCache } from "./task-navigation";
   import ToolCall from "./ToolCall.svelte";
 
@@ -85,6 +85,7 @@
   let renameValue = $state("");
   let compactDialogElement = $state<HTMLDialogElement>();
   const mobileViewport = new MediaQuery("max-width: 900px");
+  const darkMode = new MediaQuery("prefers-color-scheme: dark");
   const api = new PidexApiClient();
   const snapshotCache = new TaskSnapshotCache();
   const chatConnection = new ChatConnection({
@@ -1456,7 +1457,15 @@
                       class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{item.thinking}</pre>
                   </details>
                 {/if}
-                <Markdown text={item.text} streaming={!item.complete} />
+                <div
+                  class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]"
+                >
+                  <MarkdownNodes
+                    nodes={parseMarkdown(item.text)}
+                    streaming={!item.complete}
+                    theme={darkMode.current ? "dark" : "light"}
+                  />
+                </div>
               </article>
             {:else if item.type === "tool"}
               <ToolCall
