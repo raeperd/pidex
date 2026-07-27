@@ -770,6 +770,7 @@ async function rpcRequest<T = unknown>(
 async function openTasks(page: Page) {
   const button = page.getByRole("button", { name: "Open tasks" });
   if (await button.isVisible()) await button.click();
+  await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
 }
 
 async function installFakeWebSocket(page: Page) {
