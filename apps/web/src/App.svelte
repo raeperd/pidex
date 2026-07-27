@@ -509,6 +509,9 @@
   function recordToolTiming(item: ToolItem) {
     const current = toolTimings[item.id];
     if (current?.endedAt !== undefined) return;
+    // A tool already running when this chat loaded arrives without a start we can trust,
+    // so report no duration rather than an invented `Took 0.0s`.
+    if (!current && item.state !== "running") return;
     toolElapsedNow = Date.now();
     const startedAt = current?.startedAt ?? toolElapsedNow;
     toolTimings = {

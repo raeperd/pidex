@@ -275,6 +275,23 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await toolBlock.click();
   await expect(page.locator(".tool-call__output")).toContainText("one");
   await expect(hint).toHaveCount(0);
+
+  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 3,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_restored_e2e",
+      argumentSummary: JSON.stringify({ command: "pnpm build" }),
+      state: "success",
+      preview: "done",
+    },
+  });
+  const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
+  await expect(restored).toBeVisible();
+  await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
