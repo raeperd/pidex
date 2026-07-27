@@ -304,7 +304,14 @@
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
       const loaded = await api.openWorkspace(path, remember);
-      if (remember && (options.reconcileHistory ?? true)) bootstrap = await api.bootstrap();
+      if (remember && (options.reconcileHistory ?? true)) {
+        try {
+          bootstrap = await api.bootstrap();
+        } catch (cause) {
+          const detail = cause instanceof Error ? `: ${cause.message}` : "";
+          error = `Project history could not be refreshed${detail}`;
+        }
+      }
       rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
         chatConnection.close();

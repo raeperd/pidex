@@ -396,6 +396,61 @@ test("refreshes membership when reopening a remotely evicted project", async ({
   expect(bootstrapCalls).toBe(2);
 });
 
+test("keeps a successful project open when history refresh fails", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    if (bootstrapCalls++ > 0) {
+      await route.abort("failed");
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: [],
+          projectCandidates: [{ name: added.name, path: added.path }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ...workspaceTemplate.result, ...added } },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByLabel("Add project", { exact: true }).click();
+  const projectDialog = page.getByRole("dialog", { name: "Add a project" });
+  await projectDialog.getByRole("button", { name: "Add project-added", exact: true }).click();
+
+  await expect(projectDialog).not.toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Project history could not be refreshed");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
+    .toBe(added.path);
+  await openTasks(page);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Projects" })
+      .getByRole("group", { name: "project-added project" }),
+  ).toBeVisible();
+  expect(bootstrapCalls).toBe(2);
+});
+
 test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{
     csrfToken: string;
