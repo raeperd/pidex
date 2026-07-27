@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightCode } from "./highlight";
+import { highlightCode } from "./MarkdownCode.svelte";
 
 describe("highlightCode", () => {
   it("tokenizes completed code with the real highlighter", async () => {

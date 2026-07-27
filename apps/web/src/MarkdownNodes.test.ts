@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseCodeInfo, parseMarkdown, safeMarkdownHref, type MarkdownNode } from "./markdown";
+import {
+  parseCodeInfo,
+  parseMarkdown,
+  safeMarkdownHref,
+  type MarkdownNode,
+} from "./MarkdownNodes.svelte";
 
 describe("parseMarkdown", () => {
   it("builds component nodes for GFM content", () => {

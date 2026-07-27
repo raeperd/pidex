@@ -268,6 +268,63 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(hint).toHaveCount(0);
 });
 
+test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${WORKSPACE_NAME}` }).click();
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "",
+      complete: false,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  const deltas = [
+    ["text", "# Streamed"],
+    ["thinking", "weighing "],
+    ["text", " heading\n\nBody "],
+    ["thinking", "options"],
+    ["text", "text."],
+  ] as const;
+  let eventId = 2;
+  for (const [channel, delta] of deltas) {
+    await emitServerEvent(page, {
+      type: "text_delta",
+      eventId: eventId++,
+      chatId,
+      itemId: "assistant_stream_e2e",
+      channel,
+      delta,
+    });
+  }
+
+  // Every delta lands in order even though a frame batches several of them together.
+  await expect(page.getByRole("heading", { name: "Streamed heading" })).toBeVisible();
+  await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
+  await page.getByText("Thinking", { exact: true }).click();
+  await expect(page.locator("details pre")).toHaveText("weighing options");
+});
+
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];

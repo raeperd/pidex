@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatToolDuration, toolCallHeader, toolCallPreview } from "./tool-call";
+import { formatToolDuration, toolCallHeader, toolCallPreview } from "./ToolCall.svelte";
 
 describe("toolCallHeader", () => {
   it("renders bash calls as a shell prompt", () => {

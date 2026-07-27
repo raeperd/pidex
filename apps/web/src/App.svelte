@@ -19,11 +19,6 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import { taskPath, TaskSnapshotCache } from "./task-navigation";
-  import {
-    appendPendingTextDelta,
-    applyPendingTextDeltas,
-    type PendingTextDeltas,
-  } from "./text-deltas";
   import ToolCall from "./ToolCall.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
@@ -97,7 +92,7 @@
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),
   });
-  let pendingTextDeltas: PendingTextDeltas = new Map();
+  let pendingTextDeltas = new Map<string, { text: string; thinking: string }>();
   let pendingTextDeltaFrame: number | undefined;
   let pendingTextDeltaChatId = "";
 
@@ -524,7 +519,11 @@
     if (pendingTextDeltaChatId && pendingTextDeltaChatId !== event.chatId)
       flushScheduledTextDeltas();
     pendingTextDeltaChatId = event.chatId;
-    appendPendingTextDelta(pendingTextDeltas, event);
+    const pending = pendingTextDeltas.get(event.itemId) ?? { text: "", thinking: "" };
+    pendingTextDeltas.set(event.itemId, {
+      ...pending,
+      [event.channel]: pending[event.channel] + event.delta,
+    });
     if (pendingTextDeltaFrame !== undefined) return;
     pendingTextDeltaFrame = requestAnimationFrame(() => {
       pendingTextDeltaFrame = undefined;
@@ -538,8 +537,19 @@
     flushPendingTextDeltas();
   }
   function flushPendingTextDeltas() {
-    if (snapshot && snapshot.chatId === pendingTextDeltaChatId)
-      snapshot = applyPendingTextDeltas(snapshot, pendingTextDeltas);
+    if (snapshot && snapshot.chatId === pendingTextDeltaChatId && pendingTextDeltas.size > 0)
+      snapshot = {
+        ...snapshot,
+        items: snapshot.items.map((item) => {
+          const delta = pendingTextDeltas.get(item.id);
+          if (!delta || item.type !== "assistant") return item;
+          return {
+            ...item,
+            text: item.text + delta.text,
+            thinking: (item.thinking ?? "") + delta.thinking,
+          };
+        }),
+      };
     pendingTextDeltas = new Map();
     pendingTextDeltaChatId = "";
   }

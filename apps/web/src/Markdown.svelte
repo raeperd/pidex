@@ -1,8 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from "svelte/reactivity";
-  import type { HighlightTheme } from "./highlight.js";
-  import { parseMarkdown } from "./markdown.js";
-  import MarkdownNodes from "./MarkdownNodes.svelte";
+  import type { HighlightTheme } from "./MarkdownCode.svelte";
+  import MarkdownNodes, { parseMarkdown } from "./MarkdownNodes.svelte";
 
   let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
