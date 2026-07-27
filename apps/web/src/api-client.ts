@@ -5,6 +5,7 @@ import {
   type ChatSnapshot,
   type ExtensionDialog,
   type PidexApiContractClient,
+  type RecentWorkspace,
   type SessionSummary,
   type ToolOutputChunk,
   type TranscriptPage,
@@ -47,6 +48,11 @@ export class PidexApiClient {
 
   openWorkspace(path: string, remember = true): Promise<Workspace> {
     return this.client.workspaces.open({ path, remember });
+  }
+
+  async reorderWorkspaces(workspaceIds: string[]): Promise<RecentWorkspace[]> {
+    const result = await this.client.workspaces.reorder({ workspaceIds });
+    return result.recentWorkspaces;
   }
 
   setWorkspaceTrust(workspaceId: string, trusted: boolean): Promise<Workspace> {

@@ -5,7 +5,7 @@ test("serves the Pi host and branded assets", async ({ request }) => {
   expect(health.response.status()).toBe(200);
   expect(health.result).toEqual({
     ok: true,
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
 
   const png = await request.get("/pidex-icon.png");

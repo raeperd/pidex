@@ -66,6 +66,20 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
           }),
         ),
       ),
+      reorder: workspaces.reorder.handler(({ input }) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const metadata = yield* Metadata;
+            yield* attemptOperation("metadata.reorderWorkspaces", () =>
+              metadata.reorderWorkspaces(input.workspaceIds),
+            );
+            const recentWorkspaces = yield* attemptOperation("metadata.recent", () =>
+              metadata.recent(),
+            );
+            return { recentWorkspaces };
+          }),
+        ),
+      ),
       sessions: workspaces.sessions.handler(({ input }) =>
         runtime.runPromise(
           Effect.gen(function* () {

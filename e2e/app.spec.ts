@@ -25,6 +25,58 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
 });
 
+test("manually reorders projects and preserves their order after reload", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "HTML drag and drop is a desktop interaction");
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const csrfToken = bootstrap.result.csrfToken;
+  const apps = await rpcRequest<{ id: string; path: string }>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps` },
+    csrfToken,
+  );
+  const packages = await rpcRequest<{ id: string; path: string }>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/packages` },
+    csrfToken,
+  );
+  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const otherIds = remembered.result.recentWorkspaces
+    .map(({ id }) => id)
+    .filter((id) => id !== apps.result.id && id !== packages.result.id);
+  await rpcRequest(
+    request,
+    "workspaces/reorder",
+    { workspaceIds: [apps.result.id, packages.result.id, ...otherIds] },
+    csrfToken,
+  );
+
+  await page.goto("/");
+  await openTasks(page);
+  const projectOrder = () =>
+    page
+      .getByRole("button", { name: /^Reorder / })
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
+  await expect.poll(projectOrder).toEqual(["Reorder apps", "Reorder packages"]);
+
+  await page
+    .getByRole("button", { name: "Reorder packages" })
+    .dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
+
+  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+  await page.reload();
+  await openTasks(page);
+  await expect.poll(projectOrder).toEqual(["Reorder packages", "Reorder apps"]);
+});
+
 test("retries a deep-linked task without replacing its route", async ({ page, request }) => {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const opened = await rpcRequest<{ id: string }>(

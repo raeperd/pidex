@@ -44,6 +44,9 @@
   let projectLoadingId = $state("");
   let projectBatchLoading = $state(false);
   let projectBatchProgress = $state(0);
+  let projectOrderSaving = $state(false);
+  let draggedProjectId = $state("");
+  let projectDropTargetId = $state("");
   let chatLoading = $state(false);
   let routeLoading = $state(false);
   let routeReady = $state(false);
@@ -203,7 +206,7 @@
     routeReady = true;
     error = "Pidex restarted. Reconnecting this task…";
   }
-  function rememberWorkspace(loaded: Workspace, moveToTop = true, expand = true) {
+  function rememberWorkspace(loaded: Workspace, expand = true) {
     workspaceCache = { ...workspaceCache, [loaded.id]: loaded };
     if (expand && !expandedProjectIds.includes(loaded.id))
       expandedProjectIds = [...expandedProjectIds, loaded.id];
@@ -212,17 +215,73 @@
       const currentIndex = bootstrap.recentWorkspaces.findIndex(
         (project) => project.id === loaded.id || project.path === loaded.path,
       );
-      const existing = bootstrap.recentWorkspaces.filter(
-        (project) => project.id !== loaded.id && project.path !== loaded.path,
-      );
-      const recentWorkspaces = moveToTop
-        ? [entry, ...existing]
-        : currentIndex < 0
-          ? [...existing, entry]
+      const recentWorkspaces =
+        currentIndex < 0
+          ? [...bootstrap.recentWorkspaces, entry]
           : bootstrap.recentWorkspaces.map((project, index) =>
               index === currentIndex ? entry : project,
             );
       bootstrap = { ...bootstrap, recentWorkspaces };
+    }
+  }
+  function startProjectDrag(event: DragEvent, projectId: string) {
+    if (projectOrderSaving) return;
+    draggedProjectId = projectId;
+    event.dataTransfer?.setData("text/plain", projectId);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  }
+  function dragProjectOver(event: DragEvent, projectId: string) {
+    if (!draggedProjectId || draggedProjectId === projectId) return;
+    event.preventDefault();
+    projectDropTargetId = projectId;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  }
+  function dropProject(event: DragEvent, projectId: string) {
+    event.preventDefault();
+    const sourceId = draggedProjectId || event.dataTransfer?.getData("text/plain") || "";
+    finishProjectDrag();
+    moveProjectTo(sourceId, projectId);
+  }
+  function finishProjectDrag() {
+    draggedProjectId = "";
+    projectDropTargetId = "";
+  }
+  function moveProjectTo(sourceId: string, targetId: string) {
+    if (!bootstrap || sourceId === targetId || projectOrderSaving) return;
+    const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === sourceId);
+    const targetIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const reordered = [...bootstrap.recentWorkspaces];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    if (!moved) return;
+    reordered.splice(targetIndex, 0, moved);
+    void saveProjectOrder(reordered);
+  }
+  function moveProjectBy(projectId: string, offset: -1 | 1) {
+    if (!bootstrap || projectOrderSaving) return;
+    const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === projectId);
+    const target = bootstrap.recentWorkspaces[sourceIndex + offset];
+    if (!target) return;
+    const reordered = [...bootstrap.recentWorkspaces];
+    [reordered[sourceIndex], reordered[sourceIndex + offset]] = [
+      reordered[sourceIndex + offset],
+      reordered[sourceIndex],
+    ];
+    void saveProjectOrder(reordered);
+  }
+  async function saveProjectOrder(recentWorkspaces: RecentWorkspace[]) {
+    if (!bootstrap) return;
+    const previous = bootstrap.recentWorkspaces;
+    projectOrderSaving = true;
+    bootstrap = { ...bootstrap, recentWorkspaces };
+    try {
+      const persisted = await api.reorderWorkspaces(recentWorkspaces.map(({ id }) => id));
+      bootstrap = { ...bootstrap, recentWorkspaces: persisted };
+    } catch (cause) {
+      bootstrap = { ...bootstrap, recentWorkspaces: previous };
+      error = cause instanceof Error ? cause.message : "Project order could not be saved";
+    } finally {
+      projectOrderSaving = false;
     }
   }
   async function openProject(
@@ -230,7 +289,6 @@
     options: {
       activate?: boolean;
       closeDrawer?: boolean;
-      moveToTop?: boolean;
       expand?: boolean;
       remember?: boolean;
       navigate?: boolean;
@@ -244,7 +302,7 @@
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
       const loaded = await api.openWorkspace(path, options.remember ?? true);
-      rememberWorkspace(loaded, options.moveToTop ?? activate, options.expand ?? activate);
+      rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
         chatConnection.close();
         workspace = loaded;
@@ -287,7 +345,6 @@
     for (const candidate of pending) {
       const loaded = await openProject(candidate.path, {
         activate: false,
-        moveToTop: false,
         expand: false,
       });
       first ??= loaded;
@@ -296,7 +353,7 @@
     if (!workspace && first) {
       workspace = first;
       projectPath = first.path;
-      rememberWorkspace(first, true, true);
+      rememberWorkspace(first, true);
       localStorage.setItem("pidex:last-project", first.path);
     }
     projectBatchLoading = false;
@@ -340,7 +397,6 @@
     if (!workspaceFor(project.id))
       await openProject(project.path, {
         activate: false,
-        moveToTop: false,
         expand: false,
         remember: false,
       });
@@ -405,8 +461,7 @@
   }
   async function newTaskInProject(project: RecentWorkspace) {
     const target =
-      workspaceFor(project.id) ??
-      (await openProject(project.path, { activate: false, moveToTop: false }));
+      workspaceFor(project.id) ?? (await openProject(project.path, { activate: false }));
     if (target) await newTask(target);
   }
   function navigateToTask(taskId: string) {
@@ -467,7 +522,6 @@
     if (!recent) return undefined;
     return openProject(recent.path, {
       activate: false,
-      moveToTop: false,
       expand: true,
       remember: false,
     });
@@ -1052,8 +1106,30 @@
             {@const hiddenTasks = expanded
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
-            <div class="mb-0.5">
+            <div
+              class={`mb-0.5 rounded-lg ${projectDropTargetId === project.id ? "bg-primary/10 ring-1 ring-primary/40" : ""}`}
+              role="group"
+              aria-label={`${projectLabel(project)} project`}
+              ondragover={(event) => dragProjectOver(event, project.id)}
+              ondrop={(event) => dropProject(event, project.id)}
+            >
               <div class="group flex min-w-0 items-center gap-0.5">
+                <button
+                  class="grid size-6 flex-none cursor-grab place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                  draggable={!projectOrderSaving}
+                  disabled={projectOrderSaving}
+                  aria-label={`Reorder ${projectLabel(project)}`}
+                  title="Drag to reorder projects; use arrow keys for precise movement"
+                  ondragstart={(event) => startProjectDrag(event, project.id)}
+                  ondragend={finishProjectDrag}
+                  onkeydown={(event) => {
+                    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                    event.preventDefault();
+                    moveProjectBy(project.id, event.key === "ArrowUp" ? -1 : 1);
+                  }}
+                >
+                  <Icon name="grip" size={14} />
+                </button>
                 <button
                   class={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground ${workspace?.id === project.id ? "text-foreground" : ""}`}
                   aria-expanded={expanded}

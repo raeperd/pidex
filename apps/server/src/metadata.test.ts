@@ -60,6 +60,55 @@ describe("metadata store", () => {
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
   });
 
+  it("persists a manually reordered workspace list across restarts", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-order-"));
+    store = new MetadataStore();
+    const first = store.rememberWorkspace("/tmp/first-project");
+    const second = store.rememberWorkspace("/tmp/second-project");
+    const third = store.rememberWorkspace("/tmp/third-project");
+
+    store.reorderWorkspaces([third, first, second]);
+    store.close();
+    store = new MetadataStore();
+
+    expect(store.recent()).toEqual([
+      { id: third, path: "/tmp/third-project" },
+      { id: first, path: "/tmp/first-project" },
+      { id: second, path: "/tmp/second-project" },
+    ]);
+  });
+
+  it("rolls back a failed legacy workspace-order migration", async () => {
+    store = undefined;
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-migration-"));
+    process.env.PIDEX_STATE_DIR = stateDir;
+    const databasePath = path.join(stateDir, "pidex.sqlite");
+    const legacyDatabase = new DatabaseSync(databasePath);
+    legacyDatabase.exec(`
+      CREATE TABLE workspaces (
+        id TEXT PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE,
+        opened_at TEXT NOT NULL
+      );
+      INSERT INTO workspaces VALUES ('workspace_legacy', '/tmp/legacy', '2026-01-01T00:00:00Z');
+      CREATE TRIGGER block_workspace_order
+      BEFORE UPDATE ON workspaces
+      BEGIN
+        SELECT RAISE(ABORT, 'workspace order migration blocked');
+      END;
+    `);
+    legacyDatabase.close();
+
+    expect(() => new MetadataStore()).toThrow(/workspace order migration blocked/);
+
+    const inspection = new DatabaseSync(databasePath);
+    const sortOrderColumn = inspection
+      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
+      .get();
+    inspection.close();
+    expect(sortOrderColumn).toBeUndefined();
+  });
+
   it("assigns one durable task ID to a native Pi session", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-task-"));
     store = new MetadataStore();

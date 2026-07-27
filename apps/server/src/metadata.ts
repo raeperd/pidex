@@ -32,6 +32,8 @@ export class MetadataStore {
     this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
     try {
       this.sqlite.exec(METADATA_SCHEMA_SQL);
+      this.ensureWorkspaceSortOrder();
+      this.sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
       this.db = createMetadataDatabase(this.sqlite);
 
       // A process death cannot prove whether Pi completed after the last durable update.
@@ -62,15 +64,32 @@ export class MetadataStore {
   }
 
   rememberWorkspace(canonicalPath: string): string {
-    const openedAt = new Date().toISOString();
-    const row = this.db
-      .insert(workspaces)
-      .values({ id: randomUUID().replaceAll("-", ""), path: canonicalPath, openedAt })
-      .onConflictDoUpdate({ target: workspaces.path, set: { openedAt } })
-      .returning({ id: workspaces.id })
-      .get();
-    if (!row) throw new Error(`Workspace ${canonicalPath} was not persisted`);
-    return row.id;
+    return this.db.transaction((tx) => {
+      const existing = tx
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(eq(workspaces.path, canonicalPath))
+        .get();
+      if (existing) return existing.id;
+      const last = tx
+        .select({ sortOrder: workspaces.sortOrder })
+        .from(workspaces)
+        .orderBy(desc(workspaces.sortOrder))
+        .limit(1)
+        .get();
+      const row = tx
+        .insert(workspaces)
+        .values({
+          id: randomUUID().replaceAll("-", ""),
+          path: canonicalPath,
+          openedAt: new Date().toISOString(),
+          sortOrder: (last?.sortOrder ?? -1) + 1,
+        })
+        .returning({ id: workspaces.id })
+        .get();
+      if (!row) throw new Error(`Workspace ${canonicalPath} was not persisted`);
+      return row.id;
+    });
   }
 
   workspaceId(canonicalPath: string): string | undefined {
@@ -85,9 +104,25 @@ export class MetadataStore {
     return this.db
       .select({ id: workspaces.id, path: workspaces.path })
       .from(workspaces)
-      .orderBy(desc(workspaces.openedAt), workspaces.id)
+      .orderBy(workspaces.sortOrder, workspaces.id)
       .limit(100)
       .all();
+  }
+
+  reorderWorkspaces(workspaceIds: string[]): void {
+    this.db.transaction((tx) => {
+      const persistedIds = tx.select({ id: workspaces.id }).from(workspaces).all();
+      const requestedIds = new Set(workspaceIds);
+      if (
+        workspaceIds.length !== persistedIds.length ||
+        requestedIds.size !== persistedIds.length ||
+        persistedIds.some(({ id }) => !requestedIds.has(id))
+      )
+        throw new Error("Workspace order must contain every persisted workspace exactly once");
+      workspaceIds.forEach((id, sortOrder) => {
+        tx.update(workspaces).set({ sortOrder }).where(eq(workspaces.id, id)).run();
+      });
+    });
   }
 
   rememberTask(workspaceId: string, workspacePath: string, sessionKey: string): string {
@@ -452,6 +487,27 @@ export class MetadataStore {
       .run();
   }
 
+  private ensureWorkspaceSortOrder() {
+    const column = this.sqlite
+      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
+      .get();
+    if (column) return;
+    this.sqlite.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+      UPDATE workspaces
+      SET sort_order = (
+        SELECT position
+        FROM (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY opened_at DESC, id) - 1 AS position
+          FROM workspaces
+        ) AS ranked
+        WHERE ranked.id = workspaces.id
+      );
+      COMMIT;
+    `);
+  }
+
   private replay(
     db: MetadataExecutor,
     input: Pick<ActionInput, "actionId" | "clientId" | "sessionKey" | "requestDigest">,
@@ -531,8 +587,9 @@ const workspaces = sqliteTable(
     id: text("id").primaryKey(),
     path: text("path").notNull().unique(),
     openedAt: text("opened_at").notNull(),
+    sortOrder: integer("sort_order").notNull(),
   },
-  (table) => [index("workspaces_recent_idx").on(desc(table.openedAt), table.id)],
+  (table) => [index("workspaces_order_idx").on(table.sortOrder, table.id)],
 );
 
 const sessionState = sqliteTable("session_state", {
@@ -577,7 +634,8 @@ const METADATA_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
-    opened_at TEXT NOT NULL
+    opened_at TEXT NOT NULL,
+    sort_order INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -607,6 +665,10 @@ const METADATA_SCHEMA_SQL = `
     updated_at TEXT NOT NULL
   );
   DROP INDEX IF EXISTS actions_session_idx;
-  CREATE INDEX IF NOT EXISTS workspaces_recent_idx ON workspaces(opened_at DESC, id);
   CREATE INDEX IF NOT EXISTS actions_prompt_idx ON actions(session_key, run_id, kind);
+`;
+
+const WORKSPACE_ORDER_INDEX_SQL = `
+  DROP INDEX IF EXISTS workspaces_recent_idx;
+  CREATE INDEX IF NOT EXISTS workspaces_order_idx ON workspaces(sort_order, id);
 `;

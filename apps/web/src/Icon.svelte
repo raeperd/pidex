@@ -9,6 +9,7 @@
     Copy,
     Folder,
     FolderPlus,
+    GripVertical,
     Menu,
     PencilLine,
     Search,
@@ -30,6 +31,7 @@
     | "copy"
     | "folder"
     | "folder-plus"
+    | "grip"
     | "menu"
     | "rename"
     | "search"
@@ -49,6 +51,7 @@
     copy: Copy,
     folder: Folder,
     "folder-plus": FolderPlus,
+    grip: GripVertical,
     menu: Menu,
     rename: PencilLine,
     search: Search,
