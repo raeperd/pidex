@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
+    "@vitest/runner": "4.1.10",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
     "vitest": "4.1.10"
