@@ -60,6 +60,30 @@ describe("metadata store", () => {
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
   });
 
+  it("assigns one durable task ID to a native Pi session", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-task-"));
+    store = new MetadataStore();
+
+    const workspaceId = store.rememberWorkspace("/tmp/task-project");
+    const taskId = store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl");
+    expect(taskId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl")).toBe(
+      taskId,
+    );
+    expect(store.task(taskId)).toEqual({
+      id: taskId,
+      workspaceId,
+      workspacePath: "/tmp/task-project",
+      sessionKey: "/sessions/task.jsonl",
+    });
+
+    store.close();
+    store = new MetadataStore();
+    expect(store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl")).toBe(
+      taskId,
+    );
+  });
+
   it("persists action transitions and replays through Drizzle transactions", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-actions-"));
     store = new MetadataStore();
@@ -157,6 +181,7 @@ describe("metadata store", () => {
     expect(tables).toEqual([
       { name: "actions" },
       { name: "session_state" },
+      { name: "tasks" },
       { name: "workspaces" },
     ]);
     expect(existsSync(path.join(stateDir, "pidex.sqlite.pre-continuity-v1.backup"))).toBe(false);

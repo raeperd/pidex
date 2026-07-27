@@ -28,11 +28,6 @@ interface ToolResource {
   text: string;
   sourceTruncated: boolean;
 }
-interface MappedSession {
-  opaque: string;
-  info: AdapterSessionInfo;
-  workspaceId: string;
-}
 type NativeSessionReference =
   | Pick<AdapterSession, "nativeId" | "nativePath">
   | Pick<AdapterSessionInfo, "nativeId" | "nativePath">;
@@ -40,13 +35,10 @@ type NativeSessionReference =
 const nativeSessionKey = (session: NativeSessionReference) =>
   session.nativePath ?? session.nativeId;
 
-const sameNativeSession = (left: NativeSessionReference, right: NativeSessionReference) =>
-  nativeSessionKey(left) === nativeSessionKey(right);
-
 interface ChatRecord {
   id: string;
   workspaceId: string;
-  sessionOpaqueId: string;
+  taskId: string;
   sessionKey: string;
   session: AdapterSession;
   revision: number;
@@ -72,7 +64,6 @@ type EventPayload = ServerEvent extends infer Event
 
 export class ChatManager {
   private workspaces = new Map<string, WorkspaceRecord>();
-  private sessions = new Map<string, MappedSession>();
   private chats = new Map<string, ChatRecord>();
   private owners = new Map<string, string>();
 
@@ -81,20 +72,10 @@ export class ChatManager {
     private readonly metadata: MetadataStore,
   ) {}
 
-  private mapSession(workspaceId: string, info: AdapterSessionInfo): MappedSession {
-    let mapped = [...this.sessions.values()].find(
-      (entry) => sameNativeSession(entry.info, info) && entry.workspaceId === workspaceId,
-    );
-    if (!mapped) {
-      mapped = { opaque: randomUUID().replaceAll("-", ""), info, workspaceId };
-      this.sessions.set(mapped.opaque, mapped);
-    } else mapped.info = info;
-    return mapped;
-  }
-
   private publicSession(workspaceId: string, info: AdapterSessionInfo): SessionSummary {
+    const workspace = this.workspace(workspaceId);
     return {
-      id: this.mapSession(workspaceId, info).opaque,
+      id: this.metadata.rememberTask(workspaceId, workspace.path, nativeSessionKey(info)),
       ...(info.name ? { name: info.name } : {}),
       firstMessage: info.firstMessage,
       createdAt: info.createdAt,
@@ -132,18 +113,20 @@ export class ChatManager {
     return (await this.openWorkspace(workspaceId, ws.path)).sessions;
   }
 
-  private attach(workspaceId: string, session: AdapterSession, opaque?: string): ChatRecord {
+  private attach(workspaceId: string, session: AdapterSession, taskId?: string): ChatRecord {
     const sessionKey = nativeSessionKey(session);
     const existingId = this.owners.get(sessionKey);
     if (existingId) return this.chat(existingId);
     const persisted = this.metadata.sessionState(sessionKey);
     const runIsActive = persisted.run?.status === "accepted" || persisted.run?.status === "running";
     const id = randomUUID().replaceAll("-", "");
-    const sessionOpaqueId = opaque ?? randomUUID().replaceAll("-", "");
+    const workspace = this.workspace(workspaceId);
+    const persistedTaskId =
+      taskId ?? this.metadata.rememberTask(workspaceId, workspace.path, sessionKey);
     const chat: ChatRecord = {
       id,
       workspaceId,
-      sessionOpaqueId,
+      taskId: persistedTaskId,
       sessionKey,
       session,
       revision: persisted.revision,
@@ -173,32 +156,31 @@ export class ChatManager {
   async create(workspaceId: string) {
     const ws = this.workspace(workspaceId);
     const session = await this.pi.createSession(ws.path);
-    const sessionKey = nativeSessionKey(session);
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
-    const listed = fresh.sessions.find((info) => nativeSessionKey(info) === sessionKey);
-    return this.attach(
-      workspaceId,
-      session,
-      listed ? this.mapSession(workspaceId, listed).opaque : undefined,
-    );
+    return this.attach(workspaceId, session);
   }
 
-  async resume(workspaceId: string, opaque: string) {
-    const ws = this.workspace(workspaceId);
+  async resume(taskId: string) {
+    const active = [...this.chats.values()].find((chat) => chat.taskId === taskId);
+    if (active) return active;
+    const persisted = this.metadata.task(taskId);
+    if (!persisted) throw new Error("Task no longer exists");
+    let ws = this.workspaces.get(persisted.workspaceId);
+    if (!ws) {
+      await this.openWorkspace(persisted.workspaceId, persisted.workspacePath);
+      ws = this.workspace(persisted.workspaceId);
+    }
     const fresh = await this.pi.inspectWorkspace(ws.path);
     ws.info = fresh;
-    const mapped = this.sessions.get(opaque);
-    if (!mapped || mapped.workspaceId !== workspaceId)
-      throw new Error("Session ID is invalid or stale");
-    const listed = fresh.sessions.find((entry) => sameNativeSession(entry, mapped.info));
+    const listed = fresh.sessions.find((entry) => nativeSessionKey(entry) === persisted.sessionKey);
     if (!listed?.nativePath) throw new Error("Session no longer exists");
     const owner = this.owners.get(listed.nativePath);
     if (owner) return this.chat(owner);
     return this.attach(
-      workspaceId,
+      persisted.workspaceId,
       await this.pi.resumeSession(ws.path, listed.nativePath),
-      opaque,
+      taskId,
     );
   }
 
@@ -214,7 +196,7 @@ export class ChatManager {
     return {
       chatId: chat.id,
       workspaceId: chat.workspaceId,
-      sessionId: chat.sessionOpaqueId,
+      taskId: chat.taskId,
       ...(chat.session.sessionName ? { sessionName: chat.session.sessionName } : {}),
       revision: chat.revision,
       ...(chat.run ? { run: chat.run } : {}),

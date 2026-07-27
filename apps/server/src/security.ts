@@ -84,10 +84,11 @@ export function validateRequest(req: IncomingMessage, mutation: boolean, csrf: s
   if (mutation && req.headers["x-pidex-csrf"] !== csrf)
     throw new HttpError(403, "Invalid CSRF token", "csrf");
 }
-export function securityHeaders(res: ServerResponse) {
+export function securityHeaders(res: ServerResponse, scriptHashes: string[] = []) {
+  const allowedScripts = ["'self'", ...scriptHashes.map((hash) => `'sha256-${hash}'`)].join(" ");
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    `default-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* wss:; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src ${allowedScripts}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
   );
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("X-Content-Type-Options", "nosniff");

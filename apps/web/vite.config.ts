@@ -1,4 +1,4 @@
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type ConfigEnv, type Plugin, type UserConfig } from "vite";
 import { createPidexApplication } from "../server/src/main.ts";
@@ -16,8 +16,7 @@ export function createViteConfig(
 ): UserConfig {
   const development = command === "serve" && !isPreview && mode !== "test";
   const config: UserConfig = {
-    base: "./",
-    plugins: [development ? pidexApplication() : undefined, tailwindcss(), svelte()],
+    plugins: [development ? pidexApplication() : undefined, tailwindcss(), sveltekit()],
   };
   if (development)
     config.server = {

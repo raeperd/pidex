@@ -4,7 +4,7 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 
   await page.goto("/");
-  await openSessions(page);
+  await openTasks(page);
   await page.getByLabel("Add project", { exact: true }).click();
   const projectDialog = page.getByRole("dialog", { name: "Add a project" });
   await expect(projectDialog).toBeVisible();
@@ -13,19 +13,50 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
     .getByRole("button", { name: new RegExp(`^(Add|Open) ${projectName}$`) })
     .click();
 
-  await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
   await expect(page.getByLabel("Prompt")).toHaveCount(0);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toContain(`/${projectName}`);
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toBeVisible();
-  await openSessions(page);
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await openTasks(page);
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
 });
 
-test("keeps search and thread creation in the no-active-thread experience", async ({
+test("retries a deep-linked task without replacing its route", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const created = await rpcRequest<{ taskId: string }>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  const taskPath = `/tasks/${created.result.taskId}`;
+  let failBootstrap = true;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    if (failBootstrap) {
+      failBootstrap = false;
+      await route.abort("failed");
+    } else await route.continue();
+  });
+
+  await page.goto(taskPath);
+  await expect(page.getByRole("button", { name: "Retry connection" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry connection" }).click();
+
+  await expect(page).toHaveURL(taskPath);
+  await expect(page.getByRole("button", { name: "Rename" })).toBeVisible();
+});
+
+test("keeps search and task creation in the no-active-task experience", async ({
   page,
   request,
 }) => {
@@ -56,42 +87,54 @@ test("keeps search and thread creation in the no-active-thread experience", asyn
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toBeVisible();
-  await expect(page.getByText("No active thread", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(page.getByText("No active task", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Prompt")).toHaveCount(0);
   await expect(page.getByLabel("Thinking level")).toHaveCount(0);
 
-  await openSessions(page);
-  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Search projects and threads" }).click();
-  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toBeFocused();
+  await openTasks(page);
+  await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Search projects and tasks" }).click();
+  await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toBeFocused();
   await page.getByRole("button", { name: "Close search" }).click();
   await page.keyboard.press("Control+K");
-  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("textbox", { name: "Search projects and threads" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Add project", exact: true }).click();
   const projectDialog = page.getByRole("dialog", { name: "Add a project" });
   await projectDialog.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
-  await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
   await expect(page.getByLabel("Prompt")).toHaveCount(0);
 
-  await openSessions(page);
+  await openTasks(page);
   await Promise.all([
     page.waitForRequest(
       (browserRequest) =>
         browserRequest.method() === "POST" &&
         new URL(browserRequest.url()).pathname === "/api/rpc/chats/create",
     ),
-    page.getByRole("button", { name: "New thread in apps" }).click(),
+    page.getByRole("button", { name: "New task in apps" }).click(),
   ]);
 
-  await expect(page.getByRole("heading", { name: "Pick a thread to continue" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toHaveCount(0);
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
+
+  const taskUrl = page.url();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(taskUrl);
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+
+  await page.reload();
+  await expect(page).toHaveURL(taskUrl);
+  await expect(page.getByLabel("Prompt")).toBeVisible();
 });
 
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
@@ -163,11 +206,8 @@ test("stages configuration without overwriting the next draft", async ({ page, r
 
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
-  await openSessions(page);
-  await page
-    .getByRole("button", { name: /^New thread in / })
-    .first()
-    .click();
+  await openTasks(page);
+  await page.getByRole("button", { name: "New task in pidex" }).click();
 
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
@@ -292,8 +332,8 @@ async function rpcRequest<T = unknown>(
   return { response, result: ((await response.json()) as { json: T }).json };
 }
 
-async function openSessions(page: Page) {
-  const button = page.getByRole("button", { name: "Open sessions" });
+async function openTasks(page: Page) {
+  const button = page.getByRole("button", { name: "Open tasks" });
   if (await button.isVisible()) await button.click();
 }
 

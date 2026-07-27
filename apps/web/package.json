@@ -7,7 +7,7 @@
     "dev": "vite",
     "preview": "vite preview",
     "test": "vitest run --root ../.. apps/web",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "5.2.8",
@@ -22,12 +22,14 @@
     "zod": "4.1.12"
   },
   "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.70.1",
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "@tailwindcss/vite": "4.3.3",
     "svelte-check": "catalog:",
     "tailwindcss": "4.3.3",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "4.0.8"
+    "vitest": "4.1.10"
   }
 }
