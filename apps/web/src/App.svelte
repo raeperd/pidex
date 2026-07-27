@@ -296,10 +296,7 @@
   ) {
     const activate = options.activate ?? true;
     const remember = options.remember ?? true;
-    const addsWorkspace = Boolean(
-      remember && !bootstrap?.recentWorkspaces.some((project) => project.path === path),
-    );
-    if (addsWorkspace && projectOrderSaving) return undefined;
+    if (remember && projectOrderSaving) return undefined;
     const knownId =
       bootstrap?.recentWorkspaces.find((project) => project.path === path)?.id ?? projectName(path);
     try {
@@ -307,7 +304,7 @@
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
       const loaded = await api.openWorkspace(path, remember);
-      if (addsWorkspace && (options.reconcileHistory ?? true)) bootstrap = await api.bootstrap();
+      if (remember && (options.reconcileHistory ?? true)) bootstrap = await api.bootstrap();
       rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
         chatConnection.close();

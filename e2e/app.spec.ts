@@ -245,7 +245,7 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   const added = { id: "workspace_new", path: `${process.cwd()}/packages` };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    const recentWorkspaces = bootstrapCalls++ === 0 ? existing : [...existing.slice(1), added];
+    const recentWorkspaces = bootstrapCalls++ < 2 ? existing : [...existing.slice(1), added];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -283,7 +283,7 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   await expect(projects.getByRole("group")).toHaveCount(100);
   await expect(projects.getByRole("group", { name: "project-000 project" })).toHaveCount(0);
   await expect(projects.getByRole("group", { name: "packages project" })).toBeVisible();
-  expect(bootstrapCalls).toBe(2);
+  expect(bootstrapCalls).toBe(3);
 });
 
 test("reconciles concurrent project additions after opening a new project", async ({
@@ -312,7 +312,7 @@ test("reconciles concurrent project additions after opening a new project", asyn
       json: {
         json: {
           ...bootstrap.result,
-          recentWorkspaces: bootstrapCalls++ === 0 ? [initial] : [concurrent, added],
+          recentWorkspaces: bootstrapCalls++ < 2 ? [initial] : [concurrent, added],
           projectCandidates: [{ name: "project-added", path: added.path }],
         },
       },
@@ -343,6 +343,56 @@ test("reconciles concurrent project additions after opening a new project", asyn
   await expect(projects.getByRole("group", { name: "project-initial project" })).toHaveCount(0);
   await expect(projects.getByRole("group", { name: "project-concurrent project" })).toBeVisible();
   await expect(projects.getByRole("group", { name: "project-added project" })).toBeVisible();
+  expect(bootstrapCalls).toBe(3);
+});
+
+test("refreshes membership when reopening a remotely evicted project", async ({
+  page,
+  request,
+}) => {
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const stale = { id: "workspace_stale", path: "/tmp/project-stale" };
+  const kept = { id: "workspace_kept", path: "/tmp/project-kept" };
+  let bootstrapCalls = 0;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: bootstrapCalls++ === 0 ? [stale] : [kept, stale],
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...workspaceTemplate.result,
+          ...stale,
+          name: "project-stale",
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group", { name: "project-kept project" })).toBeVisible();
+  await expect(projects.getByRole("group", { name: "project-stale project" })).toBeVisible();
   expect(bootstrapCalls).toBe(2);
 });
 
