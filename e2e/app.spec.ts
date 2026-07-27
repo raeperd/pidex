@@ -768,8 +768,11 @@ async function rpcRequest<T = unknown>(
 }
 
 async function openTasks(page: Page) {
-  const button = page.getByRole("button", { name: "Open tasks" });
-  if (await button.isVisible()) await button.click();
+  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 900) {
+    const button = page.getByRole("button", { name: "Open tasks" });
+    await expect(button).toBeVisible();
+    await button.click();
+  }
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
 }
 
