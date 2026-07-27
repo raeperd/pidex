@@ -1,76 +1,111 @@
 import { realpath, stat } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { Effect } from "effect";
+import {
+  applicationError,
+  ConfigurationError,
+  HttpError,
+  type ApplicationError,
+} from "./errors.js";
 
-export class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly code = "bad_request",
-  ) {
-    super(message);
-  }
-}
+export { HttpError } from "./errors.js";
+
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
 export function parsePort(value = process.env.PORT): number {
   if (value === undefined || value === "") return 4783;
-  if (!/^\d+$/.test(value)) throw new Error("PORT must be an integer from 1024 through 65535");
+  if (!/^\d+$/.test(value))
+    throw ConfigurationError.make({
+      message: "PORT must be an integer from 1024 through 65535",
+    });
   const port = Number(value);
   if (port < 1024 || port > 65535)
-    throw new Error("PORT must be an integer from 1024 through 65535");
+    throw ConfigurationError.make({
+      message: "PORT must be an integer from 1024 through 65535",
+    });
   return port;
 }
-export async function allowedRoots(): Promise<string[]> {
+
+export const allowedRoots = Effect.fn("security.allowedRoots")(function* () {
   const configured = process.env.WORKSPACE_ROOTS?.split(path.delimiter).filter(Boolean) ?? [
     os.homedir(),
   ];
-  return Promise.all(configured.map((root) => realpath(root)));
-}
-export function isDescendant(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  return yield* Effect.forEach(
+    configured,
+    (root) =>
+      Effect.tryPromise({
+        try: () => realpath(root),
+        catch: (cause) => applicationError("workspace-roots.resolve", cause),
+      }),
+    { concurrency: "unbounded" },
   );
-}
-export async function canonicalWorkspace(candidate: string, roots: string[]): Promise<string> {
-  let canonical: string;
-  try {
-    canonical = await realpath(candidate);
-  } catch {
-    throw new HttpError(404, "Project directory does not exist", "workspace_missing");
-  }
-  if (!(await stat(canonical)).isDirectory())
-    throw new HttpError(400, "Project path is not a directory", "workspace_not_directory");
+});
+
+export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(function* (
+  candidate: string,
+  roots: string[],
+) {
+  const canonical = yield* Effect.tryPromise({
+    try: () => realpath(candidate),
+    catch: () =>
+      HttpError.make({
+        status: 404,
+        code: "workspace_missing",
+        message: "Project directory does not exist",
+      }),
+  });
+  const details = yield* Effect.tryPromise({
+    try: () => stat(canonical),
+    catch: (cause) => applicationError("workspace.stat", cause),
+  });
+  if (!details.isDirectory())
+    return yield* Effect.fail(
+      HttpError.make({
+        status: 400,
+        code: "workspace_not_directory",
+        message: "Project path is not a directory",
+      }),
+    );
   if (!roots.some((root) => isDescendant(root, canonical)))
-    throw new HttpError(403, "Project is outside WORKSPACE_ROOTS", "workspace_forbidden");
+    return yield* Effect.fail(
+      HttpError.make({
+        status: 403,
+        code: "workspace_forbidden",
+        message: "Project is outside WORKSPACE_ROOTS",
+      }),
+    );
   return canonical;
-}
-const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
-export function validateRequest(req: IncomingMessage, mutation: boolean, csrf: string): void {
+});
+
+export const validateRequest = Effect.fn("security.validateRequest")(function* (
+  req: IncomingMessage,
+  mutation: boolean,
+  csrf: string,
+) {
   const rawHost = req.headers.host;
-  if (!rawHost) throw new HttpError(400, "Missing Host header", "bad_host");
-  let requestUrl: URL;
-  let hostname: string;
-  try {
-    requestUrl = new URL(`http://${rawHost}`);
-    hostname = requestUrl.hostname;
-  } catch {
-    throw new HttpError(400, "Invalid Host header", "bad_host");
-  }
+  if (!rawHost)
+    return yield* Effect.fail(
+      HttpError.make({ status: 400, code: "bad_host", message: "Missing Host header" }),
+    );
+  const { requestUrl, hostname } = yield* parseRequestHost(rawHost);
   const tailscaleHost = process.env.PIDEX_TAILSCALE_HOST?.toLowerCase();
   if (!loopbackHosts.has(hostname.toLowerCase()) && hostname.toLowerCase() !== tailscaleHost)
-    throw new HttpError(403, "Host is not allowed", "bad_host");
+    return yield* Effect.fail(
+      HttpError.make({ status: 403, code: "bad_host", message: "Host is not allowed" }),
+    );
   if (req.headers["sec-fetch-site"] === "cross-site")
-    throw new HttpError(403, "Cross-site requests are not allowed", "cross_site");
+    return yield* Effect.fail(
+      HttpError.make({
+        status: 403,
+        code: "cross_site",
+        message: "Cross-site requests are not allowed",
+      }),
+    );
   const origin = req.headers.origin;
   if (origin) {
-    let parsed: URL;
-    try {
-      parsed = new URL(origin);
-    } catch {
-      throw new HttpError(403, "Invalid Origin", "bad_origin");
-    }
+    const parsed = yield* parseOrigin(origin);
     const loopback = loopbackHosts.has(hostname.toLowerCase());
     const requestPort = requestUrl.port || (loopback ? "80" : "443");
     const originPort = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
@@ -79,10 +114,23 @@ export function validateRequest(req: IncomingMessage, mutation: boolean, csrf: s
       originPort === requestPort &&
       ((loopback && parsed.protocol === "http:") ||
         (hostname.toLowerCase() === tailscaleHost && parsed.protocol === "https:"));
-    if (!originAllowed) throw new HttpError(403, "Origin is not allowed", "bad_origin");
+    if (!originAllowed)
+      return yield* Effect.fail(
+        HttpError.make({ status: 403, code: "bad_origin", message: "Origin is not allowed" }),
+      );
   }
   if (mutation && req.headers["x-pidex-csrf"] !== csrf)
-    throw new HttpError(403, "Invalid CSRF token", "csrf");
+    return yield* Effect.fail(
+      HttpError.make({ status: 403, code: "csrf", message: "Invalid CSRF token" }),
+    );
+});
+
+export function isDescendant(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  );
 }
 export function securityHeaders(res: ServerResponse, scriptHashes: string[] = []) {
   const allowedScripts = ["'self'", ...scriptHashes.map((hash) => `'sha256-${hash}'`)].join(" ");
@@ -95,6 +143,7 @@ export function securityHeaders(res: ServerResponse, scriptHashes: string[] = []
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 }
+
 export function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   return message
@@ -109,3 +158,24 @@ export function safeError(error: unknown) {
     )
     .slice(0, 1000);
 }
+
+function parseRequestHost(
+  rawHost: string,
+): Effect.Effect<{ requestUrl: URL; hostname: string }, HttpError> {
+  return Effect.try({
+    try: () => {
+      const requestUrl = new URL(`http://${rawHost}`);
+      return { requestUrl, hostname: requestUrl.hostname };
+    },
+    catch: () => HttpError.make({ status: 400, code: "bad_host", message: "Invalid Host header" }),
+  });
+}
+
+function parseOrigin(origin: string): Effect.Effect<URL, HttpError> {
+  return Effect.try({
+    try: () => new URL(origin),
+    catch: () => HttpError.make({ status: 403, code: "bad_origin", message: "Invalid Origin" }),
+  });
+}
+
+export type SecurityError = ApplicationError;

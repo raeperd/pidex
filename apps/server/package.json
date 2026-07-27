@@ -11,18 +11,21 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
+    "@effect/platform-node": "4.0.0-beta.101",
     "@orpc/server": "1.14.8",
     "@pidex/api": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
+    "effect": "4.0.0-beta.101",
     "ws": "8.18.3",
     "zod": "4.1.12"
   },
   "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.101",
     "@orpc/client": "1.14.8",
     "@types/node": "catalog:",
     "@types/ws": "8.18.1",
     "tsx": "4.23.1",
     "typescript": "catalog:",
-    "vitest": "4.0.8"
+    "vitest": "4.1.10"
   }
 }

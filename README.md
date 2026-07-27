@@ -45,11 +45,16 @@ apps/desktop ───────────> packages/api
 ```
 
 - `packages/api`: browser-safe Zod schemas, the oRPC contract, and protocol types.
-- `apps/server`: Node host with native oRPC, custom WebSocket, Pi, and Drizzle SQLite.
+- `apps/server`: Node host with an Effect-managed application runtime.
+- Its adapters are native oRPC, WebSocket, Pi SDK, and Drizzle SQLite.
 - `apps/web`: responsive Svelte client with typed native oRPC and WebSocket transports.
 - `apps/desktop`: sandboxed/context-isolated Electron 41 shell that starts, health-checks, logs, restarts, and shuts down the compiled server child. Its preload exposes only the native project-folder chooser.
 
 During development, `apps/web/vite.config.ts` is the composition root: it mounts the server's API and WebSocket handlers into Vite's HTTP server. Browser code under `apps/web/src` remains independent from the server implementation.
+
+Inside `apps/server`, one Effect `ManagedRuntime` composes the Pi, metadata, and chat
+services. Scoped layers own SQLite and live chat cleanup. oRPC and Node callbacks convert
+Effects to promises only at their framework boundaries.
 
 The server issues an authoritative, revisioned snapshot on a new socket, keeps a bounded monotonically numbered event buffer, replays only complete retained ranges, and resnapshots otherwise. Socket loss never stops Pi. Every prompt is recorded durably before the one Pi call; replaying its client action ID returns the stored outcome, conflicting reuse is rejected, and Stop targets the exact host-issued run ID. A crash-interrupted action is shown as ambiguous and blocks new work until acknowledged. A server restart may replace temporary chat IDs, but the SDK lists the same native sessions again. A session file has only one live writer inside one Pidex server; Pi cannot prevent an unrelated terminal or second dashboard process from opening that file concurrently.
 
