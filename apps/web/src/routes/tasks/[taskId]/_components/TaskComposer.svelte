@@ -37,6 +37,13 @@
     return commands[(currentIndex + direction + commands.length) % commands.length];
   }
 
+  export function parseCompactCommand(draft: string): { instructions?: string } | undefined {
+    const match = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
+    if (!match) return undefined;
+    const instructions = match[1]?.trim();
+    return instructions ? { instructions } : {};
+  }
+
   export async function submitComposerDraft(
     draft: string,
     actions: {
@@ -44,12 +51,12 @@
       send: () => Promise<void>;
     },
   ): Promise<"compact" | "compact-failed" | "prompt"> {
-    const compactMatch = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
-    if (!compactMatch) {
+    const command = parseCompactCommand(draft);
+    if (!command) {
       await actions.send();
       return "prompt";
     }
-    const compacted = await actions.compact(compactMatch[1]?.trim() || undefined);
+    const compacted = await actions.compact(command.instructions);
     return compacted ? "compact" : "compact-failed";
   }
 </script>
@@ -113,10 +120,11 @@
   } = $props();
 
   let promptInput = $state<HTMLTextAreaElement>();
+  let compactPending = $state(false);
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
   let commandCatalog = $derived(composerCommands(commands));
-  let commandSuggestions = $derived(slashCommandSuggestions(draft, commandCatalog));
+  let commandSuggestions = $derived(active ? [] : slashCommandSuggestions(draft, commandCatalog));
   let selectedCommandName = $state("");
   let selectedSuggestion = $derived(
     commandSuggestions.find((command) => command.name === selectedCommandName) ??
@@ -152,12 +160,19 @@
   }
 
   async function submitDraft() {
+    if (compactPending) return;
     const submittedDraft = draft;
-    const result = await submitComposerDraft(submittedDraft, { compact, send });
-    if (result !== "compact" || draft !== submittedDraft) return;
-    draft = "";
-    persistDraft();
-    resize();
+    const isCompaction = parseCompactCommand(submittedDraft) !== undefined;
+    if (isCompaction) compactPending = true;
+    try {
+      const result = await submitComposerDraft(submittedDraft, { compact, send });
+      if (result !== "compact" || draft !== submittedDraft) return;
+      draft = "";
+      persistDraft();
+      resize();
+    } finally {
+      if (isCompaction) compactPending = false;
+    }
   }
 
   function keydown(event: KeyboardEvent) {
@@ -318,7 +333,8 @@
             disabled={!draft.trim() ||
               !models.length ||
               connection !== "connected" ||
-              requiresAcknowledgement}
+              requiresAcknowledgement ||
+              compactPending}
             aria-label="Send"><Icon name="send" /></button
           >
         {/if}

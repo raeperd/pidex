@@ -956,11 +956,15 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(page.locator("details pre")).toHaveText("weighing options");
 });
 
-test("preserves edits made while slash compaction is pending", async ({ page, request }) => {
+test("preserves edits made while slash compaction is pending", async ({
+  page,
+  request,
+}, testInfo) => {
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
   let compactInput: Record<string, unknown> | undefined;
+  let compactRequests = 0;
   let snapshot: Record<string, unknown> | undefined;
 
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -985,6 +989,7 @@ test("preserves edits made while slash compaction is pending", async ({ page, re
   });
   await page.route("**/api/rpc/chats/compact", async (route) => {
     if (!snapshot) throw new Error("Expected a chat before compaction");
+    compactRequests++;
     compactInput = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
     await compactionPending;
     snapshot = {
@@ -1017,6 +1022,16 @@ test("preserves edits made while slash compaction is pending", async ({ page, re
   await prompt.fill("/compact Preserve decisions\nand constraints");
   await page.getByRole("button", { name: "Send" }).click();
   await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
+  if (testInfo.project.name === "mobile")
+    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  else {
+    await prompt.press("Enter");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(compactRequests).toBe(1);
+  }
 
   await prompt.fill("Draft typed while compaction is pending");
   releaseCompaction();

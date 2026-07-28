@@ -69,34 +69,14 @@ describe("slashCommandSuggestions", () => {
   });
 
   it("renders matching commands above the composer", () => {
-    const { body } = render(TaskComposer, {
-      props: {
-        active: false,
-        clearQueue: async () => {},
-        commands: [],
-        compact: async () => true,
-        connection: "connected",
-        delivery: "steer",
-        draft: "/com",
-        followUpCount: 0,
-        hasConfigurationDraft: false,
-        models: [],
-        openCompact: () => {},
-        persistDraft: () => {},
-        requiresAcknowledgement: false,
-        runStatus: "idle",
-        selectedModel: "",
-        selectedThinkingLevel: "low",
-        send: async () => {},
-        stageConfiguration: () => {},
-        stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
-        steeringCount: 0,
-        stop: async () => {},
-      },
-    });
+    const body = renderComposer("/com", false);
 
     expect(body).toContain('role="listbox"');
     expect(body).toContain("Manually compact the session context");
+  });
+
+  it("hides commands that cannot be expanded during active delivery", () => {
+    expect(renderComposer("/", true)).not.toContain('role="listbox"');
   });
 
   it("completes a selected command in the composer", () => {
@@ -109,3 +89,31 @@ describe("slashCommandSuggestions", () => {
     ).toEqual({ name: "compare" });
   });
 });
+
+function renderComposer(draft: string, active: boolean) {
+  return render(TaskComposer, {
+    props: {
+      active,
+      clearQueue: async () => {},
+      commands: [],
+      compact: async () => true,
+      connection: "connected",
+      delivery: "steer",
+      draft,
+      followUpCount: 0,
+      hasConfigurationDraft: false,
+      models: [],
+      openCompact: () => {},
+      persistDraft: () => {},
+      requiresAcknowledgement: false,
+      runStatus: active ? "running" : "idle",
+      selectedModel: "",
+      selectedThinkingLevel: "low",
+      send: async () => {},
+      stageConfiguration: () => {},
+      stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+      steeringCount: 0,
+      stop: async () => {},
+    },
+  }).body;
+}
