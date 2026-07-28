@@ -195,7 +195,11 @@
     }
     if (
       selectedSuggestion &&
-      (event.key === "Tab" ||
+      ((event.key === "Tab" &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey) ||
         (event.key === "Enter" && !event.shiftKey && draft !== `/${selectedSuggestion.name}`))
     ) {
       event.preventDefault();

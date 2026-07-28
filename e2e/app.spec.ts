@@ -1254,6 +1254,10 @@ test("preserves edits made while slash compaction is pending", async ({
   await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
   await prompt.press("Shift+Enter");
   await expect(prompt).toHaveValue("/com\n");
+  await prompt.fill("/com");
+  await prompt.press("Shift+Tab");
+  await expect(prompt).toHaveValue("/com");
+  await prompt.focus();
   await prompt.fill("/");
   for (let index = 0; index < 18; index++) await prompt.press("ArrowDown");
   const selectedCommand = page
