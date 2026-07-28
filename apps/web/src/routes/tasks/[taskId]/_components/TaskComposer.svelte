@@ -63,6 +63,7 @@
 
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage } from "@pidex/api";
+  import { tick } from "svelte";
   import type { ConnectionState } from "../../../_components/AppShellConnection";
   import type {
     TaskConfigurationPatch,
@@ -157,9 +158,14 @@
     promptInput?.focus();
   }
 
-  function moveCommandSelection(direction: -1 | 1) {
-    selectedCommandName =
-      nextSlashCommand(commandSuggestions, selectedSuggestion, direction)?.name ?? "";
+  async function moveCommandSelection(direction: -1 | 1) {
+    const nextCommand = nextSlashCommand(commandSuggestions, selectedSuggestion, direction);
+    selectedCommandName = nextCommand?.name ?? "";
+    if (!nextCommand) return;
+    await tick();
+    document
+      .getElementById(`${commandListId}-${nextCommand.name}`)
+      ?.scrollIntoView({ block: "nearest" });
   }
 
   async function submitDraft() {
@@ -183,7 +189,7 @@
     if (event.isComposing || event.keyCode === 229) return;
     if (selectedSuggestion && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
-      moveCommandSelection(event.key === "ArrowDown" ? 1 : -1);
+      void moveCommandSelection(event.key === "ArrowDown" ? 1 : -1);
       return;
     }
     if (

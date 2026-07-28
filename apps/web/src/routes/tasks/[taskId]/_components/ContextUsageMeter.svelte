@@ -42,9 +42,9 @@
     type="button"
     aria-label={ariaLabel}
     aria-describedby={detailsId}
+    aria-disabled={disabled}
     title="Compact task"
-    {disabled}
-    {onclick}
+    onclick={disabled ? undefined : onclick}
   >
     <svg class="context-meter__ring" viewBox="0 0 24 24" aria-hidden="true">
       <circle class="context-meter__track" cx="12" cy="12" r={RADIUS} />
@@ -113,7 +113,7 @@
     transition: background-color 140ms ease;
   }
 
-  .context-meter__trigger:disabled {
+  .context-meter__trigger[aria-disabled="true"] {
     cursor: not-allowed;
     opacity: 0.4;
   }

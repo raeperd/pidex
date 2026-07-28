@@ -1195,6 +1195,10 @@ test("preserves edits made while slash compaction is pending", async ({
         ...payload,
         json: {
           ...payload.json,
+          commands: Array.from({ length: 24 }, (_, index) => ({
+            name: `command-${String(index + 1).padStart(2, "0")}`,
+            description: `Workspace command ${index + 1}`,
+          })),
           models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
         },
       },
@@ -1250,6 +1254,21 @@ test("preserves edits made while slash compaction is pending", async ({
   await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
   await prompt.press("Shift+Enter");
   await expect(prompt).toHaveValue("/com\n");
+  await prompt.fill("/");
+  for (let index = 0; index < 18; index++) await prompt.press("ArrowDown");
+  const selectedCommand = page
+    .getByRole("listbox", { name: "Commands" })
+    .getByRole("option", { selected: true });
+  await expect(selectedCommand).toBeVisible();
+  expect(
+    await selectedCommand.evaluate((option) => {
+      const list = option.closest('[role="listbox"]');
+      if (!list) return false;
+      const optionBounds = option.getBoundingClientRect();
+      const listBounds = list.getBoundingClientRect();
+      return optionBounds.top >= listBounds.top && optionBounds.bottom <= listBounds.bottom;
+    }),
+  ).toBe(true);
   await prompt.fill("/compact Preserve decisions\nand constraints");
   await page.getByRole("button", { name: "Send" }).click();
   await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
@@ -1520,8 +1539,9 @@ test("stages configuration without overwriting the next draft", async ({
       compactsAutomatically: true,
     },
   });
-  const contextMeter = page.getByRole("button", { name: "Context window 34% used" });
+  const contextMeter = page.locator(".context-meter__trigger");
   await expect(contextMeter).toBeVisible();
+  await expect(contextMeter).toHaveRole("button");
   await contextMeter.hover();
   const contextDetails = page.getByRole("tooltip");
   await expect(contextDetails).toHaveCSS("opacity", "1");
@@ -1566,6 +1586,13 @@ test("stages configuration without overwriting the next draft", async ({
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(thinking).toBeEnabled();
+  await expect(contextMeter).toHaveAttribute("aria-disabled", "true");
+  await page.mouse.move(0, 0);
+  await contextMeter.focus();
+  await expect(contextMeter).toBeFocused();
+  await expect(contextDetails).toHaveCSS("opacity", "1");
+  await contextMeter.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
   const stagedThinking = nextThinking === "high" ? "medium" : "high";
   await thinking.selectOption(stagedThinking);
