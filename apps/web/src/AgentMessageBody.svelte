@@ -1,7 +1,7 @@
 <script lang="ts">
   import { safeAgentMessageHref, type AgentMessageNode } from "./AgentMessageParser";
-  import MarkdownCode, { type HighlightTheme } from "./MarkdownCode.svelte";
-  import MarkdownNodes from "./MarkdownNodes.svelte";
+  import AgentMessageBody from "./AgentMessageBody.svelte";
+  import AgentMessageCodeBlock, { type HighlightTheme } from "./AgentMessageCodeBlock.svelte";
 
   let {
     nodes,
@@ -21,24 +21,24 @@
     {node.text}
   {:else if node.type === "paragraph"}
     {#if unwrapParagraphs}
-      <MarkdownNodes nodes={node.children} {streaming} {theme} />
+      <AgentMessageBody nodes={node.children} {streaming} {theme} />
     {:else}
-      <p><MarkdownNodes nodes={node.children} {streaming} {theme} /></p>
+      <p><AgentMessageBody nodes={node.children} {streaming} {theme} /></p>
     {/if}
   {:else if node.type === "heading"}
     <svelte:element this={`h${Math.min(6, Math.max(1, node.depth))}`}>
-      <MarkdownNodes nodes={node.children} {streaming} {theme} />
+      <AgentMessageBody nodes={node.children} {streaming} {theme} />
     </svelte:element>
   {:else if node.type === "strong"}
-    <strong><MarkdownNodes nodes={node.children} {streaming} {theme} /></strong>
+    <strong><AgentMessageBody nodes={node.children} {streaming} {theme} /></strong>
   {:else if node.type === "emphasis"}
-    <em><MarkdownNodes nodes={node.children} {streaming} {theme} /></em>
+    <em><AgentMessageBody nodes={node.children} {streaming} {theme} /></em>
   {:else if node.type === "delete"}
-    <del><MarkdownNodes nodes={node.children} {streaming} {theme} /></del>
+    <del><AgentMessageBody nodes={node.children} {streaming} {theme} /></del>
   {:else if node.type === "codespan"}
     <code>{node.text}</code>
   {:else if node.type === "code"}
-    <MarkdownCode
+    <AgentMessageCodeBlock
       code={node.code}
       language={node.language}
       title={node.title}
@@ -46,7 +46,7 @@
       {theme}
     />
   {:else if node.type === "blockquote"}
-    <blockquote><MarkdownNodes nodes={node.children} {streaming} {theme} /></blockquote>
+    <blockquote><AgentMessageBody nodes={node.children} {streaming} {theme} /></blockquote>
   {:else if node.type === "rule"}
     <hr />
   {:else if node.type === "break"}
@@ -61,10 +61,10 @@
     {@const href = safeAgentMessageHref(node.href)}
     {#if href}
       <a {href} title={node.title} target="_blank" rel="noopener noreferrer">
-        <MarkdownNodes nodes={node.children} {streaming} {theme} />
+        <AgentMessageBody nodes={node.children} {streaming} {theme} />
       </a>
     {:else}
-      <MarkdownNodes nodes={node.children} {streaming} {theme} />
+      <AgentMessageBody nodes={node.children} {streaming} {theme} />
     {/if}
   {:else if node.type === "list"}
     <svelte:element
@@ -81,7 +81,12 @@
               aria-label={item.checked ? "Completed task" : "Incomplete task"}
             />
           {/if}
-          <MarkdownNodes nodes={item.children} {streaming} {theme} unwrapParagraphs={!item.loose} />
+          <AgentMessageBody
+            nodes={item.children}
+            {streaming}
+            {theme}
+            unwrapParagraphs={!item.loose}
+          />
         </li>
       {/each}
     </svelte:element>
@@ -92,7 +97,7 @@
           <tr>
             {#each node.header as cell (cell.key)}
               <th style:text-align={cell.align ?? undefined}>
-                <MarkdownNodes nodes={cell.children} {streaming} {theme} />
+                <AgentMessageBody nodes={cell.children} {streaming} {theme} />
               </th>
             {/each}
           </tr>
@@ -102,7 +107,7 @@
             <tr>
               {#each row as cell (cell.key)}
                 <td style:text-align={cell.align ?? undefined}>
-                  <MarkdownNodes nodes={cell.children} {streaming} {theme} />
+                  <AgentMessageBody nodes={cell.children} {streaming} {theme} />
                 </td>
               {/each}
             </tr>

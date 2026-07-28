@@ -13,12 +13,12 @@
     ToolItem,
     Workspace,
   } from "@pidex/api";
+  import AgentMessageBody from "./AgentMessageBody.svelte";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
   import { ChatConnection, type ConnectionState } from "./chat-connection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
-  import MarkdownNodes from "./MarkdownNodes.svelte";
   import { taskPath, TaskSnapshotCache } from "./task-navigation";
   import ToolCall from "./ToolCall.svelte";
 
@@ -1460,7 +1460,7 @@
                 <div
                   class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]"
                 >
-                  <MarkdownNodes
+                  <AgentMessageBody
                     nodes={parseAgentMessage(item.text)}
                     streaming={!item.complete}
                     theme={darkMode.current ? "dark" : "light"}
