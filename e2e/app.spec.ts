@@ -17,6 +17,18 @@ test("integrates the application headers with macOS window chrome", async ({ pag
   const mainTitleBar = page.locator("main > header");
   await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
   await expect(sidebarTitleBar).toHaveCSS("padding-left", "80px");
+
+  const appMark = sidebarTitleBar.locator('img[src="/pidex-icon.png"]');
+  const appTitle = sidebarTitleBar.getByText("Pidex", { exact: true });
+  await expect(appMark).toBeVisible();
+  const appMarkBox = await appMark.boundingBox();
+  const appTitleBox = await appTitle.boundingBox();
+  if (!appMarkBox || !appTitleBox) throw new Error("The desktop app identity is not visible");
+  expect(
+    Math.abs(appMarkBox.y + appMarkBox.height / 2 - (appTitleBox.y + appTitleBox.height / 2)),
+  ).toBeLessThanOrEqual(1);
+  expect(appTitleBox.x).toBeGreaterThanOrEqual(appMarkBox.x + appMarkBox.width + 6);
+
   await expect(mainTitleBar).toHaveCSS("-webkit-app-region", "drag");
   await expect(page.getByRole("button", { name: "Search projects and tasks" })).toHaveCSS(
     "-webkit-app-region",

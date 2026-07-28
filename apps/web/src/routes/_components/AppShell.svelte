@@ -1057,6 +1057,14 @@
       class={`flex min-h-14 items-center gap-2 pt-2 pr-1 pb-1.5 ${usesIntegratedTitleBar ? "window-drag-region pl-20" : "pl-2"}`}
     >
       <div class="flex min-w-0 flex-1 items-center gap-2">
+        {#if usesIntegratedTitleBar}
+          <img
+            class="size-4 flex-none rounded-[4px]"
+            src="/pidex-icon.png"
+            alt=""
+            draggable="false"
+          />
+        {/if}
         <strong class="text-[15px] font-semibold tracking-tight">Pidex</strong>
         <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
           >LOCAL</span
