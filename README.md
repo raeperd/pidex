@@ -67,10 +67,12 @@ Project resources load only after Pi trusts the project. Assistant Markdown is s
 | `PORT`                 | Server port from 1024 to 65535                                         | `4783`         |
 | `WORKSPACE_ROOTS`      | Allowed workspace roots, separated with your platform's path delimiter | Home directory |
 | `PIDEX_PROJECT_ROOTS`  | Folders searched by the project picker                                 | `~/Projects`   |
-| `PIDEX_STATE_DIR`      | Location of the pidex metadata database                                | App default    |
+| `PIDEX_STATE_DIR`      | Location of the pidex metadata database                                | Platform data  |
 | `PIDEX_TAILSCALE_HOST` | One allowed Tailscale Serve hostname                                   | Disabled       |
 
 Projects discovered through `PIDEX_PROJECT_ROOTS` must also be inside `WORKSPACE_ROOTS`. Production startup stops with an error if its port is busy.
+
+The desktop app stores metadata under Electron's platform-native `userData` directory, in a dedicated `state` subdirectory. On macOS this is normally `~/Library/Application Support/pidex/state/pidex.sqlite`. A standalone server defaults to `~/.pidex/pidex.sqlite`; `PIDEX_STATE_DIR` overrides either location.
 
 ## Troubleshooting
 
