@@ -1166,7 +1166,10 @@ test("ignores compact responses after navigating to another task", async ({ page
   ).toHaveCount(0);
 });
 
-test("stages configuration without overwriting the next draft", async ({ page, request }) => {
+test("stages configuration without overwriting the next draft", async ({
+  page,
+  request,
+}, testInfo) => {
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
@@ -1312,7 +1315,8 @@ test("stages configuration without overwriting the next draft", async ({ page, r
 
   await page.getByLabel("Delivery mode").selectOption("steer");
   await prompt.fill("/compact");
-  await page.getByRole("button", { name: "Queue" }).click();
+  if (testInfo.project.name === "mobile") await page.getByRole("button", { name: "Queue" }).click();
+  else await prompt.press("Enter");
   await expect.poll(() => mutations).toHaveLength(1);
   expect(mutations[0]).toEqual(
     expect.objectContaining({

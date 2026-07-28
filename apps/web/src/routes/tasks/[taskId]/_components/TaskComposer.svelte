@@ -177,7 +177,7 @@
     }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      void submitDraft();
+      void (active ? send() : submitDraft());
     }
   }
 </script>
