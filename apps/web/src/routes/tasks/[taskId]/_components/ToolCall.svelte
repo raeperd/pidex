@@ -124,26 +124,39 @@
   );
 </script>
 
-<div class={`tool-call tool-call--${status}`}>
+<div
+  class={[
+    "mx-1 my-2 rounded-lg px-3 py-2 font-mono text-[11.5px] leading-[1.55]",
+    status === "success"
+      ? "bg-[var(--tool-success)]"
+      : status === "error"
+        ? "bg-[var(--tool-error)]"
+        : "bg-[var(--tool-pending)]",
+  ]}
+>
   <button
     type="button"
-    class="tool-call__toggle"
+    class="block w-full cursor-pointer border-0 border-none bg-transparent p-0 text-left text-inherit"
     aria-expanded={expanded}
     onclick={() => (expanded = !expanded)}
   >
-    <span class="tool-call__title"
-      ><span class="tool-call__label">{header.label}</span>
-      {#if header.detail}<span class={header.label === "$" ? "" : "tool-call__argument"}
-          >{header.detail}</span
+    <span class="block font-semibold whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]"
+      ><span>{header.label}</span>{" "}{#if header.detail}<span
+          class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}>{header.detail}</span
         >{/if}</span
     >
     {#if !expanded && preview.skipped > 0}
-      <span class="tool-call__hint">… ({preview.skipped} earlier lines, click to expand)</span>
+      <span class="mt-[0.5em] block text-faint"
+        >… ({preview.skipped} earlier lines, click to expand)</span
+      >
     {/if}
   </button>
   {#if normalizedOutput}
-    <pre class="tool-call__output">{lines.join("\n")}</pre>
+    <pre
+      class="mt-[0.5em] mb-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{lines.join(
+        "\n",
+      )}</pre>
   {/if}
-  {#if timing}<p class="tool-call__timing">{timing}</p>{/if}
+  {#if timing}<p class="mt-[0.5em] mb-0 text-faint">{timing}</p>{/if}
   {@render children?.()}
 </div>

@@ -96,7 +96,11 @@
         <thead>
           <tr>
             {#each node.header as cell (cell.key)}
-              <th style:text-align={cell.align ?? undefined}>
+              <th
+                class:text-left={cell.align === "left"}
+                class:text-center={cell.align === "center"}
+                class:text-right={cell.align === "right"}
+              >
                 <AgentMessageBody nodes={cell.children} {streaming} {theme} />
               </th>
             {/each}
@@ -106,7 +110,11 @@
           {#each node.rows as row, rowIndex (`${node.key}:${rowIndex}`)}
             <tr>
               {#each row as cell (cell.key)}
-                <td style:text-align={cell.align ?? undefined}>
+                <td
+                  class:text-left={cell.align === "left"}
+                  class:text-center={cell.align === "center"}
+                  class:text-right={cell.align === "right"}
+                >
                   <AgentMessageBody nodes={cell.children} {streaming} {theme} />
                 </td>
               {/each}
