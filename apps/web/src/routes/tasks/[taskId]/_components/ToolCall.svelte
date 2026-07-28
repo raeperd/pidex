@@ -126,7 +126,7 @@
 
 <div
   class={[
-    "mx-1 my-2 rounded-lg px-3 py-2 font-mono text-[11.5px] leading-[1.55]",
+    "tool-call mx-1 my-2 rounded-lg px-3 py-2 font-mono text-[11.5px] leading-[1.55]",
     status === "success"
       ? "bg-[var(--tool-success)]"
       : status === "error"
@@ -153,10 +153,10 @@
   </button>
   {#if normalizedOutput}
     <pre
-      class="mt-[0.5em] mb-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{lines.join(
+      class="tool-call__output mt-[0.5em] mb-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{lines.join(
         "\n",
       )}</pre>
   {/if}
-  {#if timing}<p class="mt-[0.5em] mb-0 text-faint">{timing}</p>{/if}
+  {#if timing}<p class="tool-call__timing mt-[0.5em] mb-0 text-faint">{timing}</p>{/if}
   {@render children?.()}
 </div>
