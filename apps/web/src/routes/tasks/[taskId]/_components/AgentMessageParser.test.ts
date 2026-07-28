@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   parseCodeInfo,
-  parseMarkdown,
-  safeMarkdownHref,
-  type MarkdownNode,
-} from "./MarkdownNodes.svelte";
+  parseAgentMessage,
+  safeAgentMessageHref,
+  type AgentMessageNode,
+} from "./AgentMessageParser";
 
-describe("parseMarkdown", () => {
+describe("parseAgentMessage", () => {
   it("builds component nodes for GFM content", () => {
-    const nodes = parseMarkdown(`# Result
+    const nodes = parseAgentMessage(`# Result
 
 - [x] shipped
 - [ ] pending
@@ -27,7 +27,7 @@ describe("parseMarkdown", () => {
   });
 
   it("keeps raw HTML as text-only nodes", () => {
-    const nodes = parseMarkdown('<script>alert("nope")</script>');
+    const nodes = parseAgentMessage('<script>alert("nope")</script>');
 
     expect(nodes).toHaveLength(1);
     expect(nodes[0]).toMatchObject({
@@ -37,7 +37,7 @@ describe("parseMarkdown", () => {
   });
 
   it("removes image destinations from the render tree", () => {
-    const [paragraph] = parseMarkdown("![private diagram](https://tracker.example/pixel.png)");
+    const [paragraph] = parseAgentMessage("![private diagram](https://tracker.example/pixel.png)");
     expect(paragraph?.type).toBe("paragraph");
     const image = paragraph?.type === "paragraph" ? paragraph.children[0] : undefined;
 
@@ -46,8 +46,8 @@ describe("parseMarkdown", () => {
   });
 
   it("keeps block keys stable while a later block streams", () => {
-    const before = parseMarkdown("Stable paragraph.\n\nStreaming");
-    const after = parseMarkdown("Stable paragraph.\n\nStreaming response");
+    const before = parseAgentMessage("Stable paragraph.\n\nStreaming");
+    const after = parseAgentMessage("Stable paragraph.\n\nStreaming response");
 
     // The growing tail keeps its key so Svelte patches it instead of remounting,
     // which would discard the code block's wrap and copy state mid-stream.
@@ -55,13 +55,13 @@ describe("parseMarkdown", () => {
   });
 
   it("represents incomplete fences as code", () => {
-    const [node] = parseMarkdown("```ts\nconst value = 1;");
+    const [node] = parseAgentMessage("```ts\nconst value = 1;");
 
     expect(node).toMatchObject({ type: "code", language: "ts", code: "const value = 1;" });
   });
 
   it("decodes entities in text while preserving code spans", () => {
-    const [paragraph] = parseMarkdown("AT&amp;T &copy; &#169; &copy `&amp; &copy;`");
+    const [paragraph] = parseAgentMessage("AT&amp;T &copy; &#169; &copy `&amp; &copy;`");
     expect(paragraph?.type).toBe("paragraph");
     if (paragraph?.type !== "paragraph") throw new Error("Expected a paragraph");
 
@@ -72,7 +72,7 @@ describe("parseMarkdown", () => {
   });
 
   it("never stores raw markup in ordinary text nodes", () => {
-    const nodes = parseMarkdown("Text <img src=x onerror=alert(1)> after");
+    const nodes = parseAgentMessage("Text <img src=x onerror=alert(1)> after");
     const text = flattenText(nodes);
 
     expect(text).toContain("<img src=x onerror=alert(1)>");
@@ -80,28 +80,28 @@ describe("parseMarkdown", () => {
   });
 });
 
-describe("safeMarkdownHref", () => {
+describe("safeAgentMessageHref", () => {
   it.each([
     ["https://example.com/docs", "https://example.com/docs"],
     ["mailto:hello@example.com", "mailto:hello@example.com"],
     ["../guide", "https://pidex.example/guide"],
   ])("allows supported destination %s", (href, expected) => {
-    expect(safeMarkdownHref(href, "https://pidex.example/tasks/1")).toBe(expected);
+    expect(safeAgentMessageHref(href, "https://pidex.example/tasks/1")).toBe(expected);
   });
 
   it.each(["javascript:alert(1)", "data:text/html,unsafe", "file:///etc/passwd"])(
     "rejects unsafe destination %s",
     (href) => {
-      expect(safeMarkdownHref(href, "https://pidex.example/tasks/1")).toBeNull();
+      expect(safeAgentMessageHref(href, "https://pidex.example/tasks/1")).toBeNull();
     },
   );
 });
 
 describe("parseCodeInfo", () => {
   it("extracts a language and filename", () => {
-    expect(parseCodeInfo('tsx title="src/App.svelte"')).toEqual({
+    expect(parseCodeInfo('tsx title="src/AgentMessage.svelte"')).toEqual({
       language: "tsx",
-      title: "src/App.svelte",
+      title: "src/AgentMessage.svelte",
     });
   });
 
@@ -110,7 +110,7 @@ describe("parseCodeInfo", () => {
   });
 });
 
-function flattenText(nodes: MarkdownNode[]): string {
+function flattenText(nodes: AgentMessageNode[]): string {
   return nodes
     .map((node) => {
       if ("children" in node) return flattenText(node.children);

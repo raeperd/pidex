@@ -121,6 +121,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
 
   await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toHaveCount(0);
   await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));

@@ -1,6 +1,6 @@
 import type { ChatSnapshot } from "@pidex/api";
 import { describe, expect, it } from "vitest";
-import { taskPath, TaskSnapshotCache } from "./task-navigation";
+import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
 
 const snapshot = (taskId: string, revision: number) => ({ taskId, revision }) as ChatSnapshot;
 
