@@ -17,5 +17,5 @@
     "@types/node": "catalog:",
     "typescript": "catalog:"
   },
-  "productName": "Pidex"
+  "productName": "pidex"
 }

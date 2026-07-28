@@ -21,12 +21,17 @@ const remember = (chunk: Buffer) => {
   if (logs.length > 200) logs.splice(0, logs.length - 200);
 };
 
-function spawnServer() {
+function spawnServer(stateDirectory: string) {
   if (process.env.PIDEX_WEB_URL || quitting) return;
   const entry = path.resolve(import.meta.dirname, "../../server/dist/main.js");
   const child = spawn(process.execPath, [entry], {
     cwd: path.resolve(import.meta.dirname, "../../.."),
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PORT: String(port) },
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PIDEX_STATE_DIR: stateDirectory,
+      PORT: String(port),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   serverChild = child;
@@ -36,7 +41,7 @@ function spawnServer() {
     if (serverChild === child) serverChild = undefined;
     if (!quitting) {
       const wait = Math.min(5000, 300 * 2 ** restartCount++);
-      setTimeout(spawnServer, wait);
+      setTimeout(() => spawnServer(stateDirectory), wait);
     }
   });
 }
@@ -50,9 +55,9 @@ async function waitForServer() {
   }
   throw new Error(`Pidex server did not become ready. Recent logs:\n${logs.slice(-20).join("\n")}`);
 }
-async function createWindow() {
+async function createWindow(stateDirectory: string) {
   if (!process.env.PIDEX_WEB_URL) {
-    if (!serverChild) spawnServer();
+    if (!serverChild) spawnServer(stateDirectory);
     await waitForServer();
   }
   const window = new BrowserWindow({
@@ -78,6 +83,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
   if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
   ipcMain.handle("pidex:pick-project", async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
@@ -88,9 +94,9 @@ app.whenReady().then(() => {
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
-  void createWindow();
+  void createWindow(stateDirectory);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow(stateDirectory);
   });
 });
 app.on("before-quit", () => {
