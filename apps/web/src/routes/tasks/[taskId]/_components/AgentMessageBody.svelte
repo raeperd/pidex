@@ -97,9 +97,8 @@
           <tr>
             {#each node.header as cell (cell.key)}
               <th
-                class:text-left={cell.align === "left"}
-                class:text-center={cell.align === "center"}
-                class:text-right={cell.align === "right"}
+                class:text-center!={cell.align === "center"}
+                class:text-right!={cell.align === "right"}
               >
                 <AgentMessageBody nodes={cell.children} {streaming} {theme} />
               </th>
@@ -111,9 +110,8 @@
             <tr>
               {#each row as cell (cell.key)}
                 <td
-                  class:text-left={cell.align === "left"}
-                  class:text-center={cell.align === "center"}
-                  class:text-right={cell.align === "right"}
+                  class:text-center!={cell.align === "center"}
+                  class:text-right!={cell.align === "right"}
                 >
                   <AgentMessageBody nodes={cell.children} {streaming} {theme} />
                 </td>

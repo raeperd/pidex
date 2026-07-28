@@ -48,8 +48,8 @@
       />
       <circle
         class={[
-          "fill-none stroke-current [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
-          overloaded && "stroke-danger",
+          "fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "stroke-danger" : "stroke-current",
         ]}
         cx="12"
         cy="12"
@@ -89,8 +89,8 @@
     >
       <span
         class={[
-          "block h-full rounded-[inherit] bg-primary transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
-          overloaded && "bg-danger",
+          "block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "bg-danger" : "bg-primary",
         ]}
         style:width={`${normalizedPercent}%`}
       ></span>
