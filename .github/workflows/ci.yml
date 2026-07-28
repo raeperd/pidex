@@ -39,6 +39,8 @@ jobs:
         run: pnpm test
       - name: Check formatting, lint, and types
         run: pnpm check
+      - name: Check dead code
+        run: pnpm deadcode
       - name: Build
         run: pnpm build
       - name: Install Chromium
