@@ -16,14 +16,22 @@ test("integrates the application headers with macOS window chrome", async ({ pag
   const sidebarTitleBar = page.locator("aside > div").first();
   const mainTitleBar = page.locator("main > header");
   await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(sidebarTitleBar).toHaveCSS("height", "52px");
   await expect(sidebarTitleBar).toHaveCSS("padding-left", "80px");
+  await expect(mainTitleBar).toHaveCSS("height", "52px");
 
   const appMark = sidebarTitleBar.locator('img[src="/pidex-icon.png"]');
   const appTitle = sidebarTitleBar.getByText("Pidex", { exact: true });
+  const collapseSidebar = page.getByRole("button", { name: "Collapse sidebar" });
   await expect(appMark).toBeVisible();
   const appMarkBox = await appMark.boundingBox();
   const appTitleBox = await appTitle.boundingBox();
   if (!appMarkBox || !appTitleBox) throw new Error("The desktop app identity is not visible");
+  if (testInfo.project.name !== "mobile") {
+    const collapseSidebarBox = await collapseSidebar.boundingBox();
+    if (!collapseSidebarBox) throw new Error("The desktop sidebar control is not visible");
+    expect(collapseSidebarBox.x + collapseSidebarBox.width).toBeLessThanOrEqual(appMarkBox.x);
+  }
   expect(
     Math.abs(appMarkBox.y + appMarkBox.height / 2 - (appTitleBox.y + appTitleBox.height / 2)),
   ).toBeLessThanOrEqual(1);
@@ -36,10 +44,20 @@ test("integrates the application headers with macOS window chrome", async ({ pag
   );
 
   if (testInfo.project.name !== "mobile") {
-    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await collapseSidebar.click();
     const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
     await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
     await expect(expandSidebar).toHaveCSS("-webkit-app-region", "no-drag");
+    const expandSidebarBox = await expandSidebar.boundingBox();
+    const mainTitleBox = await mainTitleBar.locator("strong").boundingBox();
+    if (!expandSidebarBox || !mainTitleBox) throw new Error("The desktop title bar is not visible");
+    expect(
+      Math.abs(
+        expandSidebarBox.y +
+          expandSidebarBox.height / 2 -
+          (mainTitleBox.y + mainTitleBox.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
     await expandSidebar.click();
   }
 
