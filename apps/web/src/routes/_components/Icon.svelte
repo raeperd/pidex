@@ -10,6 +10,7 @@
     Folder,
     FolderOpen,
     FolderPlus,
+    GripVertical,
     Menu,
     PencilLine,
     Search,
@@ -32,6 +33,7 @@
     | "folder"
     | "folder-open"
     | "folder-plus"
+    | "grip"
     | "menu"
     | "rename"
     | "search"
@@ -52,6 +54,7 @@
     folder: Folder,
     "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
+    grip: GripVertical,
     menu: Menu,
     rename: PencilLine,
     search: Search,

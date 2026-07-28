@@ -1,7 +1,7 @@
 import { decodeHTMLStrict } from "entities";
 import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 
-export type AgentMessageAlignment = "center" | "left" | "right" | null;
+type AgentMessageAlignment = "center" | "left" | "right" | null;
 
 interface AgentMessageNodeBase {
   key: string;
@@ -40,14 +40,14 @@ export type AgentMessageNode =
   | { type: "break"; key: string }
   | { type: "rule"; key: string };
 
-export interface AgentMessageListItem {
+interface AgentMessageListItem {
   key: string;
   children: AgentMessageNode[];
   checked?: boolean;
   loose: boolean;
 }
 
-export interface AgentMessageTableCell {
+interface AgentMessageTableCell {
   key: string;
   align: AgentMessageAlignment;
   children: AgentMessageNode[];

@@ -21,6 +21,7 @@ const coveredEndpoints = [
   "system.health",
   "system.bootstrap",
   "workspaces.open",
+  "workspaces.reorder",
   "workspaces.sessions",
   "workspaces.trust",
   "chats.create",
@@ -139,6 +140,23 @@ describe.sequential("HTTP API endpoints", () => {
       path: workspacePath,
       name: "workspace",
       protectedResourcesSkipped: true,
+    });
+  });
+
+  it("workspaces.reorder", async () => {
+    const first = await api.workspaces.open({ path: workspacePath, remember: true });
+    const secondPath = path.join(tempRoot, "second-workspace");
+    await mkdir(secondPath);
+    const second = await api.workspaces.open({ path: secondPath, remember: true });
+
+    await api.workspaces.reorder({ workspaceIds: [second.id, first.id] });
+    await api.workspaces.open({ path: first.path, remember: true });
+
+    await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
+      recentWorkspaces: [
+        { id: second.id, path: second.path },
+        { id: first.id, path: first.path },
+      ],
     });
   });
 

@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ActionOutcome, RunOutcome } from "@pidex/api";
+import { MAX_RECENT_WORKSPACES, type ActionOutcome, type RunOutcome } from "@pidex/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -32,6 +32,10 @@ export class MetadataStore {
     this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
     try {
       this.sqlite.exec(METADATA_SCHEMA_SQL);
+      this.ensureWorkspaceSortOrder();
+      this.ensureWorkspaceListed();
+      this.pruneWorkspaceHistory();
+      this.sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
       this.db = createMetadataDatabase(this.sqlite);
 
       // A process death cannot prove whether Pi completed after the last durable update.
@@ -62,15 +66,63 @@ export class MetadataStore {
   }
 
   rememberWorkspace(canonicalPath: string): string {
-    const openedAt = new Date().toISOString();
-    const row = this.db
-      .insert(workspaces)
-      .values({ id: randomUUID().replaceAll("-", ""), path: canonicalPath, openedAt })
-      .onConflictDoUpdate({ target: workspaces.path, set: { openedAt } })
-      .returning({ id: workspaces.id })
-      .get();
-    if (!row) throw new Error(`Workspace ${canonicalPath} was not persisted`);
-    return row.id;
+    return this.db.transaction((tx) => {
+      const existing = tx
+        .select({ id: workspaces.id, listed: workspaces.listed })
+        .from(workspaces)
+        .where(eq(workspaces.path, canonicalPath))
+        .get();
+      const openedAt = new Date().toISOString();
+      if (existing?.listed) {
+        tx.update(workspaces).set({ openedAt }).where(eq(workspaces.id, existing.id)).run();
+        return existing.id;
+      }
+      const retained = tx
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(eq(workspaces.listed, true))
+        .limit(MAX_RECENT_WORKSPACES)
+        .all();
+      if (retained.length === MAX_RECENT_WORKSPACES) {
+        const oldest = tx
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.listed, true))
+          .orderBy(workspaces.openedAt, workspaces.id)
+          .limit(1)
+          .get();
+        if (oldest)
+          tx.update(workspaces).set({ listed: false }).where(eq(workspaces.id, oldest.id)).run();
+      }
+      const last = tx
+        .select({ sortOrder: workspaces.sortOrder })
+        .from(workspaces)
+        .where(eq(workspaces.listed, true))
+        .orderBy(desc(workspaces.sortOrder))
+        .limit(1)
+        .get();
+      const sortOrder = (last?.sortOrder ?? -1) + 1;
+      if (existing) {
+        tx.update(workspaces)
+          .set({ listed: true, openedAt, sortOrder })
+          .where(eq(workspaces.id, existing.id))
+          .run();
+        return existing.id;
+      }
+      const row = tx
+        .insert(workspaces)
+        .values({
+          id: randomUUID().replaceAll("-", ""),
+          path: canonicalPath,
+          openedAt,
+          sortOrder,
+          listed: true,
+        })
+        .returning({ id: workspaces.id })
+        .get();
+      if (!row) throw new Error(`Workspace ${canonicalPath} was not persisted`);
+      return row.id;
+    });
   }
 
   workspaceId(canonicalPath: string): string | undefined {
@@ -85,9 +137,30 @@ export class MetadataStore {
     return this.db
       .select({ id: workspaces.id, path: workspaces.path })
       .from(workspaces)
-      .orderBy(desc(workspaces.openedAt), workspaces.id)
-      .limit(100)
+      .where(eq(workspaces.listed, true))
+      .orderBy(workspaces.sortOrder, workspaces.id)
+      .limit(MAX_RECENT_WORKSPACES)
       .all();
+  }
+
+  reorderWorkspaces(workspaceIds: string[]): void {
+    this.db.transaction((tx) => {
+      const persistedIds = tx
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(eq(workspaces.listed, true))
+        .all();
+      const requestedIds = new Set(workspaceIds);
+      if (
+        workspaceIds.length !== persistedIds.length ||
+        requestedIds.size !== persistedIds.length ||
+        persistedIds.some(({ id }) => !requestedIds.has(id))
+      )
+        throw new Error("Workspace order must contain every persisted workspace exactly once");
+      workspaceIds.forEach((id, sortOrder) => {
+        tx.update(workspaces).set({ sortOrder }).where(eq(workspaces.id, id)).run();
+      });
+    });
   }
 
   rememberTask(workspaceId: string, workspacePath: string, sessionKey: string): string {
@@ -452,6 +525,53 @@ export class MetadataStore {
       .run();
   }
 
+  private ensureWorkspaceSortOrder() {
+    const column = this.sqlite
+      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
+      .get();
+    if (column) return;
+    this.sqlite.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+      UPDATE workspaces
+      SET sort_order = (
+        SELECT position
+        FROM (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY opened_at DESC, id) - 1 AS position
+          FROM workspaces
+        ) AS ranked
+        WHERE ranked.id = workspaces.id
+      );
+      COMMIT;
+    `);
+  }
+
+  private ensureWorkspaceListed() {
+    const column = this.sqlite
+      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'listed'")
+      .get();
+    if (column) return;
+    this.sqlite.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE workspaces ADD COLUMN listed INTEGER NOT NULL DEFAULT 1;
+      COMMIT;
+    `);
+  }
+
+  private pruneWorkspaceHistory() {
+    this.sqlite.exec(`
+      UPDATE workspaces
+      SET listed = 0
+      WHERE listed = 1 AND id NOT IN (
+        SELECT id
+        FROM workspaces
+        WHERE listed = 1
+        ORDER BY opened_at DESC, id
+        LIMIT ${MAX_RECENT_WORKSPACES}
+      );
+    `);
+  }
+
   private replay(
     db: MetadataExecutor,
     input: Pick<ActionInput, "actionId" | "clientId" | "sessionKey" | "requestDigest">,
@@ -531,8 +651,10 @@ const workspaces = sqliteTable(
     id: text("id").primaryKey(),
     path: text("path").notNull().unique(),
     openedAt: text("opened_at").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    listed: integer("listed", { mode: "boolean" }).notNull().default(true),
   },
-  (table) => [index("workspaces_recent_idx").on(desc(table.openedAt), table.id)],
+  (table) => [index("workspaces_order_idx").on(table.listed, table.sortOrder, table.id)],
 );
 
 const sessionState = sqliteTable("session_state", {
@@ -577,7 +699,9 @@ const METADATA_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
-    opened_at TEXT NOT NULL
+    opened_at TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    listed INTEGER NOT NULL DEFAULT 1
   );
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -607,6 +731,11 @@ const METADATA_SCHEMA_SQL = `
     updated_at TEXT NOT NULL
   );
   DROP INDEX IF EXISTS actions_session_idx;
-  CREATE INDEX IF NOT EXISTS workspaces_recent_idx ON workspaces(opened_at DESC, id);
   CREATE INDEX IF NOT EXISTS actions_prompt_idx ON actions(session_key, run_id, kind);
+`;
+
+const WORKSPACE_ORDER_INDEX_SQL = `
+  DROP INDEX IF EXISTS workspaces_recent_idx;
+  DROP INDEX IF EXISTS workspaces_order_idx;
+  CREATE INDEX workspaces_order_idx ON workspaces(listed, sort_order, id);
 `;

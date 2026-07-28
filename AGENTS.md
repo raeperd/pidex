@@ -1,4 +1,6 @@
 - Organize code top-down: put high-level entry points first and implementation details below them.
 - Prefer simple, direct solutions over unnecessary abstractions and dependencies.
+- Keep one-use code local. Do not create a new file for a function, helper, or logic used in only one place.
+- Keep route-specific components and logic under the route that owns them. Move code to a parent `_components/` directory only when multiple child routes use it.
 - Keep application wiring in one obvious composition root.
 - Prefer real integration tests over mocks; inject dependencies at boundaries when needed.

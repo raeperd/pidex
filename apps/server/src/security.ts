@@ -3,12 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import {
-  applicationError,
-  ConfigurationError,
-  HttpError,
-  type ApplicationError,
-} from "./errors.js";
+import { applicationError, ConfigurationError, HttpError } from "./errors.js";
 
 export { HttpError } from "./errors.js";
 
@@ -177,5 +172,3 @@ function parseOrigin(origin: string): Effect.Effect<URL, HttpError> {
     catch: () => HttpError.make({ status: 403, code: "bad_origin", message: "Invalid Origin" }),
   });
 }
-
-export type SecurityError = ApplicationError;

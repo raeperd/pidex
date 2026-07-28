@@ -29,7 +29,7 @@ export class ActionProtocolError extends Schema.TaggedErrorClass<ActionProtocolE
   readonly status = 409;
 }
 
-export class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>()(
+class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>()(
   "ServerOperationError",
   {
     operation: Schema.String,

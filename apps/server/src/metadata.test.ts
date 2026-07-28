@@ -6,12 +6,15 @@ import { DatabaseSync } from "node:sqlite";
 import { and, eq, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActionProtocolError, MetadataStore, requestDigest } from "./metadata.js";
 
 describe("metadata store", () => {
   let store: MetadataStore | undefined;
-  afterEach(() => store?.close());
+  afterEach(() => {
+    store?.close();
+    vi.useRealTimers();
+  });
 
   it("marks an accepted run interrupted after restart and requires acknowledgement", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-metadata-"));
@@ -58,6 +61,113 @@ describe("metadata store", () => {
     expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
     expect(store.workspaceId("/tmp/example-project")).toBe(id);
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
+  });
+
+  it("persists a manually reordered workspace list across restarts", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-order-"));
+    store = new MetadataStore();
+    const first = store.rememberWorkspace("/tmp/first-project");
+    const second = store.rememberWorkspace("/tmp/second-project");
+    const third = store.rememberWorkspace("/tmp/third-project");
+
+    store.reorderWorkspaces([third, first, second]);
+    store.close();
+    store = new MetadataStore();
+
+    expect(store.recent()).toEqual([
+      { id: third, path: "/tmp/third-project" },
+      { id: first, path: "/tmp/first-project" },
+      { id: second, path: "/tmp/second-project" },
+    ]);
+  });
+
+  it("keeps a newly remembered workspace inside the 100-project ordering boundary", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-limit-"));
+    store = new MetadataStore();
+    for (let index = 0; index < 100; index += 1) store.rememberWorkspace(`/tmp/project-${index}`);
+
+    const newestId = store.rememberWorkspace("/tmp/project-100");
+    const recent = store.recent();
+
+    expect(recent).toHaveLength(100);
+    expect(recent.at(-1)).toEqual({ id: newestId, path: "/tmp/project-100" });
+    expect(() => store!.reorderWorkspaces(recent.map(({ id }) => id).toReversed())).not.toThrow();
+  });
+
+  it("refreshes recency without changing manual order when reopening a workspace", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-recency-"));
+    vi.useFakeTimers();
+    const metadata = new MetadataStore();
+    store = metadata;
+    const remembered = Array.from({ length: 100 }, (_, index) => {
+      vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
+      const workspacePath = `/tmp/recency-project-${index}`;
+      return { id: metadata.rememberWorkspace(workspacePath), path: workspacePath };
+    });
+    const first = remembered[0];
+    const second = remembered[1];
+    if (!first || !second) throw new Error("Expected at least two remembered workspaces");
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 1)));
+
+    expect(metadata.rememberWorkspace(first.path)).toBe(first.id);
+    expect(metadata.recent()[0]).toEqual(first);
+    vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 2)));
+    metadata.rememberWorkspace("/tmp/recency-project-100");
+
+    expect(metadata.recent()).toContainEqual(first);
+    expect(metadata.recent()).not.toContainEqual(second);
+  });
+
+  it("preserves the durable ID of a project evicted from the sidebar", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-id-"));
+    const metadata = new MetadataStore();
+    store = metadata;
+    const remembered = Array.from({ length: 100 }, (_, index) => {
+      const workspacePath = `/tmp/durable-project-${index}`;
+      return { id: metadata.rememberWorkspace(workspacePath), path: workspacePath };
+    });
+    metadata.rememberWorkspace("/tmp/durable-project-100");
+    const recentPaths = new Set(metadata.recent().map(({ path: workspacePath }) => workspacePath));
+    const evicted = remembered.find(({ path: workspacePath }) => !recentPaths.has(workspacePath));
+    if (!evicted) throw new Error("Expected one workspace to leave the sidebar history");
+    metadata.close();
+    const reopened = new MetadataStore();
+    store = reopened;
+
+    expect(reopened.workspaceId(evicted.path)).toBe(evicted.id);
+    expect(reopened.rememberWorkspace(evicted.path)).toBe(evicted.id);
+    expect(reopened.recent()).toContainEqual(evicted);
+  });
+
+  it("rolls back a failed legacy workspace-order migration", async () => {
+    store = undefined;
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-migration-"));
+    process.env.PIDEX_STATE_DIR = stateDir;
+    const databasePath = path.join(stateDir, "pidex.sqlite");
+    const legacyDatabase = new DatabaseSync(databasePath);
+    legacyDatabase.exec(`
+      CREATE TABLE workspaces (
+        id TEXT PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE,
+        opened_at TEXT NOT NULL
+      );
+      INSERT INTO workspaces VALUES ('workspace_legacy', '/tmp/legacy', '2026-01-01T00:00:00Z');
+      CREATE TRIGGER block_workspace_order
+      BEFORE UPDATE ON workspaces
+      BEGIN
+        SELECT RAISE(ABORT, 'workspace order migration blocked');
+      END;
+    `);
+    legacyDatabase.close();
+
+    expect(() => new MetadataStore()).toThrow(/workspace order migration blocked/);
+
+    const inspection = new DatabaseSync(databasePath);
+    const sortOrderColumn = inspection
+      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
+      .get();
+    inspection.close();
+    expect(sortOrderColumn).toBeUndefined();
   });
 
   it("assigns one durable task ID to a native Pi session", async () => {
