@@ -13,6 +13,8 @@
     FolderPlus,
     GripVertical,
     Menu,
+    PanelLeftClose,
+    PanelLeftOpen,
     PencilLine,
     Search,
     ShieldCheck,
@@ -41,6 +43,8 @@
     | "search"
     | "send"
     | "shield"
+    | "sidebar-collapse"
+    | "sidebar-expand"
     | "stop"
     | "tool"
     | "x";
@@ -63,6 +67,8 @@
     search: Search,
     send: ArrowUp,
     shield: ShieldCheck,
+    "sidebar-collapse": PanelLeftClose,
+    "sidebar-expand": PanelLeftOpen,
     stop: Square,
     tool: Wrench,
     x: X,

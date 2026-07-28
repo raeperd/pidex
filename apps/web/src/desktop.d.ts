@@ -1,4 +1,5 @@
 export interface PidexDesktopBridge {
+  readonly usesIntegratedTitleBar: boolean;
   pickProject(): Promise<string | null>;
 }
 
