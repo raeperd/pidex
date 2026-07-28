@@ -12,7 +12,7 @@ export class PiAgent extends Context.Service<PiAgent, PiSdk>()("@pidex/server/Pi
 
 export class Chats extends Context.Service<Chats, ChatManager>()("@pidex/server/Chats") {}
 
-export type ApplicationServices = Metadata | PiAgent | Chats;
+type ApplicationServices = Metadata | PiAgent | Chats;
 export type ApplicationRuntime = ManagedRuntime.ManagedRuntime<
   ApplicationServices,
   ApplicationError
@@ -22,7 +22,7 @@ export function makeApplicationRuntime() {
   return ManagedRuntime.make(ApplicationLive);
 }
 
-export const MetadataLive = Layer.effect(
+const MetadataLive = Layer.effect(
   Metadata,
   Effect.acquireRelease(
     Effect.try({
@@ -33,9 +33,9 @@ export const MetadataLive = Layer.effect(
   ),
 );
 
-export const PiAgentLive = Layer.sync(PiAgent, () => new PiSdk());
+const PiAgentLive = Layer.sync(PiAgent, () => new PiSdk());
 
-export const ChatsLive = Layer.effect(
+const ChatsLive = Layer.effect(
   Chats,
   Effect.acquireRelease(
     Effect.gen(function* () {
@@ -49,4 +49,4 @@ export const ChatsLive = Layer.effect(
 
 const ApplicationDependencies = Layer.mergeAll(MetadataLive, PiAgentLive);
 
-export const ApplicationLive = ChatsLive.pipe(Layer.provideMerge(ApplicationDependencies));
+const ApplicationLive = ChatsLive.pipe(Layer.provideMerge(ApplicationDependencies));
