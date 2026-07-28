@@ -5,6 +5,8 @@ import { RPCLink } from "@orpc/client/fetch";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
+app.setName("pidex");
+
 const appIconPath = path.resolve(import.meta.dirname, "../assets/icon.png");
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
 const localUrl = `http://127.0.0.1:${port}`;
@@ -90,7 +92,6 @@ async function createWindow(stateDirectory: string) {
 
 app.whenReady().then(() => {
   const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
-  if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
   ipcMain.handle("pidex:pick-project", async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner) return null;
