@@ -5,6 +5,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "deadcode": "pnpm --filter @pidex/api build && pnpm --filter @pidex/web exec svelte-kit sync && knip",
     "dev": "pnpm --filter @pidex/api build && pnpm --filter @pidex/web dev",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
@@ -20,7 +21,7 @@
   "devDependencies": {
     "@playwright/test": "1.56.1",
     "@sveltejs/vite-plugin-svelte": "catalog:",
-    "@vitest/runner": "4.1.10",
+    "knip": "6.29.0",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
     "svelte": "catalog:",
@@ -29,5 +30,17 @@
   "engines": {
     "node": "24.x"
   },
-  "packageManager": "pnpm@11.16.0"
+  "packageManager": "pnpm@11.16.0",
+  "knip": {
+    "workspaces": {
+      ".": {
+        "svelte": false
+      },
+      "apps/desktop": {
+        "entry": [
+          "src/preload.ts"
+        ]
+      }
+    }
+  }
 }
