@@ -1311,6 +1311,30 @@ test("preserves edits made while slash compaction is pending", async ({
   await expect
     .poll(() => prompt.evaluate((element) => element.getBoundingClientRect().height))
     .toBeLessThan(expandedHeight);
+
+  if (testInfo.project.name !== "mobile") {
+    await emitServerEvent(page, {
+      type: "run_status",
+      eventId: 2,
+      chatId: String(snapshot?.chatId),
+      status: "idle",
+      revision: Number(snapshot?.revision),
+      run: {
+        runId: "run_requires_acknowledgement",
+        actionId: "action_requires_acknowledgement",
+        status: "accepted",
+        requiresAcknowledgement: true,
+      },
+    });
+    await prompt.fill("/compact");
+    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    await prompt.press("Enter");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(compactRequests).toBe(2);
+  }
 });
 
 test("ignores compact responses after navigating to another task", async ({ page, request }) => {

@@ -125,6 +125,13 @@
   let promptInput = $state<HTMLTextAreaElement>();
   let compactPendingByTask = $state<Record<string, boolean>>({});
   let compactPending = $derived(compactPendingByTask[taskId] ?? false);
+  let idleSubmissionDisabled = $derived(
+    !draft.trim() ||
+      !models.length ||
+      connection !== "connected" ||
+      requiresAcknowledgement ||
+      compactPending,
+  );
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
   let commandCatalog = $derived(composerCommands(commands));
@@ -208,7 +215,7 @@
     }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      if (compactPending) return;
+      if (compactPending || (!active && idleSubmissionDisabled)) return;
       void (active ? send() : submitDraft());
     }
   }
@@ -347,11 +354,7 @@
           <button
             class="chat-composer__send"
             onclick={submitDraft}
-            disabled={!draft.trim() ||
-              !models.length ||
-              connection !== "connected" ||
-              requiresAcknowledgement ||
-              compactPending}
+            disabled={idleSubmissionDisabled}
             aria-label="Send"><Icon name="send" /></button
           >
         {/if}
