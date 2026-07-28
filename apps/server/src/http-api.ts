@@ -75,6 +75,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
           Effect.gen(function* () {
             const metadata = yield* Metadata;
             const manager = yield* Chats;
+            const pi = yield* PiAgent;
             const source = yield* attemptOperation("chats.workspace", () =>
               manager.workspace(input.workspaceId),
             );
@@ -82,6 +83,9 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             const worktreePath = yield* createProjectWorktree(canonicalSource);
             let id: string | undefined;
             return yield* Effect.gen(function* () {
+              yield* attemptOperation("pi.inheritWorkspaceTrust", () =>
+                pi.inheritWorkspaceTrust(canonicalSource, worktreePath),
+              );
               const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
                 metadata.workspaceProjectId(source.id),
               );
@@ -102,6 +106,9 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
                   yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
                     Effect.catch(() => Effect.void),
                   );
+                  yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+                    pi.clearWorkspaceTrust(worktreePath),
+                  ).pipe(Effect.catch(() => Effect.void));
                   const createdWorkspaceId = id;
                   if (createdWorkspaceId)
                     yield* attemptOperation("metadata.forgetWorkspace", () =>
@@ -118,6 +125,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
           Effect.gen(function* () {
             const metadata = yield* Metadata;
             const manager = yield* Chats;
+            const pi = yield* PiAgent;
             const worktree = yield* attemptOperation("chats.workspace", () =>
               manager.workspace(input.workspaceId),
             );
@@ -147,6 +155,9 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
                 }),
               );
             yield* removeProjectWorktree(source.path, worktree.path);
+            yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+              pi.clearWorkspaceTrust(worktree.path),
+            ).pipe(Effect.catch(() => Effect.void));
             yield* attemptOperation("chats.forgetWorkspace", () =>
               manager.forgetWorkspace(worktree.id),
             );

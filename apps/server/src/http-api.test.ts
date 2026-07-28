@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -185,6 +185,7 @@ describe.sequential("HTTP API endpoints", () => {
   });
 
   it("workspaces.createWorktree", async () => {
+    await api.workspaces.trust({ workspaceId, trusted: true });
     const created = await api.workspaces.createWorktree({ workspaceId });
     const { stdout: worktreeRootOutput } = await execFileAsync(
       "git",
@@ -198,7 +199,12 @@ describe.sequential("HTTP API endpoints", () => {
     });
     const branch = branchOutput.trim();
 
-    expect(created).toMatchObject({ name: "workspace", path: expect.any(String) });
+    expect(created).toMatchObject({
+      name: "workspace",
+      path: expect.any(String),
+      trusted: true,
+      protectedResourcesSkipped: false,
+    });
     expect(created.path).toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
     expect(branch).toMatch(/^pidex\/[0-9a-f]{8}$/);
     await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
@@ -225,6 +231,10 @@ describe.sequential("HTTP API endpoints", () => {
     await expect(publicApi.system.bootstrap({})).resolves.not.toMatchObject({
       recentWorkspaces: expect.arrayContaining([{ id: created.id }]),
     });
+    const trust = JSON.parse(
+      await readFile(path.join(tempRoot, "agent", "trust.json"), "utf8"),
+    ) as Record<string, boolean>;
+    expect(trust[created.path]).toBeUndefined();
   });
 
   it("rejects removing a local workspace as a managed worktree", async () => {
