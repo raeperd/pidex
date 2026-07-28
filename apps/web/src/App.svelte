@@ -3,15 +3,16 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
-  import type {
-    Bootstrap,
-    ChatSnapshot,
-    ExtensionDialog,
-    ProjectCandidate,
-    RecentWorkspace,
-    ServerEvent,
-    ToolItem,
-    Workspace,
+  import {
+    MAX_RECENT_WORKSPACES,
+    type Bootstrap,
+    type ChatSnapshot,
+    type ExtensionDialog,
+    type ProjectCandidate,
+    type RecentWorkspace,
+    type ServerEvent,
+    type ToolItem,
+    type Workspace,
   } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
   import { ChatConnection, type ConnectionState } from "./chat-connection";
@@ -218,7 +219,7 @@
       );
       const recentWorkspaces =
         currentIndex < 0
-          ? [...bootstrap.recentWorkspaces, entry]
+          ? [...bootstrap.recentWorkspaces, entry].slice(-MAX_RECENT_WORKSPACES)
           : bootstrap.recentWorkspaces.map((project, index) =>
               index === currentIndex ? entry : project,
             );

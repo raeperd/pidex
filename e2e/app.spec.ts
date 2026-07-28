@@ -431,7 +431,10 @@ test("refreshes membership when reopening a remotely evicted project", async ({
   expect(bootstrapCalls).toBe(2);
 });
 
-test("keeps a successful project open when history refresh fails", async ({ page, request }) => {
+test("keeps a successful project open within the history limit when refresh fails", async ({
+  page,
+  request,
+}) => {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
     request,
@@ -440,9 +443,13 @@ test("keeps a successful project open when history refresh fails", async ({ page
     bootstrap.result.csrfToken,
   );
   const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
+  const existing = Array.from({ length: 100 }, (_, index) => ({
+    id: `workspace_${String(index).padStart(3, "0")}`,
+    path: `/tmp/project-${String(index).padStart(3, "0")}`,
+  }));
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    if (bootstrapCalls++ > 0) {
+    if (bootstrapCalls++ > 1) {
       await route.abort("failed");
       return;
     }
@@ -452,17 +459,19 @@ test("keeps a successful project open when history refresh fails", async ({ page
       json: {
         json: {
           ...bootstrap.result,
-          recentWorkspaces: [],
+          recentWorkspaces: existing,
           projectCandidates: [{ name: added.name, path: added.path }],
         },
       },
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const project = input.path === added.path ? added : existing[0];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      json: { json: { ...workspaceTemplate.result, ...added } },
+      json: { json: { ...workspaceTemplate.result, ...project } },
     });
   });
 
@@ -478,12 +487,11 @@ test("keeps a successful project open when history refresh fails", async ({ page
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toBe(added.path);
   await openTasks(page);
-  await expect(
-    page
-      .getByRole("navigation", { name: "Projects" })
-      .getByRole("group", { name: "project-added project" }),
-  ).toBeVisible();
-  expect(bootstrapCalls).toBe(2);
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group")).toHaveCount(100);
+  await expect(projects.getByRole("group", { name: "project-000 project" })).toHaveCount(0);
+  await expect(projects.getByRole("group", { name: "project-added project" })).toBeVisible();
+  expect(bootstrapCalls).toBe(3);
 });
 
 test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
