@@ -42,4 +42,14 @@ describe("createTaskViewControllerRegistry", () => {
     expect(transcript.scrollIfNearBottom).not.toHaveBeenCalled();
     expect(transcript.scrollLatest).not.toHaveBeenCalled();
   });
+
+  it("focuses a composer that attaches after focus was requested", () => {
+    const composer = { focus: vi.fn(), resize: vi.fn() };
+    const registry = createTaskViewControllerRegistry((callback) => callback());
+
+    registry.focusComposer();
+    registry.attachComposer(composer);
+
+    expect(composer.focus).toHaveBeenCalledOnce();
+  });
 });

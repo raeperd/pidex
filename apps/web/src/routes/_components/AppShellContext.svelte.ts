@@ -89,20 +89,38 @@ const [getAppShellContext, provideAppShellContext] = createContext<AppShellConte
 
 export { getAppShellContext, provideAppShellContext };
 
-export function createTaskViewControllerRegistry(): TaskViewControllerRegistry {
+export function createTaskViewControllerRegistry(
+  scheduleTask: (callback: () => void) => void = scheduleOnNextFrame,
+): TaskViewControllerRegistry {
   let composer: TaskComposerController | undefined;
+  let composerFocusPending = false;
   let transcript: TaskTranscriptController | undefined;
 
   return {
-    attachComposer: (controller) => (composer = controller),
+    attachComposer: (controller) => {
+      composer = controller;
+      if (!controller || !composerFocusPending) return;
+      composerFocusPending = false;
+      scheduleTask(() => {
+        if (composer === controller) controller.focus();
+      });
+    },
     attachTranscript: (controller) => (transcript = controller),
     dispose: () => {
       composer = undefined;
+      composerFocusPending = false;
       transcript = undefined;
     },
-    focusComposer: () => composer?.focus(),
+    focusComposer: () => {
+      if (composer) composer.focus();
+      else composerFocusPending = true;
+    },
     resizeComposer: () => composer?.resize(),
     scrollIfNearBottom: () => transcript?.scrollIfNearBottom(),
     scrollLatest: () => transcript?.scrollLatest(),
   };
+}
+
+function scheduleOnNextFrame(callback: () => void) {
+  requestAnimationFrame(callback);
 }
