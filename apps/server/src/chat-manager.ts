@@ -108,6 +108,24 @@ export class ChatManager {
     return value;
   }
 
+  assertWorkspaceDisposable(id: string) {
+    this.workspace(id);
+    const workspaceChats = [...this.chats.values()].filter((chat) => chat.workspaceId === id);
+    if (
+      workspaceChats.some(
+        (chat) => chat.items.length > 0 || !["idle", "error"].includes(chat.runStatus),
+      )
+    )
+      throw new Error("Workspace has a started task");
+  }
+
+  forgetWorkspace(id: string) {
+    this.assertWorkspaceDisposable(id);
+    const workspaceChats = [...this.chats.values()].filter((chat) => chat.workspaceId === id);
+    for (const chat of workspaceChats) this.dispose(chat);
+    this.workspaces.delete(id);
+  }
+
   async refreshSessions(workspaceId: string) {
     const ws = this.workspace(workspaceId);
     return (await this.openWorkspace(workspaceId, ws.path)).sessions;

@@ -1,7 +1,7 @@
 import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = z
   .string()
@@ -293,6 +293,7 @@ export const pidexApiContract = {
   workspaces: {
     open: oc.input(openWorkspaceSchema).output(workspaceSchema),
     createWorktree: oc.input(workspaceIdInputSchema).output(workspaceSchema),
+    removeWorktree: oc.input(workspaceIdInputSchema).output(okResponseSchema),
     reorder: oc.input(reorderWorkspacesSchema).output(recentWorkspacesResponseSchema),
     sessions: oc.input(workspaceIdInputSchema).output(sessionsResponseSchema),
     trust: oc.input(trustWorkspaceSchema.extend({ workspaceId: idSchema })).output(workspaceSchema),

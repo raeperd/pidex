@@ -54,6 +54,10 @@ export class PidexApiClient {
     return this.client.workspaces.createWorktree({ workspaceId });
   }
 
+  async removeWorktree(workspaceId: string): Promise<void> {
+    await this.client.workspaces.removeWorktree({ workspaceId });
+  }
+
   async reorderWorkspaces(workspaceIds: string[]): Promise<RecentWorkspace[]> {
     const result = await this.client.workspaces.reorder({ workspaceIds });
     return result.recentWorkspaces;

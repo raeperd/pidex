@@ -171,6 +171,23 @@ export class MetadataStore {
     return row?.sourceWorkspaceId ?? workspaceId;
   }
 
+  forgetWorkspace(workspaceId: string): void {
+    this.db.transaction((tx) => {
+      const sessionKeys = tx
+        .select({ sessionKey: tasks.sessionKey })
+        .from(tasks)
+        .where(eq(tasks.workspaceId, workspaceId))
+        .all()
+        .map(({ sessionKey }) => sessionKey);
+      if (sessionKeys.length > 0) {
+        tx.delete(actions).where(inArray(actions.sessionKey, sessionKeys)).run();
+        tx.delete(sessionState).where(inArray(sessionState.sessionKey, sessionKeys)).run();
+      }
+      tx.delete(tasks).where(eq(tasks.workspaceId, workspaceId)).run();
+      tx.delete(workspaces).where(eq(workspaces.id, workspaceId)).run();
+    });
+  }
+
   reorderWorkspaces(workspaceIds: string[]): void {
     this.db.transaction((tx) => {
       const persistedIds = tx

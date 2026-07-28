@@ -74,6 +74,46 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
   );
 });
 
+export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(function* (
+  sourceProjectPath: string,
+  worktreeProjectPath: string,
+) {
+  const sourceRepository = yield* inspectRepository(sourceProjectPath);
+  const worktreeRepository = yield* inspectRepository(worktreeProjectPath);
+  const branch = (yield* runGit(
+    worktreeRepository.worktreeRoot,
+    ["branch", "--show-current"],
+    "worktree_branch_read_failed",
+    "Git could not identify the worktree branch",
+  )).trim();
+  if (
+    path.resolve(sourceRepository.commonGitDirectory) !==
+      path.resolve(worktreeRepository.commonGitDirectory) ||
+    !isDescendant(managedWorktreesRoot(), worktreeRepository.worktreeRoot) ||
+    !/^pidex\/[0-9a-f]{8}$/.test(branch)
+  )
+    return yield* Effect.fail(
+      HttpError.make({
+        status: 400,
+        code: "workspace_not_managed_worktree",
+        message: "Workspace is not a managed Pidex worktree",
+      }),
+    );
+
+  yield* runGit(
+    sourceRepository.worktreeRoot,
+    ["worktree", "remove", "--force", worktreeRepository.worktreeRoot],
+    "worktree_remove_failed",
+    "Git could not remove the worktree",
+  );
+  yield* runGit(
+    sourceRepository.worktreeRoot,
+    ["branch", "-D", branch],
+    "worktree_branch_remove_failed",
+    "Git could not remove the worktree branch",
+  );
+});
+
 export function managedWorktreesRoot(): string {
   const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
   try {

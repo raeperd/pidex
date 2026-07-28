@@ -112,6 +112,9 @@
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
   let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let taskHasNoTranscript = $derived(
+    Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
+  );
   let hasTopBanner = $derived(
     Boolean(
       error ||
@@ -133,7 +136,7 @@
   let startModeEditable = $derived(
     Boolean(
       snapshot &&
-      snapshot.transcriptTotal === 0 &&
+      taskHasNoTranscript &&
       !active &&
       !chatLoading &&
       !workspaceIsWorktree(snapshot.workspaceId),
@@ -688,14 +691,15 @@
     const source = workspace;
     const previousSnapshot = snapshot;
     const sequence = ++routeSequence;
+    let worktree: Workspace | undefined;
     let created: ChatSnapshot | undefined;
     try {
       error = "";
       chatLoading = true;
-      const worktree = await api.createWorktree(source.id);
+      worktree = await api.createWorktree(source.id);
       created = await api.createChat(worktree.id);
       if (sequence !== routeSequence) {
-        await disposeCreatedTask(created);
+        await disposeCreatedWorktree(worktree, created);
         return false;
       }
       persistDraft();
@@ -715,7 +719,7 @@
       startMode = "worktree";
       await afterChat(initialDraft, true);
       if (sequence !== routeSequence) {
-        await disposeCreatedTask(created);
+        await disposeCreatedWorktree(worktree, created);
         return false;
       }
       const path = taskPath(created.taskId);
@@ -723,10 +727,25 @@
       await goto(path);
       return true;
     } catch (cause) {
+      if (worktree) await disposeCreatedWorktree(worktree, created);
+      if (sequence !== routeSequence) return false;
+      workspace = source;
+      projectPath = source.path;
+      localStorage.setItem("pidex:last-project", source.path);
+      snapshot = previousSnapshot;
       error = cause instanceof Error ? cause.message : "Could not create worktree";
       return false;
     } finally {
       if (sequence === routeSequence) chatLoading = false;
+    }
+  }
+  async function disposeCreatedWorktree(worktree: Workspace, created?: ChatSnapshot) {
+    if (created) await disposeCreatedTask(created);
+    try {
+      await api.removeWorktree(worktree.id);
+      bootstrap = await api.bootstrap();
+    } catch {
+      /* Cleanup is best-effort; the original task remains usable if removal fails. */
     }
   }
   function navigateToTask(taskId: string) {
@@ -945,7 +964,7 @@
     if (
       mode === "normal" &&
       startMode === "worktree" &&
-      snapshot.transcriptTotal === 0 &&
+      taskHasNoTranscript &&
       !workspaceIsWorktree(snapshot.workspaceId) &&
       !(await prepareWorktreeTask(submittedDraft))
     )

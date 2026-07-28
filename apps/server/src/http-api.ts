@@ -10,6 +10,7 @@ import {
   createProjectWorktree,
   discoverProjectCandidates,
   managedWorktreesRoot,
+  removeProjectWorktree,
 } from "./project-catalog.js";
 import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 
@@ -88,6 +89,42 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             return yield* attemptOperation("chats.openWorkspace", () =>
               manager.openWorkspace(id, worktreePath),
             );
+          }),
+        ),
+      ),
+      removeWorktree: workspaces.removeWorktree.handler(({ input }) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const metadata = yield* Metadata;
+            const manager = yield* Chats;
+            const worktree = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(input.workspaceId),
+            );
+            const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+              metadata.workspaceProjectId(input.workspaceId),
+            );
+            if (sourceWorkspaceId === input.workspaceId)
+              return yield* Effect.fail(
+                HttpError.make({
+                  status: 400,
+                  code: "workspace_not_managed_worktree",
+                  message: "Workspace is not a managed Pidex worktree",
+                }),
+              );
+            const source = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(sourceWorkspaceId),
+            );
+            yield* attemptOperation("chats.assertWorkspaceDisposable", () =>
+              manager.assertWorkspaceDisposable(worktree.id),
+            );
+            yield* removeProjectWorktree(source.path, worktree.path);
+            yield* attemptOperation("chats.forgetWorkspace", () =>
+              manager.forgetWorkspace(worktree.id),
+            );
+            yield* attemptOperation("metadata.forgetWorkspace", () =>
+              metadata.forgetWorkspace(worktree.id),
+            );
+            return { ok: true };
           }),
         ),
       ),

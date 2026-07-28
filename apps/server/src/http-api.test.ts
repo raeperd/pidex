@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -26,6 +26,7 @@ const coveredEndpoints = [
   "system.bootstrap",
   "workspaces.open",
   "workspaces.createWorktree",
+  "workspaces.removeWorktree",
   "workspaces.reorder",
   "workspaces.sessions",
   "workspaces.trust",
@@ -185,14 +186,21 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("workspaces.createWorktree", async () => {
     const created = await api.workspaces.createWorktree({ workspaceId });
+    const { stdout: worktreeRootOutput } = await execFileAsync(
+      "git",
+      ["rev-parse", "--show-toplevel"],
+      { cwd: created.path, encoding: "utf8" },
+    );
+    const worktreeRoot = worktreeRootOutput.trim();
     const { stdout: branchOutput } = await execFileAsync("git", ["branch", "--show-current"], {
       cwd: created.path,
       encoding: "utf8",
     });
+    const branch = branchOutput.trim();
 
     expect(created).toMatchObject({ name: "workspace", path: expect.any(String) });
     expect(created.path).toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
-    expect(branchOutput.trim()).toMatch(/^pidex\/[0-9a-f]{8}$/);
+    expect(branch).toMatch(/^pidex\/[0-9a-f]{8}$/);
     await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
       recentWorkspaces: expect.arrayContaining([
         {
@@ -202,6 +210,27 @@ describe.sequential("HTTP API endpoints", () => {
           worktree: true,
         },
       ]),
+    });
+    await api.chats.create({ workspaceId: created.id });
+
+    await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).resolves.toEqual({
+      ok: true,
+    });
+    await expect(access(worktreeRoot)).rejects.toThrow();
+    await expect(
+      execFileAsync("git", ["show-ref", "--verify", `refs/heads/${branch}`], {
+        cwd: workspacePath,
+      }),
+    ).rejects.toThrow();
+    await expect(publicApi.system.bootstrap({})).resolves.not.toMatchObject({
+      recentWorkspaces: expect.arrayContaining([{ id: created.id }]),
+    });
+  });
+
+  it("rejects removing a local workspace as a managed worktree", async () => {
+    await expect(api.workspaces.removeWorktree({ workspaceId })).rejects.toMatchObject({
+      code: "workspace_not_managed_worktree",
+      status: 400,
     });
   });
 

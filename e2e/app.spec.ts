@@ -957,6 +957,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   let localSnapshot: Record<string, unknown> | undefined;
   let chatCreations = 0;
   let worktreeCreations = 0;
+  const removedWorktrees: string[] = [];
   const sentPrompts: Record<string, unknown>[] = [];
   await installFakeWebSocket(page);
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -984,6 +985,15 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       },
     });
   });
+  await page.route("**/api/rpc/workspaces/removeWorktree", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
+    removedWorktrees.push(input.workspaceId);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ok: true } },
+    });
+  });
   await page.route("**/api/rpc/chats/create", async (route) => {
     chatCreations += 1;
     if (chatCreations === 1) {
@@ -1008,6 +1018,10 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
         contentType: "application/json",
         json: { json: localSnapshot },
       });
+      return;
+    }
+    if (chatCreations === 2) {
+      await route.abort("failed");
       return;
     }
     if (!localSnapshot) throw new Error("Expected the local task to exist");
@@ -1064,6 +1078,13 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
 
   await expect.poll(() => worktreeCreations).toBe(1);
   await expect.poll(() => chatCreations).toBe(2);
+  await expect.poll(() => removedWorktrees).toEqual(["worktree_workspace_e2e"]);
+  await expect.poll(() => sentPrompts).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => worktreeCreations).toBe(2);
+  await expect.poll(() => chatCreations).toBe(3);
   await expect.poll(() => sentPrompts).toHaveLength(1);
   expect(sentPrompts[0]).toEqual(
     expect.objectContaining({
@@ -1131,6 +1152,8 @@ const answer = 42;
       timestamp: "2026-07-27T00:00:00.000Z",
     },
   });
+
+  await expect(page.getByRole("button", { name: "Start in Work locally" })).toBeDisabled();
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
