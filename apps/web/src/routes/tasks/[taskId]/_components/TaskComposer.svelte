@@ -188,7 +188,8 @@
     }
     if (
       selectedSuggestion &&
-      (event.key === "Tab" || (event.key === "Enter" && draft !== `/${selectedSuggestion.name}`))
+      (event.key === "Tab" ||
+        (event.key === "Enter" && !event.shiftKey && draft !== `/${selectedSuggestion.name}`))
     ) {
       event.preventDefault();
       completeCommand(selectedSuggestion);

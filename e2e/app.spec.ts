@@ -1246,6 +1246,10 @@ test("preserves edits made while slash compaction is pending", async ({
 
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
+  await prompt.fill("/com");
+  await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
+  await prompt.press("Shift+Enter");
+  await expect(prompt).toHaveValue("/com\n");
   await prompt.fill("/compact Preserve decisions\nand constraints");
   await page.getByRole("button", { name: "Send" }).click();
   await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
