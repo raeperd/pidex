@@ -14,6 +14,11 @@ allowBuilds:
   msgpackr-extract: false
   protobufjs: false
 
+packageExtensions:
+  "@effect/vitest@4.0.0-beta.101":
+    dependencies:
+      "@vitest/runner": 4.1.10
+
 catalog:
   "@types/node": 24.12.4
   "@sveltejs/vite-plugin-svelte": 7.2.0

@@ -5,6 +5,8 @@ import { RPCLink } from "@orpc/client/fetch";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
+app.setName("pidex");
+
 const appIconPath = app.isPackaged
   ? path.join(process.resourcesPath, "icon.png")
   : path.resolve(import.meta.dirname, "../assets/icon.png");
@@ -73,8 +75,14 @@ async function createWindow(stateDirectory: string) {
     minWidth: 320,
     minHeight: 560,
     backgroundColor: "#181b18",
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
-      preload: path.join(import.meta.dirname, "preload.js"),
+      preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -90,7 +98,6 @@ async function createWindow(stateDirectory: string) {
 
 app.whenReady().then(() => {
   const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
-  if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
   ipcMain.handle("pidex:pick-project", async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner) return null;

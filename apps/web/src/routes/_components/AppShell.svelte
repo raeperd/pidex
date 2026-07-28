@@ -30,6 +30,7 @@
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+  const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
 
   let { children }: { children: Snippet } = $props();
@@ -49,6 +50,7 @@
   let error = $state("");
   let bootstrapError = $state("");
   let drawerOpen = $state(false);
+  let sidebarCollapsed = $state(false);
   let projectLoading = $state(false);
   let projectLoadingId = $state("");
   let projectBatchLoading = $state(false);
@@ -73,6 +75,8 @@
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
   let searchInput = $state<HTMLInputElement>();
+  let collapseSidebarButton = $state<HTMLButtonElement>();
+  let expandSidebarButton = $state<HTMLButtonElement>();
   let relativeNow = $state(Date.now());
   let dialogValue = $state<string | boolean>("");
   let dialogElement = $state<HTMLDialogElement>();
@@ -104,6 +108,17 @@
   });
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
+  );
+  let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let hasTopBanner = $derived(
+    Boolean(
+      error ||
+      (snapshot && connection !== "connected" && !routeLoading) ||
+      snapshot?.run?.requiresAcknowledgement ||
+      workspace?.protectedResourcesSkipped ||
+      workspace?.resourceDiagnostics.length ||
+      (workspace && workspace.models.length === 0),
+    ),
   );
   let configurationDraft = $derived(snapshot ? (configurationDrafts[snapshot.taskId] ?? {}) : {});
   let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
@@ -1073,6 +1088,16 @@
     search = "";
     searchOpen = false;
   }
+  async function collapseSidebar() {
+    sidebarCollapsed = true;
+    await tick();
+    expandSidebarButton?.focus();
+  }
+  async function expandSidebar() {
+    sidebarCollapsed = false;
+    await tick();
+    collapseSidebarButton?.focus();
+  }
   function globalKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
       if (document.querySelector("dialog[open]")) return;
@@ -1130,7 +1155,7 @@
 </svelte:head>
 
 <div
-  class="grid h-dvh w-full grid-cols-[304px_minmax(0,1fr)] overflow-hidden max-[900px]:grid-cols-1"
+  class={`grid h-dvh w-full overflow-hidden max-[900px]:grid-cols-1 ${sidebarCollapsed ? "grid-cols-1" : "grid-cols-[304px_minmax(0,1fr)]"}`}
 >
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
@@ -1141,12 +1166,32 @@
 
   <aside
     id="tasks-drawer"
-    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${sidebarCollapsed ? "min-[901px]:hidden" : ""} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Tasks"
     inert={mobileViewport.current && !drawerOpen}
   >
-    <div class="flex min-h-14 items-center gap-2 px-1 pt-2 pr-1 pb-1.5 pl-2">
+    <div
+      class={`flex items-center gap-2 pr-1 ${usesIntegratedTitleBar ? "window-drag-region h-13 min-h-13 pl-20" : "min-h-14 pt-2 pb-1.5 pl-2"}`}
+    >
+      <button
+        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
+        bind:this={collapseSidebarButton}
+        aria-label="Collapse sidebar"
+        aria-controls="tasks-drawer"
+        aria-expanded="true"
+        onclick={collapseSidebar}
+      >
+        <Icon name="sidebar-collapse" />
+      </button>
       <div class="flex min-w-0 flex-1 items-center gap-2">
+        {#if usesIntegratedTitleBar}
+          <img
+            class="size-4 flex-none rounded-[4px]"
+            src="/pidex-icon.png"
+            alt=""
+            draggable="false"
+          />
+        {/if}
         <strong class="text-[15px] font-semibold tracking-tight">Pidex</strong>
         <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
           >LOCAL</span
@@ -1344,11 +1389,25 @@
     class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background"
     inert={mobileViewport.current && drawerOpen}
   >
-    <header
-      class="z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13"
-    >
+    {#if isNewTask}
+      {#if usesIntegratedTitleBar}<div
+          class="window-drag-region absolute inset-x-0 top-0 z-8 h-8"
+          aria-hidden="true"
+        ></div>{/if}
+      {#if sidebarCollapsed}
+        <button
+          class={`absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
+          bind:this={expandSidebarButton}
+          aria-label="Expand sidebar"
+          aria-controls="tasks-drawer"
+          aria-expanded="false"
+          onclick={expandSidebar}
+        >
+          <Icon name="sidebar-expand" size={19} />
+        </button>
+      {/if}
       <button
-        class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
+        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
         aria-label="Open tasks"
         aria-expanded={drawerOpen}
         aria-controls="tasks-drawer"
@@ -1356,41 +1415,71 @@
       >
         <Icon name="menu" size={19} />
       </button>
-      <div class="min-w-0 flex-1">
-        <strong
-          class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
-          >{currentTitle}</strong
+    {:else}
+      <header
+        class={`z-8 flex flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 backdrop-blur-xl max-[900px]:px-2.5 ${usesIntegratedTitleBar ? `window-drag-region h-13 min-h-13 py-0 ${sidebarCollapsed ? "pl-20" : "max-[900px]:pl-20"}` : "min-h-14 py-1.5 max-[560px]:min-h-13"}`}
+      >
+        {#if sidebarCollapsed}
+          <button
+            class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
+            bind:this={expandSidebarButton}
+            aria-label="Expand sidebar"
+            aria-controls="tasks-drawer"
+            aria-expanded="false"
+            onclick={expandSidebar}
+          >
+            <Icon name="sidebar-expand" size={19} />
+          </button>
+        {/if}
+        <button
+          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
+          aria-label="Open tasks"
+          aria-expanded={drawerOpen}
+          aria-controls="tasks-drawer"
+          onclick={() => (drawerOpen = true)}
         >
-        <div class="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-faint capitalize">
-          <span class="max-[560px]:hidden">{workspace?.name ?? "No project"}</span>
-          <span class="opacity-45 max-[560px]:hidden">/</span>
-          <span
-            class={`size-1.5 rounded-full ${connection === "connected" ? "bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-faint"}`}
-          ></span>
-          <span>{routeLoading ? "syncing" : snapshot ? connection : "local"}</span>
-        </div>
-      </div>
-      {#if snapshot}
-        <div class="flex gap-1">
-          <button
-            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
-            onclick={openRename}
-            disabled={active}
-            aria-label="Rename"
-            title="Rename task"
-            ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
+          <Icon name="menu" size={19} />
+        </button>
+        <div class="min-w-0 flex-1">
+          <strong
+            class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
+            >{currentTitle}</strong
           >
-          <button
-            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
-            onclick={openCompact}
-            disabled={active}
-            aria-label="Compact"
-            title="Compact task"
-            ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
-          >
+          {#if !usesIntegratedTitleBar || mobileViewport.current}
+            <div class="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-faint capitalize">
+              <span class="max-[560px]:hidden">{workspace?.name ?? "No project"}</span>
+              <span class="opacity-45 max-[560px]:hidden">/</span>
+              <span
+                class={`size-1.5 rounded-full ${connection === "connected" ? "bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-faint"}`}
+              ></span>
+              <span>{routeLoading ? "syncing" : snapshot ? connection : "local"}</span>
+            </div>
+          {/if}
         </div>
-      {/if}
-    </header>
+        {#if snapshot}
+          <div class="flex gap-1">
+            <button
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
+              onclick={openRename}
+              disabled={active}
+              aria-label="Rename"
+              title="Rename task"
+              ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
+            >
+            <button
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
+              onclick={openCompact}
+              disabled={active}
+              aria-label="Compact"
+              title="Compact task"
+              ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
+            >
+          </div>
+        {/if}
+      </header>
+    {/if}
+
+    {#if isNewTask && hasTopBanner}<div class="h-13 flex-none" aria-hidden="true"></div>{/if}
 
     {#if error}
       <div

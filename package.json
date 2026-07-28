@@ -39,7 +39,7 @@
       },
       "apps/desktop": {
         "entry": [
-          "src/preload.ts"
+          "src/preload.cts"
         ]
       }
     }

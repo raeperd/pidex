@@ -105,6 +105,18 @@
     outline: 2px solid color-mix(in srgb, var(--primary) 68%, transparent);
     outline-offset: 2px;
   }
+
+  .window-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .window-drag-region button,
+  .window-drag-region a,
+  .window-drag-region input,
+  .window-drag-region textarea,
+  .window-drag-region select {
+    -webkit-app-region: no-drag;
+  }
 }
 
 @layer components {
