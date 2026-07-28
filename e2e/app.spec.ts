@@ -1311,7 +1311,7 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   expect(mutations).toEqual([]);
 
   await page.getByLabel("Delivery mode").selectOption("steer");
-  await prompt.fill("Guide the current turn");
+  await prompt.fill("/compact");
   await page.getByRole("button", { name: "Queue" }).click();
   await expect.poll(() => mutations).toHaveLength(1);
   expect(mutations[0]).toEqual(

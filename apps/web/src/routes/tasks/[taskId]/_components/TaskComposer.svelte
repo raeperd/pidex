@@ -307,7 +307,7 @@
           >
           <button
             class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
-            onclick={submitDraft}
+            onclick={send}
             disabled={!draft.trim() || connection !== "connected"}
             aria-label="Queue">Queue</button
           >
