@@ -941,11 +941,15 @@
   }
   async function compact(instructions?: string) {
     if (!snapshot) return false;
+    const chatId = snapshot.chatId;
     try {
-      snapshot = await api.compact(snapshot.chatId, snapshot.revision, instructions);
+      const compacted = await api.compact(chatId, snapshot.revision, instructions);
+      if (snapshot?.chatId !== chatId) return false;
+      snapshot = compacted;
       compactDialogElement?.close();
       return true;
     } catch (cause) {
+      if (snapshot?.chatId !== chatId) return false;
       error = cause instanceof Error ? cause.message : "Compaction failed";
       return false;
     }

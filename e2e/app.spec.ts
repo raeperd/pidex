@@ -1026,6 +1026,128 @@ test("preserves edits made while slash compaction is pending", async ({ page, re
   await expect(prompt).toHaveValue("Draft typed while compaction is pending");
 });
 
+test("ignores compact responses after navigating to another task", async ({ page, request }) => {
+  await installFakeWebSocket(page);
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const first = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  const second = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  const now = new Date().toISOString();
+  const sessions = [
+    {
+      id: String(first.result.taskId),
+      name: "First task",
+      firstMessage: "",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 0,
+    },
+    {
+      id: String(second.result.taskId),
+      name: "Second task",
+      firstMessage: "",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 0,
+    },
+  ];
+  const secondUsage = {
+    tokens: 20,
+    contextWindow: 100,
+    percent: 20,
+    totalProcessedTokens: 20,
+    compactsAutomatically: true,
+  };
+  const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let compactRequested = false;
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    await route.fulfill({ response, json: { ...payload, json: { ...payload.json, sessions } } });
+  });
+  await page.route("**/api/rpc/workspaces/sessions", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { sessions } },
+    });
+  });
+  await page.route("**/api/rpc/chats/resume", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json:
+          input.taskId === second.result.taskId
+            ? { ...payload.json, contextUsage: secondUsage }
+            : payload.json,
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/compact", async (route) => {
+    compactRequested = true;
+    await compactionPending;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...first.result,
+          revision: Number(first.result.revision) + 1,
+          contextUsage: { ...secondUsage, tokens: 10, percent: 10, totalProcessedTokens: 10 },
+        },
+      },
+    });
+  });
+
+  await page.goto(`/tasks/${String(first.result.taskId)}`);
+  await openTasks(page);
+  const prompt = page.getByLabel("Prompt");
+  await expect(prompt).toBeVisible();
+  await prompt.fill("/compact");
+  const compactResponse = page.waitForResponse("**/api/rpc/chats/compact");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactRequested).toBe(true);
+
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(
+    page.getByRole("button", { name: "Compact task (context window 20% used)" }),
+  ).toBeVisible();
+  releaseCompaction();
+  await compactResponse;
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+
+  await expect(
+    page.getByRole("button", { name: "Compact task (context window 20% used)" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Compact task (context window 10% used)" }),
+  ).toHaveCount(0);
+});
+
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
