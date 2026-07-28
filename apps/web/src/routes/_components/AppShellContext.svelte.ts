@@ -64,6 +64,7 @@ export interface AppShellContext {
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
     send(): Promise<void>;
+    start(draft: string, configuration: TaskConfigurationPatch): Promise<void>;
     setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
     stageConfiguration(patch: TaskConfigurationPatch): void;

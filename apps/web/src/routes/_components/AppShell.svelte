@@ -32,6 +32,11 @@
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+  interface StarterPrompt {
+    readonly configuration: ChatConfiguration;
+    readonly draft: string;
+    readonly text: string;
+  }
 
   let { children }: { children: Snippet } = $props();
 
@@ -239,6 +244,7 @@
       loadToolOutput,
       persistDraft,
       send,
+      start: startTask,
       setDelivery: (value) => (delivery = value),
       setDraft: (value) => (draft = value),
       stageConfiguration,
@@ -538,7 +544,12 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  async function newTask(target = workspace) {
+  async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
+    const text = submittedDraft.trim();
+    if (!text) return;
+    await newTask(workspace, { configuration, draft: submittedDraft, text });
+  }
+  async function newTask(target = workspace, starterPrompt?: StarterPrompt) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
     let created: ChatSnapshot | undefined;
@@ -562,8 +573,8 @@
       rememberWorkspace(rememberedTarget);
       localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
-      draft = "";
-      await afterChat("", true);
+      draft = starterPrompt?.draft ?? "";
+      await afterChat(draft, !starterPrompt);
       if (sequence !== routeSequence) {
         await disposeCreatedTask(created);
         return;
@@ -571,6 +582,11 @@
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path);
+      if (starterPrompt && snapshot?.chatId === created.chatId) {
+        stageConfiguration(starterPrompt.configuration);
+        if (!(await applyConfigurationDraft()) || snapshot?.chatId !== created.chatId) return;
+        await submitPrompt(starterPrompt.text, starterPrompt.draft, "normal");
+      }
     } catch (cause) {
       if (sequence !== routeSequence) {
         if (created) await disposeCreatedTask(created);
