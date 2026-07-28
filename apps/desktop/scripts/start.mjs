@@ -68,9 +68,13 @@ function rebrandMacOSBundle(appBundle, iconPath) {
   setPlistString(plistPath, "CFBundleIconFile", "pidex.icns");
   setPlistString(plistPath, "CFBundleIdentifier", "dev.pidex");
   setPlistString(plistPath, "CFBundleName", "pidex");
-  execFileSync("/usr/bin/codesign", ["--force", "--sign", "-", appBundle]);
+  execFileSync(macOSUtilityPath("codesign"), ["--force", "--sign", "-", appBundle]);
 }
 
 function setPlistString(plistPath, key, value) {
-  execFileSync("/usr/bin/plutil", ["-replace", key, "-string", value, plistPath]);
+  execFileSync(macOSUtilityPath("plutil"), ["-replace", key, "-string", value, plistPath]);
+}
+
+function macOSUtilityPath(name) {
+  return path.join("/", "usr", "bin", name);
 }
