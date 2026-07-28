@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Icon from "./Icon.svelte";
+  import Icon from "../../../_components/Icon.svelte";
 
   let { level, text }: { level: "error" | "info" | "warning"; text: string } = $props();
 </script>

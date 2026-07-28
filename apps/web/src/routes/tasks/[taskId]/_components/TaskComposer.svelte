@@ -1,9 +1,12 @@
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage, Workspace } from "@pidex/api";
-  import type { ConnectionState } from "./AppShellConnection";
-  import type { TaskConfigurationPatch, TaskDelivery } from "./AppShellContext.svelte";
+  import type { ConnectionState } from "../../../_components/AppShellConnection";
+  import type {
+    TaskConfigurationPatch,
+    TaskDelivery,
+  } from "../../../_components/AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
-  import Icon from "./Icon.svelte";
+  import Icon from "../../../_components/Icon.svelte";
 
   let {
     active,

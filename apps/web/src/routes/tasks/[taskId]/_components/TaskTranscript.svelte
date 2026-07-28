@@ -3,8 +3,8 @@
   import { MediaQuery } from "svelte/reactivity";
   import type { TranscriptItem, ToolItem } from "@pidex/api";
   import AgentMessage from "./AgentMessage.svelte";
-  import type { TaskToolOutput, TaskToolTiming } from "./AppShellContext.svelte";
-  import Icon from "./Icon.svelte";
+  import type { TaskToolOutput, TaskToolTiming } from "../../../_components/AppShellContext.svelte";
+  import Icon from "../../../_components/Icon.svelte";
   import TaskNotice from "./TaskNotice.svelte";
   import ToolCall from "./ToolCall.svelte";
   import UserMessage from "./UserMessage.svelte";

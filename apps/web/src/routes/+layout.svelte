@@ -7,5 +7,4 @@
   let { children } = $props();
 </script>
 
-<AppShell />
-{@render children()}
+<AppShell>{@render children()}</AppShell>

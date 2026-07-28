@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { onMount, tick, untrack, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
@@ -25,13 +25,13 @@
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
   import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
-  import TaskComposer from "./TaskComposer.svelte";
-  import TaskTranscript from "./TaskTranscript.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+
+  let { children }: { children: Snippet } = $props();
 
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
@@ -1366,137 +1366,7 @@
       </div>
     {/if}
 
-    {#if snapshot}
-      <TaskTranscript
-        bind:this={null, taskViews.attachTranscript}
-        items={snapshot.items}
-        transcriptStart={snapshot.transcriptStart}
-        {loadingEarlier}
-        {loadEarlier}
-        {loadToolOutput}
-        {toolElapsedNow}
-        {toolOutputs}
-        {toolTimings}
-      />
-    {:else}
-      <section
-        class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions text"
-      >
-        {#if bootstrapError && !bootstrap}
-          <div
-            class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-            role="status"
-          >
-            <div
-              class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-            >
-              <Icon name="activity" size={22} />
-            </div>
-            <p
-              class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-            >
-              HOST UNAVAILABLE
-            </p>
-            <h1
-              class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-            >
-              Your projects are still on the desktop.
-            </h1>
-            <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-              Pidex could not reach its local host. Nothing was deleted and no draft will be
-              submitted automatically.
-            </p>
-            <button
-              class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-              onclick={retryConnection}
-              disabled={retryingConnection}
-              >{retryingConnection ? "Retrying…" : "Retry connection"}</button
-            >
-          </div>
-        {:else if routeLoading && !snapshot}
-          <div
-            class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
-            aria-label="Loading task"
-            role="status"
-          >
-            <span class="sr-only">Loading task…</span>
-            {#each ["w-2/5", "w-4/5", "w-3/5"] as width, index (width)}
-              <div class={`animate-pulse ${index === 1 ? "ml-auto" : ""} ${width}`}>
-                <div class="mb-2 h-2.5 w-20 rounded-full bg-border"></div>
-                <div class="h-20 rounded-2xl bg-secondary/75"></div>
-              </div>
-            {/each}
-          </div>
-        {:else if !workspace}
-          <div
-            class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-          >
-            <div
-              class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-            >
-              <span class="font-serif text-[26px] leading-none font-bold">π</span>
-            </div>
-            <p
-              class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-            >
-              YOUR PRIVATE PI PROJECT
-            </p>
-            <h1
-              class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-            >
-              Bring Pi with you.
-            </h1>
-            <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-              Choose a project to create or resume a task.
-            </p>
-            <button
-              class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
-              onclick={openProjectPicker}>Add a project</button
-            >
-          </div>
-        {:else}
-          <div
-            class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
-            role="status"
-          >
-            <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
-              Pick a task to continue
-            </h1>
-            <p class="mt-2 text-sm leading-relaxed text-muted">
-              Select an existing task or create a new one to get started.
-            </p>
-          </div>
-        {/if}
-      </section>
-    {/if}
-
-    {#if snapshot}
-      <TaskComposer
-        bind:this={null, taskViews.attachComposer}
-        bind:delivery
-        bind:draft
-        {active}
-        {clearQueue}
-        {connection}
-        contextUsage={snapshot.contextUsage}
-        followUpCount={snapshot.followUpQueue.length}
-        {hasConfigurationDraft}
-        models={workspace?.models ?? []}
-        {persistDraft}
-        requiresAcknowledgement={Boolean(snapshot.run?.requiresAcknowledgement)}
-        runStatus={snapshot.runStatus}
-        {selectedModel}
-        {selectedThinkingLevel}
-        {send}
-        {stageConfiguration}
-        stats={snapshot.stats}
-        steeringCount={snapshot.steeringQueue.length}
-        {stop}
-      />
-    {/if}
+    {@render children()}
   </main>
 </div>
 
