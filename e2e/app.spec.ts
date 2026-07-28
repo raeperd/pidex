@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { basename } from "node:path";
 
-test("integrates the application headers with macOS window chrome", async ({ page }) => {
+test("integrates the application headers with macOS window chrome", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, "pidexDesktop", {
       value: {
@@ -35,9 +35,37 @@ test("integrates the application headers with macOS window chrome", async ({ pag
     "no-drag",
   );
 
+  if (testInfo.project.name !== "mobile") {
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+    await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
+    await expect(expandSidebar).toHaveCSS("-webkit-app-region", "no-drag");
+    await expandSidebar.click();
+  }
+
   await page.setViewportSize({ width: 800, height: 820 });
   await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
   await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
+});
+
+test("collapses and restores the desktop sidebar with keyboard focus", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a drawer");
+  await page.goto("/");
+
+  const sidebar = page.getByRole("complementary", { name: "Tasks" });
+  const collapseSidebar = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(sidebar).toBeVisible();
+  await collapseSidebar.focus();
+  await collapseSidebar.press("Enter");
+
+  await expect(sidebar).toBeHidden();
+  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+  await expect(expandSidebar).toBeFocused();
+  await expandSidebar.press("Enter");
+  await expect(sidebar).toBeVisible();
+  await expect(collapseSidebar).toBeFocused();
 });
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
