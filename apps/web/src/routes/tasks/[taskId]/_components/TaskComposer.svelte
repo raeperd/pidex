@@ -94,6 +94,7 @@
     stats,
     steeringCount,
     stop,
+    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
@@ -117,10 +118,12 @@
     stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;
+    taskId: string;
   } = $props();
 
   let promptInput = $state<HTMLTextAreaElement>();
-  let compactPending = $state(false);
+  let compactPendingByTask = $state<Record<string, boolean>>({});
+  let compactPending = $derived(compactPendingByTask[taskId] ?? false);
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
   let commandCatalog = $derived(composerCommands(commands));
@@ -162,8 +165,9 @@
   async function submitDraft() {
     if (compactPending) return;
     const submittedDraft = draft;
+    const submittedTaskId = taskId;
     const isCompaction = parseCompactCommand(submittedDraft) !== undefined;
-    if (isCompaction) compactPending = true;
+    if (isCompaction) compactPendingByTask[submittedTaskId] = true;
     try {
       const result = await submitComposerDraft(submittedDraft, { compact, send });
       if (result !== "compact" || draft !== submittedDraft) return;
@@ -171,7 +175,7 @@
       persistDraft();
       resize();
     } finally {
-      if (isCompaction) compactPending = false;
+      if (isCompaction) delete compactPendingByTask[submittedTaskId];
     }
   }
 
@@ -192,6 +196,7 @@
     }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
+      if (compactPending) return;
       void (active ? send() : submitDraft());
     }
   }
@@ -323,7 +328,7 @@
           <button
             class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
             onclick={send}
-            disabled={!draft.trim() || connection !== "connected"}
+            disabled={!draft.trim() || connection !== "connected" || compactPending}
             aria-label="Queue">Queue</button
           >
         {:else}

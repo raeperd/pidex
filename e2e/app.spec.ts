@@ -965,6 +965,7 @@ test("preserves edits made while slash compaction is pending", async ({
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
   let compactInput: Record<string, unknown> | undefined;
   let compactRequests = 0;
+  let queuedRequests = 0;
   let snapshot: Record<string, unknown> | undefined;
 
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -1009,6 +1010,14 @@ test("preserves edits made while slash compaction is pending", async ({
       json: { json: snapshot },
     });
   });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    queuedRequests++;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { accepted: false, reason: "Compaction is active" } },
+    });
+  });
 
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
@@ -1022,16 +1031,23 @@ test("preserves edits made while slash compaction is pending", async ({
   await prompt.fill("/compact Preserve decisions\nand constraints");
   await page.getByRole("button", { name: "Send" }).click();
   await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
-  if (testInfo.project.name === "mobile")
-    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
-  else {
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 1,
+    chatId: String(snapshot?.chatId),
+    status: "compacting",
+    revision: Number(snapshot?.revision),
+  });
+  await expect(page.getByRole("button", { name: "Queue" })).toBeDisabled();
+  if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
     await page.evaluate(
       () =>
         new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
-    expect(compactRequests).toBe(1);
   }
+  expect(compactRequests).toBe(1);
+  expect(queuedRequests).toBe(0);
 
   await prompt.fill("Draft typed while compaction is pending");
   releaseCompaction();
@@ -1156,6 +1172,10 @@ test("ignores compact responses after navigating to another task", async ({ page
   await page.goto(`/tasks/${String(first.result.taskId)}`);
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
   await prompt.fill("/compact");
   const compactResponse = page.waitForResponse("**/api/rpc/chats/compact");
   await page.getByRole("button", { name: "Send" }).click();
@@ -1163,6 +1183,8 @@ test("ignores compact responses after navigating to another task", async ({ page
 
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await prompt.fill("Message for the second task");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await expect(
     page.getByRole("button", { name: "Compact task (context window 20% used)" }),
   ).toBeVisible();

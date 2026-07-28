@@ -61,6 +61,7 @@
     stats={context.task.snapshot.stats}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
+    {taskId}
   />
 {:else}
   <section

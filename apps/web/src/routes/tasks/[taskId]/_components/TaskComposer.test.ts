@@ -114,6 +114,7 @@ function renderComposer(draft: string, active: boolean) {
       stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
       steeringCount: 0,
       stop: async () => {},
+      taskId: "task_test",
     },
   }).body;
 }
