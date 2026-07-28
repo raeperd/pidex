@@ -217,12 +217,13 @@
       const currentIndex = bootstrap.recentWorkspaces.findIndex(
         (project) => project.id === loaded.id || project.path === loaded.path,
       );
-      const recentWorkspaces =
-        currentIndex < 0
-          ? [...bootstrap.recentWorkspaces, entry].slice(-MAX_RECENT_WORKSPACES)
-          : bootstrap.recentWorkspaces.map((project, index) =>
-              index === currentIndex ? entry : project,
-            );
+      let recentWorkspaces = bootstrap.recentWorkspaces;
+      if (currentIndex < 0 && recentWorkspaces.length < MAX_RECENT_WORKSPACES)
+        recentWorkspaces = [...recentWorkspaces, entry];
+      else if (currentIndex >= 0)
+        recentWorkspaces = recentWorkspaces.map((project, index) =>
+          index === currentIndex ? entry : project,
+        );
       bootstrap = { ...bootstrap, recentWorkspaces };
     }
   }
@@ -560,11 +561,9 @@
     if (cached) return cached;
     const recent = bootstrap?.recentWorkspaces.find((project) => project.id === workspaceId);
     if (!recent) return undefined;
-    return openProject(recent.path, {
-      activate: false,
-      expand: true,
-      remember: false,
-    });
+    const loaded = await api.openWorkspace(recent.path, true);
+    rememberWorkspace(loaded);
+    return loaded;
   }
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");

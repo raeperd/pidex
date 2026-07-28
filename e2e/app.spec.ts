@@ -489,8 +489,8 @@ test("keeps a successful project open within the history limit when refresh fail
   await openTasks(page);
   const projects = page.getByRole("navigation", { name: "Projects" });
   await expect(projects.getByRole("group")).toHaveCount(100);
-  await expect(projects.getByRole("group", { name: "project-000 project" })).toHaveCount(0);
-  await expect(projects.getByRole("group", { name: "project-added project" })).toBeVisible();
+  await expect(projects.getByRole("group", { name: "project-000 project" })).toBeVisible();
+  await expect(projects.getByRole("group", { name: "project-added project" })).toHaveCount(0);
   expect(bootstrapCalls).toBe(3);
 });
 
@@ -637,11 +637,20 @@ test("keeps search and task creation in the no-active-task experience", async ({
 }) => {
   const createRequests: unknown[] = [];
   const taskCreationRequests: string[] = [];
+  const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
     const body = (browserRequest.postDataJSON() as { json?: unknown } | null)?.json;
     if (browserRequest.method() === "POST" && path === "/api/rpc/chats/create")
       createRequests.push(body);
+    if (
+      browserRequest.method() === "POST" &&
+      path === "/api/rpc/workspaces/open" &&
+      body &&
+      typeof body === "object" &&
+      "path" in body
+    )
+      workspaceOpenRequests.push(body as { path: string; remember?: boolean });
     if (
       browserRequest.method() === "POST" &&
       (path === "/api/rpc/workspaces/open" || path === "/api/rpc/chats/create")
@@ -709,15 +718,24 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const taskUrl = page.url();
+  const otherWorkspacePath = `${process.cwd()}/packages`;
+  await rememberWorkspace(request, otherWorkspacePath);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(taskUrl);
   await expect(page.getByLabel("Prompt")).toBeVisible();
 
+  await page.evaluate(
+    (path) => localStorage.setItem("pidex:last-project", path),
+    otherWorkspacePath,
+  );
+  workspaceOpenRequests.length = 0;
   await page.reload();
   await expect(page).toHaveURL(taskUrl);
   await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect.poll(() => workspaceOpenRequests.length).toBeGreaterThan(0);
+  expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
