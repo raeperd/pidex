@@ -891,7 +891,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     chatId,
     item: {
       ...toolItem,
-      state: "success",
+      state: "error",
       preview: JSON.stringify({
         content: [
           {
@@ -915,10 +915,22 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(page.locator(".tool-call__output")).toContainText("one");
   await expect(hint).toHaveCount(0);
 
-  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
   await emitServerEvent(page, {
     type: "tool",
     eventId: 3,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_running_e2e",
+      argumentSummary: JSON.stringify({ command: "sleep 10" }),
+      state: "running",
+    },
+  });
+
+  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 4,
     chatId,
     item: {
       ...toolItem,
@@ -934,7 +946,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
 
   await emitServerEvent(page, {
     type: "tool",
-    eventId: 4,
+    eventId: 5,
     chatId,
     item: {
       ...toolItem,
@@ -946,13 +958,30 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     },
   });
 
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 6,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_grep_e2e",
+      name: "grep",
+      argumentSummary: JSON.stringify({ pattern: "TODO", path: "src" }),
+      state: "success",
+      preview: "no matches",
+    },
+  });
+
   const earlierTools = page.getByRole("button", { name: "Show 1 previous tool call" });
   await expect(earlierTools).toBeVisible();
-  await expect(toolBlock).toHaveCount(0);
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByRole("button", { name: "$ sleep 10" })).toBeVisible();
+  await expect(restored).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Read README.md" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Searched TODO · src" })).toBeVisible();
   await earlierTools.click();
   await expect(page.getByRole("button", { name: "Hide 1 previous tool call" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "$ ls -la" })).toBeVisible();
+  await expect(restored).toBeVisible();
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {

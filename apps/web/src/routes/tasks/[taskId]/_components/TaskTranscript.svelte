@@ -155,7 +155,11 @@
           <TaskNotice level={item.level} text={item.text} />
         {/if}
       {:else}
-        {@const hiddenCount = Math.max(0, row.items.length - 2)}
+        {@const collapsibleItems = row.items
+          .slice(0, -2)
+          .filter((item) => item.state === "success")}
+        {@const collapsibleIds = new Set(collapsibleItems.map((item) => item.id))}
+        {@const hiddenCount = collapsibleItems.length}
         {@const expanded = Boolean(expandedToolGroups[row.id])}
         {#if hiddenCount > 0}
           <button
@@ -169,13 +173,10 @@
             {hiddenCount} previous tool {hiddenCount === 1 ? "call" : "calls"}
           </button>
         {/if}
-        {#if expanded}
-          {#each row.items.slice(0, hiddenCount) as item (item.id)}
+        {#each row.items as item (item.id)}
+          {#if expanded || !collapsibleIds.has(item.id)}
             {@render toolCall(item)}
-          {/each}
-        {/if}
-        {#each row.items.slice(hiddenCount) as item (item.id)}
-          {@render toolCall(item)}
+          {/if}
         {/each}
       {/if}
     {/each}
