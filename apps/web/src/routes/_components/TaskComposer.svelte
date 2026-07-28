@@ -1,14 +1,9 @@
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage, Workspace } from "@pidex/api";
   import type { ConnectionState } from "./AppShellConnection";
+  import type { TaskConfigurationPatch, TaskDelivery } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
-
-  type Delivery = "follow-up" | "steer";
-  type TaskConfiguration = {
-    model?: string;
-    thinkingLevel?: ChatSnapshot["thinkingLevel"];
-  };
 
   let {
     active,
@@ -35,7 +30,7 @@
     clearQueue: () => Promise<void>;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
-    delivery: Delivery;
+    delivery: TaskDelivery;
     draft: string;
     followUpCount: number;
     hasConfigurationDraft: boolean;
@@ -46,7 +41,7 @@
     selectedModel: string;
     selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     send: () => Promise<void>;
-    stageConfiguration: (patch: TaskConfiguration) => void;
+    stageConfiguration: (patch: TaskConfigurationPatch) => void;
     stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;

@@ -1,25 +1,9 @@
-<script lang="ts" module>
-  export interface TaskToolOutput {
-    text: string;
-    nextOffset: number;
-    total: number;
-    complete: boolean;
-    loading: boolean;
-    sourceTruncated: boolean;
-    error?: string;
-  }
-
-  export interface TaskToolTiming {
-    startedAt: number;
-    endedAt?: number;
-  }
-</script>
-
 <script lang="ts">
   import { tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import type { TranscriptItem, ToolItem } from "@pidex/api";
   import AgentMessage from "./AgentMessage.svelte";
+  import type { TaskToolOutput, TaskToolTiming } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
   import TaskNotice from "./TaskNotice.svelte";
   import ToolCall from "./ToolCall.svelte";

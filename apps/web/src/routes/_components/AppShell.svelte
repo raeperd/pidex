@@ -15,26 +15,23 @@
   } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
   import { ChatConnection, type ConnectionState } from "./AppShellConnection";
+  import {
+    createTaskViewControllerRegistry,
+    provideAppShellContext,
+    type AppShellContext,
+    type TaskDelivery,
+    type TaskToolOutput,
+    type TaskToolTiming,
+  } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
   import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
   import TaskComposer from "./TaskComposer.svelte";
-  import TaskTranscript, {
-    type TaskToolOutput,
-    type TaskToolTiming,
-  } from "./TaskTranscript.svelte";
+  import TaskTranscript from "./TaskTranscript.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
-  interface TaskTranscriptApi {
-    scrollIfNearBottom(): void;
-    scrollLatest(): void;
-  }
-  interface TaskComposerApi {
-    focus(): void;
-    resize(): void;
-  }
 
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
@@ -62,7 +59,7 @@
   let routeSequence = 0;
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
-  let delivery = $state<"steer" | "follow-up">("steer");
+  let delivery = $state<TaskDelivery>("steer");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
@@ -70,8 +67,6 @@
   let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
-  let taskComposer = $state<TaskComposerApi>();
-  let taskTranscript = $state<TaskTranscriptApi>();
   let searchInput = $state<HTMLInputElement>();
   let relativeNow = $state(Date.now());
   let dialogValue = $state<string | boolean>("");
@@ -83,6 +78,7 @@
   const mobileViewport = new MediaQuery("max-width: 900px");
   const api = new PidexApiClient();
   const snapshotCache = new TaskSnapshotCache();
+  const taskViews = createTaskViewControllerRegistry();
   const chatConnection = new ChatConnection({
     onEvent: applyEvent,
     onInvalidChat: () => void recoverInvalidChat(),
@@ -159,6 +155,82 @@
       return firstUser.text.split("\n")[0]?.slice(0, 64) || workspace?.name || "Pidex";
     return workspace?.name ?? "Pidex";
   });
+  const appShellContext: AppShellContext = {
+    shell: {
+      get bootstrap() {
+        return bootstrap;
+      },
+      get bootstrapError() {
+        return bootstrapError;
+      },
+      get connection() {
+        return connection;
+      },
+      get retryingConnection() {
+        return retryingConnection;
+      },
+      get routeLoading() {
+        return routeLoading;
+      },
+      get workspace() {
+        return workspace;
+      },
+    },
+    task: {
+      get active() {
+        return active;
+      },
+      get delivery() {
+        return delivery;
+      },
+      get draft() {
+        return draft;
+      },
+      get hasConfigurationDraft() {
+        return hasConfigurationDraft;
+      },
+      get loadingEarlier() {
+        return loadingEarlier;
+      },
+      get selectedModel() {
+        return selectedModel;
+      },
+      get selectedThinkingLevel() {
+        return selectedThinkingLevel;
+      },
+      get snapshot() {
+        return snapshot;
+      },
+      get toolElapsedNow() {
+        return toolElapsedNow;
+      },
+      get toolOutputs() {
+        return toolOutputs;
+      },
+      get toolTimings() {
+        return toolTimings;
+      },
+    },
+    taskActions: {
+      attachComposer: taskViews.attachComposer,
+      attachTranscript: taskViews.attachTranscript,
+      clearQueue,
+      loadEarlier,
+      loadToolOutput,
+      persistDraft,
+      send,
+      setDelivery: (value) => (delivery = value),
+      setDraft: (value) => (draft = value),
+      stageConfiguration,
+      stop,
+    },
+    projectActions: {
+      openProjectPicker,
+      retryConnection,
+    },
+  };
+  provideAppShellContext(appShellContext);
+
   const relativeTime = (value: string) => {
     const seconds = Math.round((new Date(value).getTime() - relativeNow) / 1000);
     const absolute = Math.abs(seconds);
@@ -435,7 +507,7 @@
       draft = localStorage.getItem(`pidex:draft:${snapshot.taskId}`) ?? "";
       drawerOpen = false;
       await tick();
-      taskTranscript?.scrollLatest();
+      taskViews.scrollLatest();
     }
 
     try {
@@ -488,9 +560,9 @@
       initializeDialogValue(snapshot.extensionDialog);
       if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
-    taskComposer?.resize();
-    taskTranscript?.scrollLatest();
-    if (focusComposer) taskComposer?.focus();
+    taskViews.resizeComposer();
+    taskViews.scrollLatest();
+    if (focusComposer) taskViews.focusComposer();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
     if (!snapshot) return;
@@ -527,7 +599,7 @@
     pendingTextDeltaFrame = requestAnimationFrame(() => {
       pendingTextDeltaFrame = undefined;
       flushPendingTextDeltas();
-      taskTranscript?.scrollIfNearBottom();
+      taskViews.scrollIfNearBottom();
     });
   }
   function flushScheduledTextDeltas() {
@@ -597,7 +669,7 @@
         dialogElement?.close();
       }
     }
-    taskTranscript?.scrollIfNearBottom();
+    taskViews.scrollIfNearBottom();
   }
   function pendingKey() {
     return snapshot ? `pidex:pending:${snapshot.taskId}` : "";
@@ -639,7 +711,7 @@
     if (clearedSubmittedDraft) {
       draft = "";
       persistDraft();
-      void tick().then(() => taskComposer?.resize());
+      void tick().then(taskViews.resizeComposer);
     }
     try {
       const outcome = await api.sendMessage(
@@ -656,7 +728,7 @@
       if (clearedSubmittedDraft && !draft) {
         draft = text;
         persistDraft();
-        void tick().then(() => taskComposer?.resize());
+        void tick().then(taskViews.resizeComposer);
       }
       error = cause instanceof Error ? cause.message : "Prompt rejected";
     }
@@ -926,7 +998,7 @@
       (document.querySelector(".menu-button") as HTMLElement)?.focus();
       return;
     }
-    if (document.activeElement === searchInput) taskComposer?.focus();
+    if (document.activeElement === searchInput) taskViews.focusComposer();
   }
   function wentOffline() {
     chatConnection.disconnect();
@@ -943,6 +1015,10 @@
     return () => {
       window.clearInterval(relativeTimeInterval);
       if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
+      pendingTextDeltaFrame = undefined;
+      pendingTextDeltas.clear();
+      pendingTextDeltaChatId = "";
+      taskViews.dispose();
       chatConnection.close();
     };
   });
@@ -1292,7 +1368,7 @@
 
     {#if snapshot}
       <TaskTranscript
-        bind:this={taskTranscript}
+        bind:this={null, taskViews.attachTranscript}
         items={snapshot.items}
         transcriptStart={snapshot.transcriptStart}
         {loadingEarlier}
@@ -1399,7 +1475,7 @@
 
     {#if snapshot}
       <TaskComposer
-        bind:this={taskComposer}
+        bind:this={null, taskViews.attachComposer}
         bind:delivery
         bind:draft
         {active}
