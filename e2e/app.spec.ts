@@ -1,6 +1,29 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { basename } from "node:path";
 
+test("integrates the application headers with macOS window chrome", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
+
+  await page.goto("/");
+
+  const sidebarTitleBar = page.locator("aside > div").first();
+  const mainTitleBar = page.locator("main > header");
+  await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(sidebarTitleBar).toHaveCSS("padding-left", "80px");
+  await expect(mainTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(page.getByRole("button", { name: "Search projects and tasks" })).toHaveCSS(
+    "-webkit-app-region",
+    "no-drag",
+  );
+});
+
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 

@@ -4,6 +4,7 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { windowTitleBarOptions } from "./window-options.js";
 
 const appIconPath = path.resolve(import.meta.dirname, "../assets/icon.png");
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
@@ -67,8 +68,9 @@ async function createWindow(stateDirectory: string) {
     minWidth: 320,
     minHeight: 560,
     backgroundColor: "#181b18",
+    ...windowTitleBarOptions(process.platform),
     webPreferences: {
-      preload: path.join(import.meta.dirname, "preload.js"),
+      preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

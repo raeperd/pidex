@@ -29,6 +29,7 @@
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+  const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
 
   let { children }: { children: Snippet } = $props();
@@ -1052,7 +1053,9 @@
     aria-label="Tasks"
     inert={mobileViewport.current && !drawerOpen}
   >
-    <div class="flex min-h-14 items-center gap-2 px-1 pt-2 pr-1 pb-1.5 pl-2">
+    <div
+      class={`flex min-h-14 items-center gap-2 pt-2 pr-1 pb-1.5 ${usesIntegratedTitleBar ? "window-drag-region pl-20" : "pl-2"}`}
+    >
       <div class="flex min-w-0 flex-1 items-center gap-2">
         <strong class="text-[15px] font-semibold tracking-tight">Pidex</strong>
         <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
@@ -1243,7 +1246,7 @@
     inert={mobileViewport.current && drawerOpen}
   >
     <header
-      class="z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13"
+      class={`z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13 ${usesIntegratedTitleBar ? "window-drag-region" : ""}`}
     >
       <button
         class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
