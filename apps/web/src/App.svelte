@@ -47,6 +47,7 @@
   let projectOrderSaving = $state(false);
   let draggedProjectId = $state("");
   let projectDropTargetId = $state("");
+  let projectDropTargetEdge = $state<"before" | "after">("before");
   let chatLoading = $state(false);
   let routeLoading = $state(false);
   let routeReady = $state(false);
@@ -231,30 +232,41 @@
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   }
   function dragProjectOver(event: DragEvent, projectId: string) {
-    if (!draggedProjectId || draggedProjectId === projectId) return;
+    if (!draggedProjectId) return;
+    if (draggedProjectId === projectId) {
+      projectDropTargetId = "";
+      return;
+    }
     event.preventDefault();
+    const target = event.currentTarget as HTMLElement;
+    const targetBounds = target.getBoundingClientRect();
     projectDropTargetId = projectId;
+    projectDropTargetEdge =
+      event.clientY < targetBounds.top + targetBounds.height / 2 ? "before" : "after";
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   }
   function dropProject(event: DragEvent, projectId: string) {
     event.preventDefault();
     const sourceId = draggedProjectId || event.dataTransfer?.getData("text/plain") || "";
+    const edge = projectDropTargetEdge;
     finishProjectDrag();
-    moveProjectTo(sourceId, projectId);
+    moveProjectTo(sourceId, projectId, edge);
   }
   function finishProjectDrag() {
     draggedProjectId = "";
     projectDropTargetId = "";
+    projectDropTargetEdge = "before";
   }
-  function moveProjectTo(sourceId: string, targetId: string) {
+  function moveProjectTo(sourceId: string, targetId: string, edge: "before" | "after") {
     if (!bootstrap || sourceId === targetId || projectOrderSaving) return;
     const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === sourceId);
-    const targetIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === targetId);
-    if (sourceIndex < 0 || targetIndex < 0) return;
+    if (sourceIndex < 0) return;
     const reordered = [...bootstrap.recentWorkspaces];
     const [moved] = reordered.splice(sourceIndex, 1);
     if (!moved) return;
-    reordered.splice(targetIndex, 0, moved);
+    const targetIndex = reordered.findIndex(({ id }) => id === targetId);
+    if (targetIndex < 0) return;
+    reordered.splice(targetIndex + (edge === "after" ? 1 : 0), 0, moved);
     void saveProjectOrder(reordered);
   }
   function moveProjectBy(projectId: string, offset: -1 | 1) {
@@ -262,7 +274,7 @@
     const sourceIndex = visibleProjects.findIndex(({ id }) => id === projectId);
     const target = visibleProjects[sourceIndex + offset];
     if (!target) return;
-    moveProjectTo(projectId, target.id);
+    moveProjectTo(projectId, target.id, offset < 0 ? "before" : "after");
   }
   async function saveProjectOrder(recentWorkspaces: RecentWorkspace[]) {
     if (!bootstrap) return;
@@ -1135,12 +1147,19 @@
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
             <div
-              class={`mb-0.5 rounded-lg ${projectDropTargetId === project.id ? "bg-primary/10 ring-1 ring-primary/40" : ""}`}
+              class="relative mb-0.5 rounded-lg"
               role="group"
               aria-label={`${projectLabel(project)} project`}
               ondragover={(event) => dragProjectOver(event, project.id)}
               ondrop={(event) => dropProject(event, project.id)}
             >
+              {#if projectDropTargetId === project.id}
+                <span
+                  class={`pointer-events-none absolute right-1 left-1 z-10 h-0.5 rounded-full bg-primary ${projectDropTargetEdge === "before" ? "-top-px" : "-bottom-px"}`}
+                  data-project-drop-edge={projectDropTargetEdge}
+                  aria-hidden="true"
+                ></span>
+              {/if}
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
                   class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing ${workspace?.id === project.id ? "text-foreground" : ""}`}

@@ -77,8 +77,42 @@ test("manually reorders projects and preserves their order after reload", async 
   await expect(page.getByLabel("Add project", { exact: true })).toBeEnabled();
   await packagesRow.press("ArrowDown");
   await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
+  await expect(page.getByLabel("Add project", { exact: true })).toBeEnabled();
 
-  await packagesRow.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }));
+  const appsGroup = projects.getByRole("group", { name: "apps project" });
+  await packagesRow.evaluate((source) => {
+    const target = document.querySelector<HTMLElement>('[aria-label="apps project"]');
+    if (!target) throw new Error("Expected apps project target");
+    const dataTransfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
+    const targetBounds = target.getBoundingClientRect();
+    target.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        clientY: targetBounds.top + 1,
+        dataTransfer,
+      }),
+    );
+  });
+  await expect(appsGroup.locator('[data-project-drop-edge="before"]')).toBeVisible();
+  await appsGroup.evaluate((target) => {
+    const targetBounds = target.getBoundingClientRect();
+    target.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        clientY: targetBounds.bottom - 1,
+        dataTransfer: new DataTransfer(),
+      }),
+    );
+  });
+  await expect(appsGroup.locator('[data-project-drop-edge="after"]')).toBeVisible();
+  await packagesRow.dispatchEvent("dragend");
+
+  await packagesRow.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }), {
+    targetPosition: { x: 10, y: 1 },
+  });
 
   await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
   await page.reload();
