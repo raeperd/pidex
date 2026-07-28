@@ -99,9 +99,9 @@ describe("safeAgentMessageHref", () => {
 
 describe("parseCodeInfo", () => {
   it("extracts a language and filename", () => {
-    expect(parseCodeInfo('tsx title="src/App.svelte"')).toEqual({
+    expect(parseCodeInfo('tsx title="src/AgentMessage.svelte"')).toEqual({
       language: "tsx",
-      title: "src/App.svelte",
+      title: "src/AgentMessage.svelte",
     });
   });
 
