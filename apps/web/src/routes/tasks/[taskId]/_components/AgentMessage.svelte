@@ -21,9 +21,14 @@
   let nodes = $derived(parseAgentMessage(text));
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-  let sentAt = $derived(new Date(timestamp));
+  let sentAt = $derived.by(() => {
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  });
   let formattedTimestamp = $derived(
-    new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(sentAt),
+    sentAt
+      ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(sentAt)
+      : undefined,
   );
 
   async function copyResponse() {
@@ -71,8 +76,10 @@
         aria-label={copied ? "Response copied" : "Copy response"}
         onclick={() => void copyResponse()}>{copied ? "Copied" : "Copy"}</button
       >
-      <span aria-hidden="true">·</span>
-      <time datetime={timestamp} title={sentAt.toLocaleString()}>{formattedTimestamp}</time>
+      {#if sentAt && formattedTimestamp}
+        <span aria-hidden="true">·</span>
+        <time datetime={timestamp} title={sentAt.toLocaleString()}>{formattedTimestamp}</time>
+      {/if}
     </footer>
   {/if}
 </article>

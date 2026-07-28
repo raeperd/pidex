@@ -826,6 +826,24 @@ const answer = 42;
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("# Rendered result");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 2,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_invalid_timestamp_e2e",
+      text: "Response with a malformed timestamp",
+      complete: true,
+      timestamp: "not-a-date",
+    },
+  });
+
+  await expect(
+    page.getByText("Response with a malformed timestamp", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('time[datetime="not-a-date"]')).toHaveCount(0);
 });
 
 test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
