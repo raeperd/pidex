@@ -46,6 +46,16 @@ describe("submitComposerDraft", () => {
       }),
     ).toBe("compact-failed");
   });
+
+  it("passes multiline compact instructions to the compaction action", async () => {
+    const compact = vi.fn(async () => true);
+    const send = vi.fn(async () => {});
+
+    await submitComposerDraft("/compact Preserve decisions\nand constraints", { compact, send });
+
+    expect(compact).toHaveBeenCalledWith("Preserve decisions\nand constraints");
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
 describe("slashCommandSuggestions", () => {

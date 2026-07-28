@@ -44,7 +44,7 @@
       send: () => Promise<void>;
     },
   ): Promise<"compact" | "compact-failed" | "prompt"> {
-    const compactMatch = /^\/compact(?:\s+(.*?))?\s*$/.exec(draft);
+    const compactMatch = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
     if (!compactMatch) {
       await actions.send();
       return "prompt";
@@ -152,8 +152,9 @@
   }
 
   async function submitDraft() {
-    const result = await submitComposerDraft(draft, { compact, send });
-    if (result !== "compact") return;
+    const submittedDraft = draft;
+    const result = await submitComposerDraft(submittedDraft, { compact, send });
+    if (result !== "compact" || draft !== submittedDraft) return;
     draft = "";
     persistDraft();
     resize();

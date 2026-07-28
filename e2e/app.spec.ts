@@ -956,6 +956,76 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(page.locator("details pre")).toHaveText("weighing options");
 });
 
+test("preserves edits made while slash compaction is pending", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let compactInput: Record<string, unknown> | undefined;
+  let snapshot: Record<string, unknown> | undefined;
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...payload.json,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+  await page.route("**/api/rpc/chats/compact", async (route) => {
+    if (!snapshot) throw new Error("Expected a chat before compaction");
+    compactInput = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await compactionPending;
+    snapshot = {
+      ...snapshot,
+      revision: Number(compactInput.expectedRevision) + 1,
+      contextUsage: {
+        tokens: 10,
+        contextWindow: 100,
+        percent: 10,
+        totalProcessedTokens: 10,
+        compactsAutomatically: true,
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: snapshot },
+    });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+
+  const prompt = page.getByLabel("Prompt");
+  await expect(prompt).toBeVisible();
+  await prompt.fill("/compact Preserve decisions\nand constraints");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
+
+  await prompt.fill("Draft typed while compaction is pending");
+  releaseCompaction();
+  await expect(
+    page.getByRole("button", { name: "Compact task (context window 10% used)" }),
+  ).toBeVisible();
+  await expect(prompt).toHaveValue("Draft typed while compaction is pending");
+});
+
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
