@@ -1,6 +1,91 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { basename } from "node:path";
 
+test("integrates the application headers with macOS window chrome", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
+
+  await page.goto("/");
+
+  const sidebarTitleBar = page.locator("aside > div").first();
+  const mainTitleBar = page.locator("main > header");
+  await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(sidebarTitleBar).toHaveCSS("height", "52px");
+  await expect(sidebarTitleBar).toHaveCSS("padding-left", "80px");
+  await expect(mainTitleBar).toHaveCSS("height", "52px");
+
+  const appMark = sidebarTitleBar.locator('img[src="/pidex-icon.png"]');
+  const appTitle = sidebarTitleBar.getByText("Pidex", { exact: true });
+  const collapseSidebar = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(appMark).toBeVisible();
+  const appMarkBox = await appMark.boundingBox();
+  const appTitleBox = await appTitle.boundingBox();
+  if (!appMarkBox || !appTitleBox) throw new Error("The desktop app identity is not visible");
+  if (testInfo.project.name !== "mobile") {
+    const collapseSidebarBox = await collapseSidebar.boundingBox();
+    if (!collapseSidebarBox) throw new Error("The desktop sidebar control is not visible");
+    expect(collapseSidebarBox.x + collapseSidebarBox.width).toBeLessThanOrEqual(appMarkBox.x);
+  }
+  expect(
+    Math.abs(appMarkBox.y + appMarkBox.height / 2 - (appTitleBox.y + appTitleBox.height / 2)),
+  ).toBeLessThanOrEqual(1);
+  expect(appTitleBox.x).toBeGreaterThanOrEqual(appMarkBox.x + appMarkBox.width + 6);
+
+  await expect(mainTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(page.getByRole("button", { name: "Search projects and tasks" })).toHaveCSS(
+    "-webkit-app-region",
+    "no-drag",
+  );
+
+  if (testInfo.project.name !== "mobile") {
+    await collapseSidebar.click();
+    const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+    await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
+    await expect(expandSidebar).toHaveCSS("-webkit-app-region", "no-drag");
+    const expandSidebarBox = await expandSidebar.boundingBox();
+    const mainTitleBox = await mainTitleBar.locator("strong").boundingBox();
+    if (!expandSidebarBox || !mainTitleBox) throw new Error("The desktop title bar is not visible");
+    expect(
+      Math.abs(
+        expandSidebarBox.y +
+          expandSidebarBox.height / 2 -
+          (mainTitleBox.y + mainTitleBox.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await expandSidebar.click();
+  }
+
+  await page.setViewportSize({ width: 800, height: 820 });
+  await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
+  await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
+});
+
+test("collapses and restores the desktop sidebar with keyboard focus", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a drawer");
+  await page.goto("/");
+
+  const sidebar = page.getByRole("complementary", { name: "Tasks" });
+  const collapseSidebar = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(sidebar).toBeVisible();
+  await collapseSidebar.focus();
+  await collapseSidebar.press("Enter");
+
+  await expect(sidebar).toBeHidden();
+  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+  await expect(expandSidebar).toBeFocused();
+  await expandSidebar.press("Enter");
+  await expect(sidebar).toBeVisible();
+  await expect(collapseSidebar).toBeFocused();
+});
+
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 
@@ -629,13 +714,22 @@ test("retries a deep-linked task without replacing its route", async ({ page, re
   await page.getByRole("button", { name: "Retry connection" }).click();
 
   await expect(page).toHaveURL(taskPath);
-  await expect(page.getByRole("button", { name: "Rename" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.locator("main > header")).toHaveCount(0);
 });
 
 test("keeps search and task creation in the no-active-task experience", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
   const createRequests: unknown[] = [];
   const taskCreationRequests: string[] = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
@@ -671,6 +765,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
         json: {
           ...workspace,
           models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+          resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
         },
       },
     });
@@ -714,6 +809,24 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
+  await expect(page.locator("main > header")).toHaveCount(0);
+  const topControl =
+    testInfo.project.name === "mobile"
+      ? page.getByRole("button", { name: "Open tasks" })
+      : page.locator("main > .window-drag-region");
+  const resourceWarning = page.getByRole("status").filter({ hasText: "E2E resource warning" });
+  await expect(topControl).toBeVisible();
+  await expect(resourceWarning).toBeVisible();
+  const topControlBox = await topControl.boundingBox();
+  const resourceWarningBox = await resourceWarning.boundingBox();
+  if (!topControlBox || !resourceWarningBox) throw new Error("Expected visible new-task chrome");
+  expect(resourceWarningBox.y).toBeGreaterThanOrEqual(topControlBox.y + topControlBox.height);
+  if (testInfo.project.name !== "mobile") {
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await expect(page.locator("main > header")).toHaveCount(0);
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+  }
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
   expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
@@ -740,7 +853,12 @@ test("keeps search and task creation in the no-active-task experience", async ({
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
-test("renders assistant markdown as safe interactive components", async ({ page, request }) => {
+test("renders assistant markdown as safe interactive components", async ({
+  context,
+  page,
+  request,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   let snapshot: Record<string, unknown> | undefined;
@@ -758,7 +876,7 @@ test("renders assistant markdown as safe interactive components", async ({ page,
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   await emitServerEvent(page, {
@@ -815,6 +933,30 @@ const answer = 42;
   await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
   expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+
+  await expect(page.locator('time[datetime="2026-07-27T00:00:00.000Z"]')).toBeVisible();
+  await page.getByRole("button", { name: "Copy response" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("# Rendered result");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 2,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_invalid_timestamp_e2e",
+      text: "Response with a malformed timestamp",
+      complete: true,
+      timestamp: "not-a-date",
+    },
+  });
+
+  await expect(
+    page.getByText("Response with a malformed timestamp", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('time[datetime="not-a-date"]')).toHaveCount(0);
 });
 
 test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
@@ -835,7 +977,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   const toolItem = {
@@ -862,8 +1004,15 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     chatId,
     item: {
       ...toolItem,
-      state: "success",
-      preview: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+      state: "error",
+      preview: JSON.stringify({
+        content: [
+          {
+            type: "text",
+            text: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+          },
+        ],
+      }),
     },
   });
 
@@ -872,16 +1021,29 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
   await expect(page.locator(".tool-call__output")).not.toContainText("one");
   await expect(page.locator(".tool-call__output")).toContainText("seven");
+  await expect(page.locator(".tool-call__output")).not.toContainText('"type": "text"');
 
   await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
   await toolBlock.click();
   await expect(page.locator(".tool-call__output")).toContainText("one");
   await expect(hint).toHaveCount(0);
 
-  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
   await emitServerEvent(page, {
     type: "tool",
     eventId: 3,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_running_e2e",
+      argumentSummary: JSON.stringify({ command: "sleep 10" }),
+      state: "running",
+    },
+  });
+
+  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 4,
     chatId,
     item: {
       ...toolItem,
@@ -894,6 +1056,45 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
   await expect(restored).toBeVisible();
   await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 5,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_read_e2e",
+      name: "read",
+      argumentSummary: JSON.stringify({ path: "README.md" }),
+      state: "success",
+      preview: JSON.stringify({ content: [{ type: "text", text: "project readme" }] }),
+    },
+  });
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 6,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_grep_e2e",
+      name: "grep",
+      argumentSummary: JSON.stringify({ pattern: "TODO", path: "src" }),
+      state: "success",
+      preview: "no matches",
+    },
+  });
+
+  const earlierTools = page.getByRole("button", { name: "Show 1 previous tool call" });
+  await expect(earlierTools).toBeVisible();
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByRole("button", { name: "$ sleep 10" })).toBeVisible();
+  await expect(restored).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read README.md" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Searched TODO · src" })).toBeVisible();
+  await earlierTools.click();
+  await expect(page.getByRole("button", { name: "Hide 1 previous tool call" })).toBeVisible();
+  await expect(restored).toBeVisible();
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
@@ -914,7 +1115,7 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   await emitServerEvent(page, {
@@ -954,6 +1155,23 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
   await page.getByText("Thinking", { exact: true }).click();
   await expect(page.locator("details pre")).toHaveText("weighing options");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: eventId++,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "# Streamed heading\n\nBody text.",
+      thinking: "weighing options",
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByText("Thought", { exact: true })).toBeVisible();
+  await expect(page.getByText("Thinking", { exact: true })).toHaveCount(0);
 });
 
 test("preserves edits made while slash compaction is pending", async ({
@@ -1412,6 +1630,21 @@ async function openTasks(page: Page) {
     await button.click();
   }
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
+}
+
+async function waitForFakeWebSocket(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              pidexTestSocket?: WebSocket;
+            }
+          ).pidexTestSocket?.readyState,
+      ),
+    )
+    .toBe(1);
 }
 
 async function installFakeWebSocket(page: Page) {
