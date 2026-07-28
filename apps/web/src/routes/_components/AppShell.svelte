@@ -13,19 +13,24 @@
     ToolItem,
     Workspace,
   } from "@pidex/api";
-  import AgentMessageBody from "./AgentMessageBody.svelte";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
   import { ChatConnection, type ConnectionState } from "./AppShellConnection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
-  import { parseAgentMessage } from "./AgentMessageParser";
   import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
-  import ToolCall from "./ToolCall.svelte";
+  import TaskTranscript, {
+    type TaskToolOutput,
+    type TaskToolTiming,
+  } from "./TaskTranscript.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+  interface TaskTranscriptApi {
+    scrollIfNearBottom(): void;
+    scrollLatest(): void;
+  }
 
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
@@ -58,26 +63,12 @@
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
   let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
-  let toolTimings = $state.raw<Record<string, { startedAt: number; endedAt?: number }>>({});
+  let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
-  let toolOutputs = $state.raw<
-    Record<
-      string,
-      {
-        text: string;
-        nextOffset: number;
-        total: number;
-        complete: boolean;
-        loading: boolean;
-        sourceTruncated: boolean;
-        error?: string;
-      }
-    >
-  >({});
-  let transcript = $state<HTMLElement>();
+  let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
+  let taskTranscript = $state<TaskTranscriptApi>();
   let searchInput = $state<HTMLInputElement>();
   let promptInput = $state<HTMLTextAreaElement>();
-  let nearBottom = $state(true);
   let relativeNow = $state(Date.now());
   let dialogValue = $state<string | boolean>("");
   let dialogElement = $state<HTMLDialogElement>();
@@ -86,7 +77,6 @@
   let renameValue = $state("");
   let compactDialogElement = $state<HTMLDialogElement>();
   const mobileViewport = new MediaQuery("max-width: 900px");
-  const darkMode = new MediaQuery("prefers-color-scheme: dark");
   const api = new PidexApiClient();
   const snapshotCache = new TaskSnapshotCache();
   const chatConnection = new ChatConnection({
@@ -441,7 +431,7 @@
       draft = localStorage.getItem(`pidex:draft:${snapshot.taskId}`) ?? "";
       drawerOpen = false;
       await tick();
-      scrollLatest();
+      taskTranscript?.scrollLatest();
     }
 
     try {
@@ -495,7 +485,7 @@
       if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
     resizePrompt();
-    scrollLatest();
+    taskTranscript?.scrollLatest();
     if (focusComposer) promptInput?.focus();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
@@ -533,7 +523,7 @@
     pendingTextDeltaFrame = requestAnimationFrame(() => {
       pendingTextDeltaFrame = undefined;
       flushPendingTextDeltas();
-      if (nearBottom) requestAnimationFrame(scrollLatest);
+      taskTranscript?.scrollIfNearBottom();
     });
   }
   function flushScheduledTextDeltas() {
@@ -603,7 +593,7 @@
         dialogElement?.close();
       }
     }
-    if (nearBottom) requestAnimationFrame(scrollLatest);
+    taskTranscript?.scrollIfNearBottom();
   }
   function pendingKey() {
     return snapshot ? `pidex:pending:${snapshot.taskId}` : "";
@@ -859,8 +849,6 @@
   }
   async function loadEarlier() {
     if (!snapshot || snapshot.transcriptStart === 0 || loadingEarlier) return;
-    const previousScrollHeight = transcript?.scrollHeight;
-    const previousScrollTop = transcript?.scrollTop;
     loadingEarlier = true;
     try {
       const transcriptPage = await api.transcript(snapshot.chatId, snapshot.transcriptStart);
@@ -871,10 +859,6 @@
         transcriptStart: transcriptPage.start,
         transcriptTotal: transcriptPage.total,
       };
-      if (transcript && previousScrollHeight !== undefined && previousScrollTop !== undefined) {
-        await tick();
-        transcript.scrollTop = previousScrollTop + transcript.scrollHeight - previousScrollHeight;
-      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded";
     } finally {
@@ -919,16 +903,6 @@
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
       void send();
-    }
-  }
-  function onScroll() {
-    if (transcript)
-      nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
-  }
-  function scrollLatest() {
-    if (transcript) {
-      transcript.scrollTop = transcript.scrollHeight;
-      nearBottom = true;
     }
   }
   async function focusSearch() {
@@ -1328,195 +1302,112 @@
       </div>
     {/if}
 
-    <section
-      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
-      bind:this={transcript}
-      onscroll={onScroll}
-      role="log"
-      aria-live="polite"
-      aria-relevant="additions text"
-    >
-      {#if bootstrapError && !bootstrap}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-          role="status"
-        >
+    {#if snapshot}
+      <TaskTranscript
+        bind:this={taskTranscript}
+        items={snapshot.items}
+        transcriptStart={snapshot.transcriptStart}
+        {loadingEarlier}
+        {loadEarlier}
+        {loadToolOutput}
+        {toolElapsedNow}
+        {toolOutputs}
+        {toolTimings}
+      />
+    {:else}
+      <section
+        class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+      >
+        {#if bootstrapError && !bootstrap}
           <div
-            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
+            class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+            role="status"
           >
-            <Icon name="activity" size={22} />
-          </div>
-          <p
-            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-          >
-            HOST UNAVAILABLE
-          </p>
-          <h1
-            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-          >
-            Your projects are still on the desktop.
-          </h1>
-          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-            Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
-            automatically.
-          </p>
-          <button
-            class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-            onclick={retryConnection}
-            disabled={retryingConnection}
-            >{retryingConnection ? "Retrying…" : "Retry connection"}</button
-          >
-        </div>
-      {:else if routeLoading && !snapshot}
-        <div
-          class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
-          aria-label="Loading task"
-          role="status"
-        >
-          <span class="sr-only">Loading task…</span>
-          {#each ["w-2/5", "w-4/5", "w-3/5"] as width, index (width)}
-            <div class={`animate-pulse ${index === 1 ? "ml-auto" : ""} ${width}`}>
-              <div class="mb-2 h-2.5 w-20 rounded-full bg-border"></div>
-              <div class="h-20 rounded-2xl bg-secondary/75"></div>
+            <div
+              class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
+            >
+              <Icon name="activity" size={22} />
             </div>
-          {/each}
-        </div>
-      {:else if !workspace}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-        >
-          <div
-            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-          >
-            <span class="font-serif text-[26px] leading-none font-bold">π</span>
+            <p
+              class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+            >
+              HOST UNAVAILABLE
+            </p>
+            <h1
+              class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
+            >
+              Your projects are still on the desktop.
+            </h1>
+            <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+              Pidex could not reach its local host. Nothing was deleted and no draft will be
+              submitted automatically.
+            </p>
+            <button
+              class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
+              onclick={retryConnection}
+              disabled={retryingConnection}
+              >{retryingConnection ? "Retrying…" : "Retry connection"}</button
+            >
           </div>
-          <p
-            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+        {:else if routeLoading && !snapshot}
+          <div
+            class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
+            aria-label="Loading task"
+            role="status"
           >
-            YOUR PRIVATE PI PROJECT
-          </p>
-          <h1
-            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-          >
-            Bring Pi with you.
-          </h1>
-          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-            Choose a project to create or resume a task.
-          </p>
-          <button
-            class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
-            onclick={openProjectPicker}>Add a project</button
-          >
-        </div>
-      {:else if !snapshot}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
-          role="status"
-        >
-          <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
-            Pick a task to continue
-          </h1>
-          <p class="mt-2 text-sm leading-relaxed text-muted">
-            Select an existing task or create a new one to get started.
-          </p>
-        </div>
-      {:else}
-        <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-12.5 max-[900px]:px-4 max-[350px]:px-3">
-          {#if snapshot.transcriptStart > 0}<button
-              class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-[10.5px] text-muted hover:text-foreground disabled:opacity-40"
-              onclick={loadEarlier}
-              disabled={loadingEarlier}
-              >{loadingEarlier
-                ? "Loading earlier messages…"
-                : `Load earlier messages · ${snapshot.transcriptStart.toLocaleString()} remaining`}</button
-            >{/if}
-          {#each snapshot.items as item (item.id)}
-            {#if item.type === "user"}
-              <article class="mb-5 flex flex-col items-end pt-1">
-                <div
-                  class="max-w-4/5 rounded-2xl bg-secondary px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] max-[560px]:max-w-9/10"
-                >
-                  {item.text}
-                </div>
-              </article>
-            {:else if item.type === "assistant"}
-              <article class="mb-5 min-w-0 px-1 pt-0.5 pb-1">
-                {#if item.thinking}
-                  <details class="mb-2.5 border-b border-border/70">
-                    <summary
-                      class="flex w-max cursor-pointer items-center gap-2 pt-1 pb-2 text-[11px] text-faint [list-style:none]"
-                      ><span class="inline-flex gap-0.5"
-                        ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-                        ></i><i
-                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
-                        ></i></span
-                      >Thinking</summary
-                    >
-                    <pre
-                      class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{item.thinking}</pre>
-                  </details>
-                {/if}
-                <div
-                  class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]"
-                >
-                  <AgentMessageBody
-                    nodes={parseAgentMessage(item.text)}
-                    streaming={!item.complete}
-                    theme={darkMode.current ? "dark" : "light"}
-                  />
-                </div>
-              </article>
-            {:else if item.type === "tool"}
-              <ToolCall
-                name={item.name}
-                argumentSummary={item.argumentSummary}
-                status={item.state}
-                output={(item.resourceId ? toolOutputs[item.resourceId]?.text : "") || item.preview}
-                startedAt={toolTimings[item.id]?.startedAt}
-                endedAt={toolTimings[item.id]?.endedAt}
-                now={toolElapsedNow}
-              >
-                {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
-                  <button
-                    class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
-                    onclick={() => loadToolOutput(item)}
-                    disabled={toolOutputs[item.resourceId]?.loading}
-                    >{toolOutputs[item.resourceId]?.loading
-                      ? "Loading bounded chunk…"
-                      : toolOutputs[item.resourceId]?.text
-                        ? `Load more · ${toolOutputs[item.resourceId]?.nextOffset.toLocaleString()} / ${toolOutputs[item.resourceId]?.total.toLocaleString()}`
-                        : `Load complete output · ${(item.outputSize ?? 0).toLocaleString()} chars`}</button
-                  >
-                {/if}
-                {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-                    class="mt-2 text-[10px] text-faint"
-                  >
-                    The host bounded this output at its safety limit.
-                  </p>{/if}
-                {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-                    class="mt-2 text-[10px] text-danger"
-                  >
-                    {toolOutputs[item.resourceId]?.error}
-                  </p>{/if}
-              </ToolCall>
-            {:else if item.type === "notice"}
-              <div
-                class={`mx-1 my-2.5 flex items-start gap-2 rounded-lg border bg-secondary/45 px-3 py-2 text-[11.5px] leading-relaxed ${item.level === "error" ? "border-danger/25 text-danger" : "border-border text-muted"}`}
-              >
-                <span class="mt-px flex-none text-primary"><Icon name="activity" size={14} /></span
-                ><span>{item.text}</span>
+            <span class="sr-only">Loading task…</span>
+            {#each ["w-2/5", "w-4/5", "w-3/5"] as width, index (width)}
+              <div class={`animate-pulse ${index === 1 ? "ml-auto" : ""} ${width}`}>
+                <div class="mb-2 h-2.5 w-20 rounded-full bg-border"></div>
+                <div class="h-20 rounded-2xl bg-secondary/75"></div>
               </div>
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    {#if !nearBottom && snapshot}<button
-        class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10.5px] text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
-        onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
-      >{/if}
+            {/each}
+          </div>
+        {:else if !workspace}
+          <div
+            class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+          >
+            <div
+              class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
+            >
+              <span class="font-serif text-[26px] leading-none font-bold">π</span>
+            </div>
+            <p
+              class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+            >
+              YOUR PRIVATE PI PROJECT
+            </p>
+            <h1
+              class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
+            >
+              Bring Pi with you.
+            </h1>
+            <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+              Choose a project to create or resume a task.
+            </p>
+            <button
+              class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
+              onclick={openProjectPicker}>Add a project</button
+            >
+          </div>
+        {:else}
+          <div
+            class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
+            role="status"
+          >
+            <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
+              Pick a task to continue
+            </h1>
+            <p class="mt-2 text-sm leading-relaxed text-muted">
+              Select an existing task or create a new one to get started.
+            </p>
+          </div>
+        {/if}
+      </section>
+    {/if}
 
     {#if snapshot}
       <footer
