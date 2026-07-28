@@ -1079,9 +1079,28 @@ test("ignores compact responses after navigating to another task", async ({ page
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     const response = await route.fetch();
     const payload = (await response.json()) as { json: Record<string, unknown> };
-    await route.fulfill({ response, json: { ...payload, json: { ...payload.json, sessions } } });
+    if (payload.json.id !== opened.result.id) {
+      await route.fulfill({ response });
+      return;
+    }
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...payload.json,
+          sessions,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
   });
   await page.route("**/api/rpc/workspaces/sessions", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (input.workspaceId !== opened.result.id) {
+      await route.continue();
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1120,7 +1139,6 @@ test("ignores compact responses after navigating to another task", async ({ page
   });
 
   await page.goto(`/tasks/${String(first.result.taskId)}`);
-  await openTasks(page);
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
   await prompt.fill("/compact");
