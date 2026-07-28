@@ -15,9 +15,9 @@
   } from "@pidex/api";
   import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
   import { ChatConnection, type ConnectionState } from "./AppShellConnection";
-  import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
   import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
+  import TaskComposer from "./TaskComposer.svelte";
   import TaskTranscript, {
     type TaskToolOutput,
     type TaskToolTiming,
@@ -30,6 +30,10 @@
   interface TaskTranscriptApi {
     scrollIfNearBottom(): void;
     scrollLatest(): void;
+  }
+  interface TaskComposerApi {
+    focus(): void;
+    resize(): void;
   }
 
   let bootstrap = $state.raw<Bootstrap>();
@@ -66,9 +70,9 @@
   let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
+  let taskComposer = $state<TaskComposerApi>();
   let taskTranscript = $state<TaskTranscriptApi>();
   let searchInput = $state<HTMLInputElement>();
-  let promptInput = $state<HTMLTextAreaElement>();
   let relativeNow = $state(Date.now());
   let dialogValue = $state<string | boolean>("");
   let dialogElement = $state<HTMLDialogElement>();
@@ -484,9 +488,9 @@
       initializeDialogValue(snapshot.extensionDialog);
       if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
-    resizePrompt();
+    taskComposer?.resize();
     taskTranscript?.scrollLatest();
-    if (focusComposer) promptInput?.focus();
+    if (focusComposer) taskComposer?.focus();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
     if (!snapshot) return;
@@ -635,7 +639,7 @@
     if (clearedSubmittedDraft) {
       draft = "";
       persistDraft();
-      void tick().then(resizePrompt);
+      void tick().then(() => taskComposer?.resize());
     }
     try {
       const outcome = await api.sendMessage(
@@ -652,7 +656,7 @@
       if (clearedSubmittedDraft && !draft) {
         draft = text;
         persistDraft();
-        void tick().then(resizePrompt);
+        void tick().then(() => taskComposer?.resize());
       }
       error = cause instanceof Error ? cause.message : "Prompt rejected";
     }
@@ -889,22 +893,6 @@
   function persistDraft() {
     if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.taskId}`, draft);
   }
-  function resizePrompt() {
-    if (!promptInput) return;
-    promptInput.style.height = "auto";
-    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
-  }
-  function draftInput() {
-    persistDraft();
-    resizePrompt();
-  }
-  function keydown(event: KeyboardEvent) {
-    if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
-      event.preventDefault();
-      void send();
-    }
-  }
   async function focusSearch() {
     searchOpen = true;
     if (matchMedia("(max-width: 900px)").matches) drawerOpen = true;
@@ -938,7 +926,7 @@
       (document.querySelector(".menu-button") as HTMLElement)?.focus();
       return;
     }
-    if (document.activeElement === searchInput) promptInput?.focus();
+    if (document.activeElement === searchInput) taskComposer?.focus();
   }
   function wentOffline() {
     chatConnection.disconnect();
@@ -1410,123 +1398,28 @@
     {/if}
 
     {#if snapshot}
-      <footer
-        class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
-      >
-        {#if active}
-          <div
-            class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-[10.5px] text-faint"
-          >
-            <span class="flex items-center gap-1.5"
-              ><span class="size-1.5 animate-pulse rounded-full bg-primary"
-              ></span>{snapshot.runStatus} · {snapshot.steeringQueue.length} steer · {snapshot
-                .followUpQueue.length} follow-up</span
-            >
-            {#if snapshot.steeringQueue.length + snapshot.followUpQueue.length > 0}<button
-                class="border-0 bg-transparent p-0 text-[10.5px] text-primary"
-                onclick={clearQueue}>Clear queues</button
-              >{/if}
-          </div>
-        {/if}
-        <div class="chat-composer mx-auto" data-testid="chat-composer">
-          <textarea
-            class="chat-composer__input"
-            bind:this={promptInput}
-            bind:value={draft}
-            oninput={draftInput}
-            onkeydown={keydown}
-            rows="2"
-            placeholder={connection !== "connected"
-              ? "Draft locally while the host reconnects…"
-              : active
-                ? "Add guidance while Pi works…"
-                : "Ask Pi to work on this project…"}
-            aria-label="Prompt"></textarea>
-          <div class="chat-composer__toolbar">
-            <div class="chat-composer__controls">
-              <label class="chat-composer__control">
-                <select
-                  class="chat-composer__select"
-                  aria-label="Model"
-                  value={selectedModel}
-                  onchange={(e) => stageConfiguration({ model: e.currentTarget.value })}
-                  disabled={!workspace?.models.length}
-                >
-                  {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
-                      >{model.name}</option
-                    >{/each}
-                </select>
-              </label>
-              <span class="chat-composer__divider" aria-hidden="true"></span>
-              <label class="chat-composer__control">
-                <span class="chat-composer__control-icon" aria-hidden="true"
-                  ><Icon name="activity" size={14} /></span
-                >
-                <select
-                  class="chat-composer__select"
-                  aria-label="Thinking level"
-                  value={selectedThinkingLevel}
-                  onchange={(e) =>
-                    stageConfiguration({
-                      thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                    })}
-                >
-                  <option value="off">Off</option><option value="minimal">Minimal</option><option
-                    value="low">Low</option
-                  ><option value="medium">Medium</option><option value="high">High</option><option
-                    value="xhigh">Extra high</option
-                  ><option value="max">Max</option>
-                </select>
-              </label>
-              {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span
-                >{/if}
-            </div>
-            <div class="flex min-w-0 flex-none items-center gap-1">
-              {#if snapshot.contextUsage}<ContextWindowMeter usage={snapshot.contextUsage} />{/if}
-              {#if active}
-                <select
-                  class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"
-                  bind:value={delivery}
-                  aria-label="Delivery mode"
-                  ><option value="steer">Steer</option><option value="follow-up">Follow-up</option
-                  ></select
-                >
-                <button
-                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 disabled:opacity-40"
-                  onclick={stop}
-                  disabled={connection !== "connected"}
-                  aria-label="Stop"><Icon name="stop" /></button
-                >
-                <button
-                  class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
-                  onclick={send}
-                  disabled={!draft.trim() || connection !== "connected"}
-                  aria-label="Queue">Queue</button
-                >
-              {:else}
-                <button
-                  class="chat-composer__send"
-                  onclick={send}
-                  disabled={!draft.trim() ||
-                    !workspace?.models.length ||
-                    connection !== "connected" ||
-                    snapshot.run?.requiresAcknowledgement}
-                  aria-label="Send"><Icon name="send" /></button
-                >
-              {/if}
-            </div>
-          </div>
-        </div>
-        <div
-          class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
-        >
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-            >{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(
-              4,
-            )}</span
-          >
-        </div>
-      </footer>
+      <TaskComposer
+        bind:this={taskComposer}
+        bind:delivery
+        bind:draft
+        {active}
+        {clearQueue}
+        {connection}
+        contextUsage={snapshot.contextUsage}
+        followUpCount={snapshot.followUpQueue.length}
+        {hasConfigurationDraft}
+        models={workspace?.models ?? []}
+        {persistDraft}
+        requiresAcknowledgement={Boolean(snapshot.run?.requiresAcknowledgement)}
+        runStatus={snapshot.runStatus}
+        {selectedModel}
+        {selectedThinkingLevel}
+        {send}
+        {stageConfiguration}
+        stats={snapshot.stats}
+        steeringCount={snapshot.steeringQueue.length}
+        {stop}
+      />
     {/if}
   </main>
 </div>
