@@ -426,6 +426,30 @@ describe.sequential("HTTP API endpoints", () => {
     await expect(api.chats.dispose({ chatId })).resolves.toEqual({ ok: true });
   });
 
+  it("rejects removing a managed worktree after its task starts", async () => {
+    const worktree = await api.workspaces.createWorktree({ workspaceId });
+    const created = await api.chats.create({ workspaceId: worktree.id });
+    await api.chats.sendMessage({
+      ...actionFor(created),
+      text: "Persist this worktree task",
+      delivery: "normal",
+    });
+    await expect
+      .poll(async () => (await api.chats.get({ chatId: created.chatId })).transcriptTotal, {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(0);
+    await api.chats.dispose({ chatId: created.chatId });
+    await api.workspaces.open({ path: worktree.path, remember: true });
+
+    await expect(api.workspaces.removeWorktree({ workspaceId: worktree.id })).rejects.toMatchObject(
+      {
+        code: "worktree_has_tasks",
+        status: 409,
+      },
+    );
+  });
+
   async function currentChat() {
     return api.chats.get({ chatId });
   }

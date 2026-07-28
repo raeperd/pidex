@@ -80,14 +80,35 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             );
             const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
             const worktreePath = yield* createProjectWorktree(canonicalSource);
-            const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
-              metadata.workspaceProjectId(source.id),
-            );
-            const id = yield* attemptOperation("metadata.rememberWorkspace", () =>
-              metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
-            );
-            return yield* attemptOperation("chats.openWorkspace", () =>
-              manager.openWorkspace(id, worktreePath),
+            let id: string | undefined;
+            return yield* Effect.gen(function* () {
+              const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+                metadata.workspaceProjectId(source.id),
+              );
+              const createdWorkspaceId = yield* attemptOperation("metadata.rememberWorkspace", () =>
+                metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
+              );
+              id = createdWorkspaceId;
+              const opened = yield* attemptOperation("chats.openWorkspace", () =>
+                manager.openWorkspace(createdWorkspaceId, worktreePath),
+              );
+              yield* attemptOperation("chats.markWorkspaceDisposable", () =>
+                manager.markWorkspaceDisposable(createdWorkspaceId),
+              );
+              return opened;
+            }).pipe(
+              Effect.onError(() =>
+                Effect.gen(function* () {
+                  yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
+                    Effect.catch(() => Effect.void),
+                  );
+                  const createdWorkspaceId = id;
+                  if (createdWorkspaceId)
+                    yield* attemptOperation("metadata.forgetWorkspace", () =>
+                      metadata.forgetWorkspace(createdWorkspaceId),
+                    ).pipe(Effect.catch(() => Effect.void));
+                }),
+              ),
             );
           }),
         ),
@@ -114,9 +135,17 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             const source = yield* attemptOperation("chats.workspace", () =>
               manager.workspace(sourceWorkspaceId),
             );
-            yield* attemptOperation("chats.assertWorkspaceDisposable", () =>
-              manager.assertWorkspaceDisposable(worktree.id),
+            const canRemove = yield* attemptOperation("chats.workspaceCanBeRemoved", () =>
+              manager.workspaceCanBeRemoved(worktree.id),
             );
+            if (!canRemove)
+              return yield* Effect.fail(
+                HttpError.make({
+                  status: 409,
+                  code: "worktree_has_tasks",
+                  message: "Only a newly created worktree without task history can be removed",
+                }),
+              );
             yield* removeProjectWorktree(source.path, worktree.path);
             yield* attemptOperation("chats.forgetWorkspace", () =>
               manager.forgetWorkspace(worktree.id),
