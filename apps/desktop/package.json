@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node scripts/start.mjs",
+    "start": "electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
