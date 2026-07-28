@@ -17,7 +17,8 @@
   import { ChatConnection, type ConnectionState } from "./chat-connection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
-  import MarkdownNodes, { parseMarkdown } from "./MarkdownNodes.svelte";
+  import { parseAgentMessage } from "./AgentMessageParser";
+  import MarkdownNodes from "./MarkdownNodes.svelte";
   import { taskPath, TaskSnapshotCache } from "./task-navigation";
   import ToolCall from "./ToolCall.svelte";
 
@@ -1460,7 +1461,7 @@
                   class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]"
                 >
                   <MarkdownNodes
-                    nodes={parseMarkdown(item.text)}
+                    nodes={parseAgentMessage(item.text)}
                     streaming={!item.complete}
                     theme={darkMode.current ? "dark" : "light"}
                   />
