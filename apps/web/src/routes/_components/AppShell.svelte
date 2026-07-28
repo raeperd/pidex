@@ -107,6 +107,16 @@
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
   let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let hasTopBanner = $derived(
+    Boolean(
+      error ||
+      (snapshot && connection !== "connected" && !routeLoading) ||
+      snapshot?.run?.requiresAcknowledgement ||
+      workspace?.protectedResourcesSkipped ||
+      workspace?.resourceDiagnostics.length ||
+      (workspace && workspace.models.length === 0),
+    ),
+  );
   let configurationDraft = $derived(snapshot ? (configurationDrafts[snapshot.taskId] ?? {}) : {});
   let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
   let selectedThinkingLevel = $derived(
@@ -1419,6 +1429,8 @@
         {/if}
       </header>
     {/if}
+
+    {#if isNewTask && hasTopBanner}<div class="h-13 flex-none" aria-hidden="true"></div>{/if}
 
     {#if error}
       <div

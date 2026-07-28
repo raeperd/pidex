@@ -675,7 +675,15 @@ test("retries a deep-linked task without replacing its route", async ({ page, re
 test("keeps search and task creation in the no-active-task experience", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
   const createRequests: unknown[] = [];
   const taskCreationRequests: string[] = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
@@ -711,6 +719,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
         json: {
           ...workspace,
           models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+          resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
         },
       },
     });
@@ -755,8 +764,17 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
   await expect(page.locator("main > header")).toHaveCount(0);
-  if (test.info().project.name === "mobile")
-    await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
+  const topControl =
+    testInfo.project.name === "mobile"
+      ? page.getByRole("button", { name: "Open tasks" })
+      : page.locator("main > .window-drag-region");
+  const resourceWarning = page.getByRole("status").filter({ hasText: "E2E resource warning" });
+  await expect(topControl).toBeVisible();
+  await expect(resourceWarning).toBeVisible();
+  const topControlBox = await topControl.boundingBox();
+  const resourceWarningBox = await resourceWarning.boundingBox();
+  if (!topControlBox || !resourceWarningBox) throw new Error("Expected visible new-task chrome");
+  expect(resourceWarningBox.y).toBeGreaterThanOrEqual(topControlBox.y + topControlBox.height);
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
   expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
