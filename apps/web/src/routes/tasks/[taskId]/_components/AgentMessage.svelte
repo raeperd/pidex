@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import AgentMessageBody from "./AgentMessageBody.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
   import type { HighlightTheme } from "./AgentMessageCodeBlock.svelte";
@@ -8,27 +9,50 @@
     text,
     theme,
     thinking,
+    timestamp,
   }: {
     complete: boolean;
     text: string;
     theme: HighlightTheme;
     thinking?: string;
+    timestamp: string;
   } = $props();
 
   let nodes = $derived(parseAgentMessage(text));
+  let copied = $state(false);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  let sentAt = $derived(new Date(timestamp));
+  let formattedTimestamp = $derived(
+    new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(sentAt),
+  );
+
+  async function copyResponse() {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (copied = false), 1_500);
+    } catch {
+      copied = false;
+    }
+  }
+
+  onDestroy(() => {
+    if (copiedTimer) clearTimeout(copiedTimer);
+  });
 </script>
 
-<article class="mb-5 min-w-0 px-1 pt-0.5 pb-1">
+<article class="group/assistant mb-5 min-w-0 px-1 pt-0.5 pb-1">
   {#if thinking}
     <details class="mb-2.5 border-b border-border/70">
       <summary
         class="flex w-max cursor-pointer items-center gap-2 pt-1 pb-2 text-[11px] text-faint [list-style:none]"
-        ><span class="inline-flex gap-0.5"
-          ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-            class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-          ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
-          ></i></span
-        >Thinking</summary
+        >{#if !complete}<span class="inline-flex gap-0.5"
+            ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
+              class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
+            ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
+            ></i></span
+          >{/if}{complete ? "Thought" : "Thinking"}</summary
       >
       <pre
         class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{thinking}</pre>
@@ -37,4 +61,18 @@
   <div class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]">
     <AgentMessageBody {nodes} streaming={!complete} {theme} />
   </div>
+  {#if complete && text.trim()}
+    <footer
+      class="mt-2 flex items-center gap-2 text-[10.5px] text-faint opacity-70 transition-opacity group-hover/assistant:opacity-100 focus-within:opacity-100"
+    >
+      <button
+        type="button"
+        class="rounded px-1 py-0.5 font-medium hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+        aria-label={copied ? "Response copied" : "Copy response"}
+        onclick={() => void copyResponse()}>{copied ? "Copied" : "Copy"}</button
+      >
+      <span aria-hidden="true">·</span>
+      <time datetime={timestamp} title={sentAt.toLocaleString()}>{formattedTimestamp}</time>
+    </footer>
+  {/if}
 </article>

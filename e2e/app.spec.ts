@@ -740,7 +740,12 @@ test("keeps search and task creation in the no-active-task experience", async ({
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
-test("renders assistant markdown as safe interactive components", async ({ page, request }) => {
+test("renders assistant markdown as safe interactive components", async ({
+  context,
+  page,
+  request,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   let snapshot: Record<string, unknown> | undefined;
@@ -815,6 +820,12 @@ const answer = 42;
   await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
   expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+
+  await expect(page.locator('time[datetime="2026-07-27T00:00:00.000Z"]')).toBeVisible();
+  await page.getByRole("button", { name: "Copy response" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("# Rendered result");
 });
 
 test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
@@ -863,7 +874,14 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     item: {
       ...toolItem,
       state: "success",
-      preview: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+      preview: JSON.stringify({
+        content: [
+          {
+            type: "text",
+            text: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+          },
+        ],
+      }),
     },
   });
 
@@ -872,6 +890,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
   await expect(page.locator(".tool-call__output")).not.toContainText("one");
   await expect(page.locator(".tool-call__output")).toContainText("seven");
+  await expect(page.locator(".tool-call__output")).not.toContainText('"type": "text"');
 
   await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
   await toolBlock.click();
@@ -894,6 +913,28 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
   await expect(restored).toBeVisible();
   await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 4,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_read_e2e",
+      name: "read",
+      argumentSummary: JSON.stringify({ path: "README.md" }),
+      state: "success",
+      preview: JSON.stringify({ content: [{ type: "text", text: "project readme" }] }),
+    },
+  });
+
+  const earlierTools = page.getByRole("button", { name: "Show 1 previous tool call" });
+  await expect(earlierTools).toBeVisible();
+  await expect(toolBlock).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read README.md" })).toBeVisible();
+  await earlierTools.click();
+  await expect(page.getByRole("button", { name: "Hide 1 previous tool call" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "$ ls -la" })).toBeVisible();
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
@@ -954,6 +995,23 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
   await page.getByText("Thinking", { exact: true }).click();
   await expect(page.locator("details pre")).toHaveText("weighing options");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: eventId++,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "# Streamed heading\n\nBody text.",
+      thinking: "weighing options",
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByText("Thought", { exact: true })).toBeVisible();
+  await expect(page.getByText("Thinking", { exact: true })).toHaveCount(0);
 });
 
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
