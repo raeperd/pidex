@@ -102,7 +102,7 @@ export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(functi
 
   yield* runGit(
     sourceRepository.worktreeRoot,
-    ["worktree", "remove", "--force", worktreeRepository.worktreeRoot],
+    ["worktree", "remove", worktreeRepository.worktreeRoot],
     "worktree_remove_failed",
     "Git could not remove the worktree",
   );

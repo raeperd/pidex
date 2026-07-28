@@ -703,7 +703,12 @@
         return false;
       }
       persistDraft();
-      bootstrap = await api.bootstrap();
+      const refreshedBootstrap = await api.bootstrap();
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      bootstrap = refreshedBootstrap;
       rememberWorkspace(worktree, false);
       const previousConfiguration = configurationDrafts[previousSnapshot.taskId];
       if (previousConfiguration)

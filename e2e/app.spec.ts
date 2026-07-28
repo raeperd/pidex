@@ -954,10 +954,24 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   let sourceWorkspace: Record<string, unknown> | undefined;
   let localSnapshot: Record<string, unknown> | undefined;
   let chatCreations = 0;
+  let localChatCreations = 0;
+  let worktreeChatCreations = 0;
   let worktreeCreations = 0;
+  let worktreeBootstrapPending = false;
+  let releaseWorktreeBootstrap: (() => void) | undefined;
   const removedWorktrees: string[] = [];
   const sentPrompts: Record<string, unknown>[] = [];
   await installFakeWebSocket(page);
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    const response = await route.fetch();
+    if (worktreeChatCreations === 3 && !worktreeBootstrapPending) {
+      worktreeBootstrapPending = true;
+      await new Promise<void>((resolve) => {
+        releaseWorktreeBootstrap = resolve;
+      });
+    }
+    await route.fulfill({ response });
+  });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     const response = await route.fetch();
     const payload = (await response.json()) as { json: Record<string, unknown> };
@@ -994,12 +1008,15 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   });
   await page.route("**/api/rpc/chats/create", async (route) => {
     chatCreations += 1;
-    if (chatCreations === 1) {
+    const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
+    if (input.workspaceId !== "worktree_workspace_e2e") {
+      localChatCreations += 1;
       if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
+      const suffix = localChatCreations === 1 ? "" : `_${localChatCreations}`;
       localSnapshot = {
-        chatId: "local_chat_e2e",
+        chatId: `local_chat_e2e${suffix}`,
         workspaceId: String(sourceWorkspace.id),
-        taskId: "local_task_e2e",
+        taskId: `local_task_e2e${suffix}`,
         revision: 0,
         runStatus: "idle",
         model: "e2e/model",
@@ -1018,19 +1035,21 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       });
       return;
     }
-    if (chatCreations === 2) {
+    worktreeChatCreations += 1;
+    if (worktreeChatCreations === 1) {
       await route.abort("failed");
       return;
     }
     if (!localSnapshot) throw new Error("Expected the local task to exist");
+    const suffix = worktreeChatCreations === 2 ? "" : `_${worktreeChatCreations}`;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       json: {
         json: {
           ...localSnapshot,
-          chatId: "worktree_chat_e2e",
-          taskId: "worktree_task_e2e",
+          chatId: `worktree_chat_e2e${suffix}`,
+          taskId: `worktree_task_e2e${suffix}`,
           workspaceId: "worktree_workspace_e2e",
         },
       },
@@ -1093,6 +1112,32 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   await expect(page).toHaveURL(/\/tasks\/worktree_task_e2e$/);
   await page.goBack();
   await expect(page).toHaveURL("/");
+
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
+  await expect(page).toHaveURL(/\/tasks\/local_task_e2e_2$/);
+  const cancelledComposer = page.getByTestId("chat-composer");
+  await cancelledComposer.getByRole("button", { name: "Start in Work locally" }).click();
+  await page
+    .getByRole("menu", { name: "Start in" })
+    .getByRole("menuitemradio", { name: "New worktree" })
+    .click();
+  await page.getByLabel("Prompt").fill("Cancel this worktree prompt");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => worktreeBootstrapPending).toBe(true);
+
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+  releaseWorktreeBootstrap?.();
+
+  await expect
+    .poll(() => removedWorktrees)
+    .toEqual(["worktree_workspace_e2e", "worktree_workspace_e2e"]);
+  await expect.poll(() => sentPrompts).toHaveLength(1);
+  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
+    .toBe(String(sourceWorkspace?.path));
 });
 
 test("renders assistant markdown as safe interactive components", async ({

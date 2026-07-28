@@ -219,6 +219,15 @@ describe.sequential("HTTP API endpoints", () => {
     });
     await api.chats.create({ workspaceId: created.id });
 
+    const dirtyFile = path.join(created.path, "unsaved-worktree-change.txt");
+    await writeFile(dirtyFile, "Do not delete this change.\n");
+    await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).rejects.toMatchObject({
+      code: "worktree_remove_failed",
+      status: 400,
+    });
+    await expect(access(dirtyFile)).resolves.toBeUndefined();
+    await rm(dirtyFile);
+
     await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).resolves.toEqual({
       ok: true,
     });
