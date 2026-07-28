@@ -4,7 +4,11 @@
   const RADIUS = 9.75;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-  let { usage }: { usage: ContextUsage } = $props();
+  let {
+    disabled = false,
+    onclick,
+    usage,
+  }: { disabled?: boolean; onclick: () => void; usage: ContextUsage } = $props();
   const componentId = $props.id();
   const detailsId = `${componentId}-details`;
 
@@ -14,8 +18,8 @@
   let overloaded = $derived(normalizedPercent > 90);
   let ariaLabel = $derived(
     percentageLabel
-      ? `Context window ${percentageLabel} used`
-      : "Context window usage is being calculated",
+      ? `Compact task (context window ${percentageLabel} used)`
+      : "Compact task (context window usage is being calculated)",
   );
 
   function formatPercentage(value: number | null) {
@@ -38,6 +42,9 @@
     type="button"
     aria-label={ariaLabel}
     aria-describedby={detailsId}
+    title="Compact task"
+    {disabled}
+    {onclick}
   >
     <svg class="context-meter__ring" viewBox="0 0 24 24" aria-hidden="true">
       <circle class="context-meter__track" cx="12" cy="12" r={RADIUS} />
@@ -104,6 +111,11 @@
     background: transparent;
     color: var(--primary);
     transition: background-color 140ms ease;
+  }
+
+  .context-meter__trigger:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
   }
 
   .context-meter__trigger:hover,

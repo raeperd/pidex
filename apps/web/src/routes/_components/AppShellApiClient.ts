@@ -162,10 +162,11 @@ export class PidexApiClient {
     });
   }
 
-  compact(chatId: string, expectedRevision: number): Promise<ChatSnapshot> {
+  compact(chatId: string, expectedRevision: number, instructions?: string): Promise<ChatSnapshot> {
     return this.client.chats.compact({
       chatId,
       ...this.actionFields(expectedRevision),
+      ...(instructions ? { instructions } : {}),
     });
   }
 

@@ -43,11 +43,14 @@
     bind:draft={() => context.task.draft, context.taskActions.setDraft}
     active={context.task.active}
     clearQueue={context.taskActions.clearQueue}
+    commands={context.shell.workspace?.commands ?? []}
+    compact={context.taskActions.compact}
     connection={context.shell.connection}
     contextUsage={context.task.snapshot.contextUsage}
     followUpCount={context.task.snapshot.followUpQueue.length}
     hasConfigurationDraft={context.task.hasConfigurationDraft}
     models={context.shell.workspace?.models ?? []}
+    openCompact={context.taskActions.openCompact}
     persistDraft={context.taskActions.persistDraft}
     requiresAcknowledgement={Boolean(context.task.snapshot.run?.requiresAcknowledgement)}
     runStatus={context.task.snapshot.runStatus}

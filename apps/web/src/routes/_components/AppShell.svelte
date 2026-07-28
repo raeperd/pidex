@@ -220,8 +220,10 @@
       attachComposer: taskViews.attachComposer,
       attachTranscript: taskViews.attachTranscript,
       clearQueue,
+      compact,
       loadEarlier,
       loadToolOutput,
+      openCompact,
       persistDraft,
       send,
       setDelivery: (value) => (delivery = value),
@@ -937,13 +939,15 @@
   function openCompact() {
     if (snapshot) void tick().then(() => compactDialogElement?.showModal());
   }
-  async function compact() {
-    if (!snapshot) return;
+  async function compact(instructions?: string) {
+    if (!snapshot) return false;
     try {
-      snapshot = await api.compact(snapshot.chatId, snapshot.revision);
+      snapshot = await api.compact(snapshot.chatId, snapshot.revision, instructions);
       compactDialogElement?.close();
+      return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Compaction failed";
+      return false;
     }
   }
   async function answerDialog(dialog: ExtensionDialog, cancelled = false) {
@@ -1392,14 +1396,6 @@
             aria-label="Rename"
             title="Rename task"
             ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
-          >
-          <button
-            class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
-            onclick={openCompact}
-            disabled={active}
-            aria-label="Compact"
-            title="Compact task"
-            ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
           >
         </div>
       {/if}
