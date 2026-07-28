@@ -5,7 +5,9 @@ import { RPCLink } from "@orpc/client/fetch";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
-const appIconPath = path.resolve(import.meta.dirname, "../assets/icon.png");
+const appIconPath = app.isPackaged
+  ? path.join(process.resourcesPath, "icon.png")
+  : path.resolve(import.meta.dirname, "../assets/icon.png");
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
 const localUrl = `http://127.0.0.1:${port}`;
 const apiClient: PidexApiContractClient = createORPCClient(
@@ -23,9 +25,13 @@ const remember = (chunk: Buffer) => {
 
 function spawnServer(stateDirectory: string) {
   if (process.env.PIDEX_WEB_URL || quitting) return;
-  const entry = path.resolve(import.meta.dirname, "../../server/dist/main.js");
+  const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
+  const serverDirectory = app.isPackaged
+    ? path.join(process.resourcesPath, "server")
+    : path.join(repositoryRoot, "apps/server");
+  const entry = path.join(serverDirectory, "dist/main.js");
   const child = spawn(process.execPath, [entry], {
-    cwd: path.resolve(import.meta.dirname, "../../.."),
+    cwd: app.isPackaged ? process.resourcesPath : repositoryRoot,
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",

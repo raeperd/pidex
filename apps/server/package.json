@@ -1,6 +1,9 @@
 {
   "name": "@pidex/server",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -2,9 +2,14 @@ packages:
   - apps/*
   - packages/*
 
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
+
 allowBuilds:
   "@google/genai": false
   electron: true
+  electron-winstaller: false
   esbuild: true
   msgpackr-extract: false
   protobufjs: false
