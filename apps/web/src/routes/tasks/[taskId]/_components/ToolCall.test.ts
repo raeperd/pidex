@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatToolDuration, toolCallHeader, toolCallPreview } from "./ToolCall.svelte";
+import {
+  formatToolDuration,
+  toolCallHeader,
+  toolCallOutputText,
+  toolCallPreview,
+} from "./ToolCall.svelte";
 
 describe("toolCallHeader", () => {
   it("renders bash calls as a shell prompt", () => {
@@ -9,14 +14,14 @@ describe("toolCallHeader", () => {
     });
   });
 
-  it("renders path tools as the tool name and its target", () => {
+  it("renders path tools as concise actions and targets", () => {
     expect(toolCallHeader("read", JSON.stringify({ path: "README.md" }))).toEqual({
-      label: "read",
+      label: "Read",
       detail: "README.md",
     });
     expect(toolCallHeader("grep", JSON.stringify({ pattern: "TODO", path: "src" }))).toEqual({
-      label: "grep",
-      detail: "TODO src",
+      label: "Searched",
+      detail: "TODO · src",
     });
   });
 
@@ -33,6 +38,14 @@ describe("toolCallHeader", () => {
 });
 
 describe("toolCallPreview", () => {
+  it("unwraps Pi text results before presenting tool output", () => {
+    expect(
+      toolCallOutputText(
+        JSON.stringify({ content: [{ type: "text", text: "ok\tgithub.com/example/project\n" }] }),
+      ),
+    ).toBe("ok\tgithub.com/example/project\n");
+  });
+
   it("keeps the trailing window and counts what it hid", () => {
     const preview = toolCallPreview("1\n2\n3\n4\n5\n6\n7\n");
 
