@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { onMount, tick, untrack, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
@@ -14,17 +14,25 @@
     type ToolItem,
     type Workspace,
   } from "@pidex/api";
-  import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
-  import { ChatConnection, type ConnectionState } from "./chat-connection";
-  import ContextWindowMeter from "./ContextWindowMeter.svelte";
+  import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
+  import { ChatConnection, type ConnectionState } from "./AppShellConnection";
+  import {
+    createTaskViewControllerRegistry,
+    provideAppShellContext,
+    type AppShellContext,
+    type TaskDelivery,
+    type TaskToolOutput,
+    type TaskToolTiming,
+  } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
-  import Markdown from "./Markdown.svelte";
-  import { taskPath, TaskSnapshotCache } from "./task-navigation";
+  import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+
+  let { children }: { children: Snippet } = $props();
 
   let bootstrap = $state.raw<Bootstrap>();
   let workspace = $state.raw<Workspace>();
@@ -56,30 +64,15 @@
   let routeSequence = 0;
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
-  let delivery = $state<"steer" | "follow-up">("steer");
+  let delivery = $state<TaskDelivery>("steer");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
   let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
-  let copyState = $state.raw<Record<string, "copied" | "failed">>({});
-  let toolOutputs = $state.raw<
-    Record<
-      string,
-      {
-        text: string;
-        nextOffset: number;
-        total: number;
-        complete: boolean;
-        loading: boolean;
-        sourceTruncated: boolean;
-        error?: string;
-      }
-    >
-  >({});
-  let transcript = $state<HTMLElement>();
+  let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
+  let toolElapsedNow = $state(Date.now());
+  let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
   let searchInput = $state<HTMLInputElement>();
-  let promptInput = $state<HTMLTextAreaElement>();
-  let nearBottom = $state(true);
   let relativeNow = $state(Date.now());
   let dialogValue = $state<string | boolean>("");
   let dialogElement = $state<HTMLDialogElement>();
@@ -90,11 +83,15 @@
   const mobileViewport = new MediaQuery("max-width: 900px");
   const api = new PidexApiClient();
   const snapshotCache = new TaskSnapshotCache();
+  const taskViews = createTaskViewControllerRegistry();
   const chatConnection = new ChatConnection({
     onEvent: applyEvent,
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),
   });
+  let pendingTextDeltas = new Map<string, { text: string; thinking: string }>();
+  let pendingTextDeltaFrame: number | undefined;
+  let pendingTextDeltaChatId = "";
 
   let routePath = $derived(page.url.pathname);
   let routeTaskId = $derived(page.params.taskId ?? "");
@@ -163,6 +160,82 @@
       return firstUser.text.split("\n")[0]?.slice(0, 64) || workspace?.name || "Pidex";
     return workspace?.name ?? "Pidex";
   });
+  const appShellContext: AppShellContext = {
+    shell: {
+      get bootstrap() {
+        return bootstrap;
+      },
+      get bootstrapError() {
+        return bootstrapError;
+      },
+      get connection() {
+        return connection;
+      },
+      get retryingConnection() {
+        return retryingConnection;
+      },
+      get routeLoading() {
+        return routeLoading;
+      },
+      get workspace() {
+        return workspace;
+      },
+    },
+    task: {
+      get active() {
+        return active;
+      },
+      get delivery() {
+        return delivery;
+      },
+      get draft() {
+        return draft;
+      },
+      get hasConfigurationDraft() {
+        return hasConfigurationDraft;
+      },
+      get loadingEarlier() {
+        return loadingEarlier;
+      },
+      get selectedModel() {
+        return selectedModel;
+      },
+      get selectedThinkingLevel() {
+        return selectedThinkingLevel;
+      },
+      get snapshot() {
+        return snapshot;
+      },
+      get toolElapsedNow() {
+        return toolElapsedNow;
+      },
+      get toolOutputs() {
+        return toolOutputs;
+      },
+      get toolTimings() {
+        return toolTimings;
+      },
+    },
+    taskActions: {
+      attachComposer: taskViews.attachComposer,
+      attachTranscript: taskViews.attachTranscript,
+      clearQueue,
+      loadEarlier,
+      loadToolOutput,
+      persistDraft,
+      send,
+      setDelivery: (value) => (delivery = value),
+      setDraft: (value) => (draft = value),
+      stageConfiguration,
+      stop,
+    },
+    projectActions: {
+      openProjectPicker,
+      retryConnection,
+    },
+  };
+  provideAppShellContext(appShellContext);
+
   const relativeTime = (value: string) => {
     const seconds = Math.round((new Date(value).getTime() - relativeNow) / 1000);
     const absolute = Math.abs(seconds);
@@ -530,7 +603,7 @@
       draft = localStorage.getItem(`pidex:draft:${snapshot.taskId}`) ?? "";
       drawerOpen = false;
       await tick();
-      scrollLatest();
+      taskViews.scrollLatest();
     }
 
     try {
@@ -580,9 +653,9 @@
       initializeDialogValue(snapshot.extensionDialog);
       if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
-    resizePrompt();
-    scrollLatest();
-    if (focusComposer) promptInput?.focus();
+    taskViews.resizeComposer();
+    taskViews.scrollLatest();
+    if (focusComposer) taskViews.focusComposer();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
     if (!snapshot) return;
@@ -592,29 +665,73 @@
     else items.push(item);
     snapshot = { ...snapshot, items };
   }
+  /** Times tool calls in the client, the way the Pi TUI does; the transcript carries no duration. */
+  function recordToolTiming(item: ToolItem) {
+    const current = toolTimings[item.id];
+    if (current?.endedAt !== undefined) return;
+    // A tool already running when this chat loaded arrives without a start we can trust,
+    // so report no duration rather than an invented `Took 0.0s`.
+    if (!current && item.state !== "running") return;
+    toolElapsedNow = Date.now();
+    const startedAt = current?.startedAt ?? toolElapsedNow;
+    toolTimings = {
+      ...toolTimings,
+      [item.id]: item.state === "running" ? { startedAt } : { startedAt, endedAt: toolElapsedNow },
+    };
+  }
+  function queueTextDelta(event: Extract<ServerEvent, { type: "text_delta" }>) {
+    if (pendingTextDeltaChatId && pendingTextDeltaChatId !== event.chatId)
+      flushScheduledTextDeltas();
+    pendingTextDeltaChatId = event.chatId;
+    const pending = pendingTextDeltas.get(event.itemId) ?? { text: "", thinking: "" };
+    pendingTextDeltas.set(event.itemId, {
+      ...pending,
+      [event.channel]: pending[event.channel] + event.delta,
+    });
+    if (pendingTextDeltaFrame !== undefined) return;
+    pendingTextDeltaFrame = requestAnimationFrame(() => {
+      pendingTextDeltaFrame = undefined;
+      flushPendingTextDeltas();
+      taskViews.scrollIfNearBottom();
+    });
+  }
+  function flushScheduledTextDeltas() {
+    if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
+    pendingTextDeltaFrame = undefined;
+    flushPendingTextDeltas();
+  }
+  function flushPendingTextDeltas() {
+    if (snapshot && snapshot.chatId === pendingTextDeltaChatId && pendingTextDeltas.size > 0)
+      snapshot = {
+        ...snapshot,
+        items: snapshot.items.map((item) => {
+          const delta = pendingTextDeltas.get(item.id);
+          if (!delta || item.type !== "assistant") return item;
+          return {
+            ...item,
+            text: item.text + delta.text,
+            thinking: (item.thinking ?? "") + delta.thinking,
+          };
+        }),
+      };
+    pendingTextDeltas = new Map();
+    pendingTextDeltaChatId = "";
+  }
   function applyEvent(event: ServerEvent) {
     if (!snapshot) return;
+    if (event.type === "text_delta") {
+      queueTextDelta(event);
+      return;
+    }
+    flushScheduledTextDeltas();
     if (event.type === "snapshot") {
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();
-    } else if (event.type === "message" || event.type === "tool" || event.type === "notice")
+    } else if (event.type === "message" || event.type === "tool" || event.type === "notice") {
+      if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
-    else if (event.type === "text_delta")
-      snapshot = {
-        ...snapshot,
-        items: snapshot.items.map((item) =>
-          item.id === event.itemId && item.type === "assistant"
-            ? {
-                ...item,
-                ...(event.channel === "text"
-                  ? { text: item.text + event.delta }
-                  : { thinking: (item.thinking ?? "") + event.delta }),
-              }
-            : item,
-        ),
-      };
-    else if (event.type === "run_status") {
+    } else if (event.type === "run_status") {
       snapshot = {
         ...snapshot,
         runStatus: event.status,
@@ -645,7 +762,7 @@
         dialogElement?.close();
       }
     }
-    if (nearBottom) requestAnimationFrame(scrollLatest);
+    taskViews.scrollIfNearBottom();
   }
   function pendingKey() {
     return snapshot ? `pidex:pending:${snapshot.taskId}` : "";
@@ -687,7 +804,7 @@
     if (clearedSubmittedDraft) {
       draft = "";
       persistDraft();
-      void tick().then(resizePrompt);
+      void tick().then(taskViews.resizeComposer);
     }
     try {
       const outcome = await api.sendMessage(
@@ -704,7 +821,7 @@
       if (clearedSubmittedDraft && !draft) {
         draft = text;
         persistDraft();
-        void tick().then(resizePrompt);
+        void tick().then(taskViews.resizeComposer);
       }
       error = cause instanceof Error ? cause.message : "Prompt rejected";
     }
@@ -856,19 +973,6 @@
       error = cause instanceof Error ? cause.message : "Could not acknowledge interrupted run";
     }
   }
-  async function copyResponse(id: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      copyState = { ...copyState, [id]: "copied" };
-    } catch {
-      copyState = { ...copyState, [id]: "failed" };
-    }
-    window.setTimeout(() => {
-      const next = { ...copyState };
-      delete next[id];
-      copyState = next;
-    }, 2200);
-  }
   async function loadToolOutput(item: ToolItem) {
     if (!snapshot || !item.resourceId) return;
     const current = toolOutputs[item.resourceId];
@@ -914,8 +1018,6 @@
   }
   async function loadEarlier() {
     if (!snapshot || snapshot.transcriptStart === 0 || loadingEarlier) return;
-    const previousScrollHeight = transcript?.scrollHeight;
-    const previousScrollTop = transcript?.scrollTop;
     loadingEarlier = true;
     try {
       const transcriptPage = await api.transcript(snapshot.chatId, snapshot.transcriptStart);
@@ -926,10 +1028,6 @@
         transcriptStart: transcriptPage.start,
         transcriptTotal: transcriptPage.total,
       };
-      if (transcript && previousScrollHeight !== undefined && previousScrollTop !== undefined) {
-        await tick();
-        transcript.scrollTop = previousScrollTop + transcript.scrollHeight - previousScrollHeight;
-      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded";
     } finally {
@@ -959,32 +1057,6 @@
   }
   function persistDraft() {
     if (snapshot) localStorage.setItem(`pidex:draft:${snapshot.taskId}`, draft);
-  }
-  function resizePrompt() {
-    if (!promptInput) return;
-    promptInput.style.height = "auto";
-    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
-  }
-  function draftInput() {
-    persistDraft();
-    resizePrompt();
-  }
-  function keydown(event: KeyboardEvent) {
-    if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
-      event.preventDefault();
-      void send();
-    }
-  }
-  function onScroll() {
-    if (transcript)
-      nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
-  }
-  function scrollLatest() {
-    if (transcript) {
-      transcript.scrollTop = transcript.scrollHeight;
-      nearBottom = true;
-    }
   }
   async function focusSearch() {
     searchOpen = true;
@@ -1019,7 +1091,7 @@
       (document.querySelector(".menu-button") as HTMLElement)?.focus();
       return;
     }
-    if (document.activeElement === searchInput) promptInput?.focus();
+    if (document.activeElement === searchInput) taskViews.focusComposer();
   }
   function wentOffline() {
     chatConnection.disconnect();
@@ -1035,8 +1107,18 @@
     const relativeTimeInterval = window.setInterval(() => (relativeNow = Date.now()), 60_000);
     return () => {
       window.clearInterval(relativeTimeInterval);
+      if (pendingTextDeltaFrame !== undefined) cancelAnimationFrame(pendingTextDeltaFrame);
+      pendingTextDeltaFrame = undefined;
+      pendingTextDeltas.clear();
+      pendingTextDeltaChatId = "";
+      taskViews.dispose();
       chatConnection.close();
     };
+  });
+  $effect(() => {
+    if (!snapshot?.items.some((item) => item.type === "tool" && item.state === "running")) return;
+    const interval = window.setInterval(() => (toolElapsedNow = Date.now()), 1_000);
+    return () => window.clearInterval(interval);
   });
 </script>
 
@@ -1177,12 +1259,8 @@
                   onclick={() => toggleProject(project)}
                 >
                   <span
-                    class={`grid flex-none text-faint transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-                    ><Icon name="chevron" size={13} /></span
-                  >
-                  <span
                     class={`grid size-5 flex-none place-items-center rounded text-muted ${workspace?.id === project.id ? "bg-primary/15 text-primary" : ""}`}
-                    ><Icon name="folder" size={15} /></span
+                    ><Icon name={expanded ? "folder-open" : "folder"} size={15} /></span
                   >
                   <strong
                     class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium text-inherit"
@@ -1226,9 +1304,6 @@
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
                       >
-                        <span
-                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
-                        ></span>
                         <strong
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
@@ -1242,6 +1317,9 @@
                             class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
+                        <span
+                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
+                        ></span>
                       </button>
                     {/each}
                     {#if hiddenTasks > 0}
@@ -1403,345 +1481,7 @@
       </div>
     {/if}
 
-    <section
-      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
-      bind:this={transcript}
-      onscroll={onScroll}
-      role="log"
-      aria-live="polite"
-      aria-relevant="additions text"
-    >
-      {#if bootstrapError && !bootstrap}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-          role="status"
-        >
-          <div
-            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-          >
-            <Icon name="activity" size={22} />
-          </div>
-          <p
-            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-          >
-            HOST UNAVAILABLE
-          </p>
-          <h1
-            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-          >
-            Your projects are still on the desktop.
-          </h1>
-          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-            Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
-            automatically.
-          </p>
-          <button
-            class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-            onclick={retryConnection}
-            disabled={retryingConnection}
-            >{retryingConnection ? "Retrying…" : "Retry connection"}</button
-          >
-        </div>
-      {:else if routeLoading && !snapshot}
-        <div
-          class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
-          aria-label="Loading task"
-          role="status"
-        >
-          <span class="sr-only">Loading task…</span>
-          {#each ["w-2/5", "w-4/5", "w-3/5"] as width, index (width)}
-            <div class={`animate-pulse ${index === 1 ? "ml-auto" : ""} ${width}`}>
-              <div class="mb-2 h-2.5 w-20 rounded-full bg-border"></div>
-              <div class="h-20 rounded-2xl bg-secondary/75"></div>
-            </div>
-          {/each}
-        </div>
-      {:else if !workspace}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-        >
-          <div
-            class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-          >
-            <span class="font-serif text-[26px] leading-none font-bold">π</span>
-          </div>
-          <p
-            class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-          >
-            YOUR PRIVATE PI PROJECT
-          </p>
-          <h1
-            class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-          >
-            Bring Pi with you.
-          </h1>
-          <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-            Choose a project to create or resume a task.
-          </p>
-          <button
-            class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
-            onclick={openProjectPicker}>Add a project</button
-          >
-        </div>
-      {:else if !snapshot}
-        <div
-          class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
-          role="status"
-        >
-          <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
-            Pick a task to continue
-          </h1>
-          <p class="mt-2 text-sm leading-relaxed text-muted">
-            Select an existing task or create a new one to get started.
-          </p>
-        </div>
-      {:else}
-        <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-12.5 max-[900px]:px-4 max-[350px]:px-3">
-          {#if snapshot.transcriptStart > 0}<button
-              class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-[10.5px] text-muted hover:text-foreground disabled:opacity-40"
-              onclick={loadEarlier}
-              disabled={loadingEarlier}
-              >{loadingEarlier
-                ? "Loading earlier messages…"
-                : `Load earlier messages · ${snapshot.transcriptStart.toLocaleString()} remaining`}</button
-            >{/if}
-          {#each snapshot.items as item (item.id)}
-            {#if item.type === "user"}
-              <article class="mb-5 flex flex-col items-end pt-1">
-                <div
-                  class="max-w-4/5 rounded-2xl bg-secondary px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] max-[560px]:max-w-9/10"
-                >
-                  {item.text}
-                </div>
-              </article>
-            {:else if item.type === "assistant"}
-              <article class="mb-5 min-w-0 px-1 pt-0.5 pb-1">
-                <div class="mb-2 flex items-center gap-1.5 text-[10.5px] font-medium text-faint">
-                  <span
-                    class="grid size-4.5 place-items-center rounded bg-foreground font-serif text-[11px] leading-none font-bold text-background"
-                    >π</span
-                  ><span>Pi</span>{#if !item.complete}<span
-                      class="inline-flex items-center gap-1 text-primary before:size-1.5 before:animate-pulse before:rounded-full before:bg-current before:content-['']"
-                      >streaming</span
-                    >{:else}<button
-                      class={`ml-auto inline-flex min-h-6.5 items-center gap-1 rounded-md border-0 bg-transparent px-2 text-[10px] text-faint hover:bg-secondary hover:text-foreground ${copyState[item.id] === "failed" ? "text-danger" : ""}`}
-                      onclick={() => copyResponse(item.id, item.text)}
-                      aria-label="Copy response"
-                      ><Icon
-                        name={copyState[item.id] === "copied" ? "check" : "copy"}
-                        size={13}
-                      />{copyState[item.id] === "copied"
-                        ? "Copied"
-                        : copyState[item.id] === "failed"
-                          ? "Copy failed"
-                          : "Copy"}</button
-                    >{/if}
-                </div>
-                {#if item.thinking}
-                  <details class="mb-2.5 border-b border-border/70">
-                    <summary
-                      class="flex w-max cursor-pointer items-center gap-2 pt-1 pb-2 text-[11px] text-faint [list-style:none]"
-                      ><span class="inline-flex gap-0.5"
-                        ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-                        ></i><i
-                          class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
-                        ></i></span
-                      >Thinking</summary
-                    >
-                    <pre
-                      class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{item.thinking}</pre>
-                  </details>
-                {/if}
-                <Markdown text={item.text} />
-              </article>
-            {:else if item.type === "tool"}
-              <details class="group/tool mx-1 mt-1 mb-2 text-[11.5px]">
-                <summary
-                  class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-muted [list-style:none] hover:bg-secondary/55"
-                >
-                  <span class="grid size-5 flex-none place-items-center text-faint"
-                    ><Icon name="tool" size={14} /></span
-                  >
-                  <strong class="font-medium text-foreground/80">{item.name}</strong>
-                  <code
-                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] leading-snug text-faint"
-                    >{item.argumentSummary}</code
-                  >
-                  <span
-                    class={`text-[10px] lowercase ${item.state === "error" ? "text-danger" : "text-success"}`}
-                    >{item.state === "success" ? "done" : item.state}</span
-                  >
-                  <span
-                    class="flex-none opacity-50 transition-transform duration-150 group-open/tool:rotate-90"
-                    ><Icon name="chevron" size={13} /></span
-                  >
-                </summary>
-                {#if item.resourceId && toolOutputs[item.resourceId]?.text}<pre
-                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{toolOutputs[
-                      item.resourceId
-                    ]?.text}</pre>{:else if item.preview}<pre
-                    class="mt-1 mr-0 mb-2 ml-7 max-h-75 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground dark:bg-[#111113]">{item.preview}</pre>{/if}
-                {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
-                  <button
-                    class="mr-0 mb-2 ml-7 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
-                    onclick={() => loadToolOutput(item)}
-                    disabled={toolOutputs[item.resourceId]?.loading}
-                    >{toolOutputs[item.resourceId]?.loading
-                      ? "Loading bounded chunk…"
-                      : toolOutputs[item.resourceId]?.text
-                        ? `Load more · ${toolOutputs[item.resourceId]?.nextOffset.toLocaleString()} / ${toolOutputs[item.resourceId]?.total.toLocaleString()}`
-                        : `Load complete output · ${(item.outputSize ?? 0).toLocaleString()} chars`}</button
-                  >
-                {/if}
-                {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-                    class="mr-0 mb-2 ml-7 text-[10px] text-faint"
-                  >
-                    The host bounded this output at its safety limit.
-                  </p>{/if}
-                {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-                    class="mr-0 mb-2 ml-7 text-[10px] text-danger"
-                  >
-                    {toolOutputs[item.resourceId]?.error}
-                  </p>{/if}
-              </details>
-            {:else if item.type === "notice"}
-              <div
-                class={`mx-1 my-2.5 flex items-start gap-2 rounded-lg border bg-secondary/45 px-3 py-2 text-[11.5px] leading-relaxed ${item.level === "error" ? "border-danger/25 text-danger" : "border-border text-muted"}`}
-              >
-                <span class="mt-px flex-none text-primary"><Icon name="activity" size={14} /></span
-                ><span>{item.text}</span>
-              </div>
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    {#if !nearBottom && snapshot}<button
-        class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10.5px] text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
-        onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
-      >{/if}
-
-    {#if snapshot}
-      <footer
-        class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
-      >
-        {#if active}
-          <div
-            class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-[10.5px] text-faint"
-          >
-            <span class="flex items-center gap-1.5"
-              ><span class="size-1.5 animate-pulse rounded-full bg-primary"
-              ></span>{snapshot.runStatus} · {snapshot.steeringQueue.length} steer · {snapshot
-                .followUpQueue.length} follow-up</span
-            >
-            {#if snapshot.steeringQueue.length + snapshot.followUpQueue.length > 0}<button
-                class="border-0 bg-transparent p-0 text-[10.5px] text-primary"
-                onclick={clearQueue}>Clear queues</button
-              >{/if}
-          </div>
-        {/if}
-        <div class="chat-composer mx-auto" data-testid="chat-composer">
-          <textarea
-            class="chat-composer__input"
-            bind:this={promptInput}
-            bind:value={draft}
-            oninput={draftInput}
-            onkeydown={keydown}
-            rows="2"
-            placeholder={connection !== "connected"
-              ? "Draft locally while the host reconnects…"
-              : active
-                ? "Add guidance while Pi works…"
-                : "Ask Pi to work on this project…"}
-            aria-label="Prompt"></textarea>
-          <div class="chat-composer__toolbar">
-            <div class="chat-composer__controls">
-              <label class="chat-composer__control">
-                <select
-                  class="chat-composer__select"
-                  aria-label="Model"
-                  value={selectedModel}
-                  onchange={(e) => stageConfiguration({ model: e.currentTarget.value })}
-                  disabled={!workspace?.models.length}
-                >
-                  {#each workspace?.models ?? [] as model (model.id)}<option value={model.id}
-                      >{model.name}</option
-                    >{/each}
-                </select>
-              </label>
-              <span class="chat-composer__divider" aria-hidden="true"></span>
-              <label class="chat-composer__control">
-                <span class="chat-composer__control-icon" aria-hidden="true"
-                  ><Icon name="activity" size={14} /></span
-                >
-                <select
-                  class="chat-composer__select"
-                  aria-label="Thinking level"
-                  value={selectedThinkingLevel}
-                  onchange={(e) =>
-                    stageConfiguration({
-                      thinkingLevel: e.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                    })}
-                >
-                  <option value="off">Off</option><option value="minimal">Minimal</option><option
-                    value="low">Low</option
-                  ><option value="medium">Medium</option><option value="high">High</option><option
-                    value="xhigh">Extra high</option
-                  ><option value="max">Max</option>
-                </select>
-              </label>
-              {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span
-                >{/if}
-            </div>
-            <div class="flex min-w-0 flex-none items-center gap-1">
-              {#if snapshot.contextUsage}<ContextWindowMeter usage={snapshot.contextUsage} />{/if}
-              {#if active}
-                <select
-                  class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"
-                  bind:value={delivery}
-                  aria-label="Delivery mode"
-                  ><option value="steer">Steer</option><option value="follow-up">Follow-up</option
-                  ></select
-                >
-                <button
-                  class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 disabled:opacity-40"
-                  onclick={stop}
-                  disabled={connection !== "connected"}
-                  aria-label="Stop"><Icon name="stop" /></button
-                >
-                <button
-                  class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
-                  onclick={send}
-                  disabled={!draft.trim() || connection !== "connected"}
-                  aria-label="Queue">Queue</button
-                >
-              {:else}
-                <button
-                  class="chat-composer__send"
-                  onclick={send}
-                  disabled={!draft.trim() ||
-                    !workspace?.models.length ||
-                    connection !== "connected" ||
-                    snapshot.run?.requiresAcknowledgement}
-                  aria-label="Send"><Icon name="send" /></button
-                >
-              {/if}
-            </div>
-          </div>
-        </div>
-        <div
-          class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[560px]:pt-1 max-[560px]:text-[8.5px]"
-        >
-          <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-            >{snapshot.stats.messages} messages · {snapshot.stats.tokens.toLocaleString()} tokens · ${snapshot.stats.cost.toFixed(
-              4,
-            )}</span
-          >
-        </div>
-      </footer>
-    {/if}
+    {@render children()}
   </main>
 </div>
 

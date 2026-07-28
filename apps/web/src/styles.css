@@ -45,14 +45,18 @@
   --faint: #a1a1aa;
   --border: #e4e4e7;
   --border-strong: #d4d4d8;
-  --primary: #315bea;
-  --primary-hover: #254dd4;
-  --primary-foreground: #fff;
+  --primary: #6a9fcc;
+  --primary-hover: #5b90bb;
+  --primary-foreground: #09090b;
   --success: #16a36a;
   --danger: #dc4c4c;
   --warning: #b7791f;
   --shadow: 0 18px 45px rgb(24 24 27 / 8%), 0 2px 6px rgb(24 24 27 / 4%);
   --mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, monospace;
+  --tool-pending: #e8e8f0;
+  --tool-success: #e8f0e8;
+  --tool-error: #f0e8e8;
+  --tool-argument: #2f7f76;
 }
 
 @layer base {
@@ -357,7 +361,75 @@ summary::-webkit-details-marker {
   display: none;
 }
 
-/* Generated Markdown cannot receive utility classes at render time. */
+/* Tool calls mirror the Pi TUI: tinted block, command header, trailing output window. */
+.tool-call {
+  margin: 0.5rem 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--tool-pending);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.tool-call--success {
+  background: var(--tool-success);
+}
+
+.tool-call--error {
+  background: var(--tool-error);
+}
+
+.tool-call__toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-call__title {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.tool-call__argument {
+  color: var(--tool-argument);
+}
+
+.tool-call__hint {
+  display: block;
+  margin-top: 0.5em;
+  color: var(--faint);
+}
+
+.tool-call__output {
+  margin: 0.5em 0 0;
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.tool-call__timing {
+  margin: 0.5em 0 0;
+  color: var(--faint);
+}
+
+/* Markdown nodes are rendered as components and share this document-level typography. */
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .markdown > :first-child {
   margin-top: 0;
 }
@@ -368,7 +440,10 @@ summary::-webkit-details-marker {
 
 .markdown h1,
 .markdown h2,
-.markdown h3 {
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
   margin: 1.55em 0 0.6em;
   font-weight: 620;
   letter-spacing: -0.025em;
@@ -387,13 +462,41 @@ summary::-webkit-details-marker {
   font-size: 1.12em;
 }
 
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
 .markdown p {
   margin: 0.75em 0;
 }
 
 .markdown ul,
 .markdown ol {
+  margin: 0.75em 0;
   padding-left: 1.45em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li + li {
+  margin-top: 0.25em;
+}
+
+.markdown .task-list-item {
+  list-style: none;
+}
+
+.markdown .task-list-item > input[type="checkbox"] {
+  margin: 0 0.4em 0 -1.4em;
+  vertical-align: -0.05em;
 }
 
 .markdown blockquote {
@@ -401,6 +504,12 @@ summary::-webkit-details-marker {
   padding-left: 13px;
   border-left: 2px solid var(--border-strong);
   color: var(--muted);
+}
+
+.markdown hr {
+  margin: 1.35em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 
 .markdown pre {
@@ -427,18 +536,98 @@ summary::-webkit-details-marker {
   background: transparent;
 }
 
-.markdown table {
-  display: block;
+.markdown-codeblock {
+  margin: 0.9em 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--secondary) 68%, var(--background));
+}
+
+.markdown-codeblock__header {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 3px 5px 3px 11px;
+  color: var(--faint);
+  font: 10.5px/1.4 var(--mono);
+}
+
+.markdown-codeblock__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-codeblock__actions {
+  display: inline-flex;
+  flex: none;
+  gap: 1px;
+}
+
+.markdown-codeblock__action {
+  display: grid;
+  width: 25px;
+  height: 23px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+}
+
+.markdown-codeblock__action:hover,
+.markdown-codeblock__action:focus-visible,
+.markdown-codeblock__action[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--foreground);
+}
+
+.markdown .markdown-codeblock pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.markdown .markdown-codeblock[data-wrap="true"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.markdown-table {
   max-width: 100%;
   overflow-x: auto;
+  margin: 0.9em 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.markdown table {
+  width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
+  font-size: 0.92em;
 }
 
 .markdown th,
 .markdown td {
   padding: 7px 9px;
-  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   text-align: left;
+}
+
+.markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown th {
+  background: color-mix(in srgb, var(--secondary) 72%, transparent);
+  font-weight: 620;
 }
 
 .markdown a {
@@ -449,6 +638,14 @@ summary::-webkit-details-marker {
 .image-blocked {
   color: var(--faint);
   font-style: italic;
+}
+
+.markdown-raw-html {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.9em;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -465,9 +662,13 @@ summary::-webkit-details-marker {
     --faint: #7f7f89;
     --border: rgb(255 255 255 / 7%);
     --border-strong: rgb(255 255 255 / 13%);
-    --primary: #4e6ff2;
-    --primary-hover: #5c7bf5;
+    --primary: #6a9fcc;
+    --primary-hover: #78add8;
     --shadow: 0 18px 55px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 2%);
+    --tool-pending: #282832;
+    --tool-success: #283228;
+    --tool-error: #3c2828;
+    --tool-argument: #8abeb7;
   }
 
   .markdown pre {

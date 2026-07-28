@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { basename } from "node:path";
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
@@ -711,6 +712,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
 
   await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toHaveCount(0);
   await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
@@ -738,7 +740,224 @@ test("keeps search and task creation in the no-active-task experience", async ({
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
+test("renders assistant markdown as safe interactive components", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_markdown_e2e",
+      text: `# Rendered result
+
+**Safe Markdown**
+
+Entity text: AT&amp;T &copy;
+
+- [x] component renderer
+
+| Name | State |
+| --- | --- |
+| Markdown | ready |
+
+\`\`\`ts title="src/example.ts"
+const answer = 42;
+\`\`\`
+
+<script>globalThis.compromised = true</script>
+
+![tracker](https://tracker.example/pixel.png)
+
+[unsafe](javascript:alert(1))`,
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
+  await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
+  await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
+  await expect(page.getByRole("listitem").filter({ hasText: "component renderer" })).toHaveText(
+    "component renderer",
+  );
+  await expect(page.getByRole("region", { name: "Scrollable table" })).toContainText(
+    "Markdownready",
+  );
+  await expect(page.getByTitle("src/example.ts")).toBeVisible();
+  await expect(page.getByText("const answer = 42;", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Wrap lines" }).click();
+  await expect(page.getByRole("button", { name: "Disable line wrap" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("<script>globalThis.compromised = true</script>")).toBeVisible();
+  await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
+  expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+});
+
+test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  const toolItem = {
+    type: "tool",
+    id: "tool_bash_e2e",
+    name: "bash",
+    argumentSummary: JSON.stringify({ command: "ls -la" }),
+    preview: "",
+    truncated: false,
+  };
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 1,
+    chatId,
+    item: { ...toolItem, state: "running" },
+  });
+  const toolBlock = page.getByRole("button", { name: "$ ls -la" });
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByText(/^Elapsed \d+\.\d+s$/)).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 2,
+    chatId,
+    item: {
+      ...toolItem,
+      state: "success",
+      preview: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+    },
+  });
+
+  const hint = page.getByText("earlier lines, click to expand");
+  await expect(hint).toContainText("2 earlier lines");
+  await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
+  await expect(page.locator(".tool-call__output")).not.toContainText("one");
+  await expect(page.locator(".tool-call__output")).toContainText("seven");
+
+  await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
+  await toolBlock.click();
+  await expect(page.locator(".tool-call__output")).toContainText("one");
+  await expect(hint).toHaveCount(0);
+
+  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 3,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_restored_e2e",
+      argumentSummary: JSON.stringify({ command: "pnpm build" }),
+      state: "success",
+      preview: "done",
+    },
+  });
+  const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
+  await expect(restored).toBeVisible();
+  await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+});
+
+test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "",
+      complete: false,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  const deltas = [
+    ["text", "# Streamed"],
+    ["thinking", "weighing "],
+    ["text", " heading\n\nBody "],
+    ["thinking", "options"],
+    ["text", "text."],
+  ] as const;
+  let eventId = 2;
+  for (const [channel, delta] of deltas) {
+    await emitServerEvent(page, {
+      type: "text_delta",
+      eventId: eventId++,
+      chatId,
+      itemId: "assistant_stream_e2e",
+      channel,
+      delta,
+    });
+  }
+
+  // Every delta lands in order even though a frame batches several of them together.
+  await expect(page.getByRole("heading", { name: "Streamed heading" })).toBeVisible();
+  await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
+  await page.getByText("Thinking", { exact: true }).click();
+  await expect(page.locator("details pre")).toHaveText("weighing options");
+});
+
 test("stages configuration without overwriting the next draft", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
   const { promise: configurationPending, resolve: releaseConfiguration } =
@@ -808,7 +1027,9 @@ test("stages configuration without overwriting the next draft", async ({ page, r
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
   await openTasks(page);
-  await page.getByRole("button", { name: "New task in pidex" }).click();
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
 
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");

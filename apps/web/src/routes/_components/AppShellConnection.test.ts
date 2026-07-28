@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ChatConnection, type ConnectionState } from "./chat-connection";
+import { ChatConnection, type ConnectionState } from "./AppShellConnection";
 
 describe("ChatConnection", () => {
   beforeEach(() => {

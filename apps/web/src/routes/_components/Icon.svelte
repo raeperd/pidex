@@ -8,6 +8,7 @@
     ChevronsDownUp,
     Copy,
     Folder,
+    FolderOpen,
     FolderPlus,
     GripVertical,
     Menu,
@@ -30,6 +31,7 @@
     | "compose"
     | "copy"
     | "folder"
+    | "folder-open"
     | "folder-plus"
     | "grip"
     | "menu"
@@ -50,6 +52,7 @@
     compose: SquarePen,
     copy: Copy,
     folder: Folder,
+    "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
     grip: GripVertical,
     menu: Menu,
