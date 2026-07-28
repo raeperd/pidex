@@ -124,6 +124,15 @@ test("groups worktree tasks under their source project", async ({ page, request 
   const sourcePath = String(source.result.path);
   const worktreeWorkspaceId = "grouped_worktree_e2e";
   const worktreePath = `${process.cwd()}/.pidex-grouped-worktree`;
+  const sourceProject = { id: sourceWorkspaceId, path: sourcePath, worktree: false };
+  const worktreeProject = {
+    id: worktreeWorkspaceId,
+    path: worktreePath,
+    sourceWorkspaceId,
+    worktree: true,
+  };
+  let recentWorkspaces: Record<string, unknown>[] = [sourceProject, worktreeProject];
+  const openedPaths: string[] = [];
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await route.fulfill({
       status: 200,
@@ -131,15 +140,7 @@ test("groups worktree tasks under their source project", async ({ page, request 
       json: {
         json: {
           ...bootstrap.result,
-          recentWorkspaces: [
-            { id: sourceWorkspaceId, path: sourcePath, worktree: false },
-            {
-              id: worktreeWorkspaceId,
-              path: worktreePath,
-              sourceWorkspaceId,
-              worktree: true,
-            },
-          ],
+          recentWorkspaces,
           projectCandidates: [],
         },
       },
@@ -147,6 +148,7 @@ test("groups worktree tasks under their source project", async ({ page, request 
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    openedPaths.push(input.path);
     const worktree = input.path === worktreePath;
     await route.fulfill({
       status: 200,
@@ -188,6 +190,19 @@ test("groups worktree tasks under their source project", async ({ page, request 
   const projects = page.getByRole("navigation", { name: "Projects" });
   await expect(projects.getByRole("group")).toHaveCount(1);
   await expect(projects.getByText("Local task", { exact: true })).toBeVisible();
+  await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
+
+  openedPaths.length = 0;
+  await page.evaluate(({ path }) => localStorage.setItem("pidex:last-project", path), {
+    path: worktreePath,
+  });
+  await page.reload();
+  await expect.poll(() => openedPaths).toEqual(expect.arrayContaining([worktreePath, sourcePath]));
+
+  recentWorkspaces = [worktreeProject];
+  await page.reload();
+  await openTasks(page);
+  await expect(projects.getByRole("group")).toHaveCount(1);
   await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
 });
 

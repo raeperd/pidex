@@ -183,9 +183,13 @@
       `${session.name ?? ""} ${session.firstMessage}`.toLowerCase().includes(query),
     );
   }
-  let rootProjects = $derived(
-    (bootstrap?.recentWorkspaces ?? []).filter((project) => !sourceWorkspaceId(project)),
-  );
+  let rootProjects = $derived.by(() => {
+    const projects = bootstrap?.recentWorkspaces ?? [];
+    return projects.filter((project) => {
+      const sourceId = sourceWorkspaceId(project);
+      return !sourceId || !projects.some((candidate) => candidate.id === sourceId);
+    });
+  });
   let visibleProjects = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return rootProjects.filter(
@@ -474,7 +478,11 @@
         }
       }
       rememberWorkspace(loaded, options.expand ?? activate);
-      if (activate)
+      if (activate) {
+        const loadedProject = bootstrap?.recentWorkspaces.find(
+          (project) => project.id === loaded.id || project.path === loaded.path,
+        );
+        if (loadedProject) await loadSourceWorkspace(loadedProject);
         for (const worktree of worktreesFor(loaded.id))
           if (!workspaceFor(worktree.id))
             await openProject(worktree.path, {
@@ -482,6 +490,7 @@
               expand: false,
               remember: false,
             });
+      }
       if (activate) {
         chatConnection.close();
         workspace = loaded;
@@ -505,6 +514,17 @@
       if (activate) projectLoading = false;
       projectLoadingId = "";
     }
+  }
+  async function loadSourceWorkspace(project: RecentWorkspace) {
+    const sourceId = sourceWorkspaceId(project);
+    if (!sourceId || workspaceFor(sourceId)) return;
+    const source = bootstrap?.recentWorkspaces.find((candidate) => candidate.id === sourceId);
+    if (!source) return;
+    await openProject(source.path, {
+      activate: false,
+      expand: false,
+      remember: false,
+    });
   }
   function openProjectPicker() {
     if (projectOrderSaving) return;
@@ -763,12 +783,16 @@
     }
   }
   async function workspaceById(workspaceId: string) {
-    const cached = workspaceFor(workspaceId);
-    if (cached) return cached;
     const recent = bootstrap?.recentWorkspaces.find((project) => project.id === workspaceId);
+    const cached = workspaceFor(workspaceId);
+    if (cached) {
+      if (recent) await loadSourceWorkspace(recent);
+      return cached;
+    }
     if (!recent) return undefined;
     const loaded = await api.openWorkspace(recent.path, true);
     rememberWorkspace(loaded);
+    await loadSourceWorkspace(recent);
     return loaded;
   }
   function initializeDialogValue(dialog: ExtensionDialog) {
