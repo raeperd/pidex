@@ -14,12 +14,12 @@
     Workspace,
   } from "@pidex/api";
   import AgentMessageBody from "./AgentMessageBody.svelte";
-  import { dialogValue as resolveDialogValue, PidexApiClient } from "./api-client";
-  import { ChatConnection, type ConnectionState } from "./chat-connection";
+  import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
+  import { ChatConnection, type ConnectionState } from "./AppShellConnection";
   import ContextWindowMeter from "./ContextWindowMeter.svelte";
   import Icon from "./Icon.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
-  import { taskPath, TaskSnapshotCache } from "./task-navigation";
+  import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
   import ToolCall from "./ToolCall.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
