@@ -779,7 +779,10 @@ test("creates, navigates, and durably submits the first starter prompt", async (
         ...payload,
         json: {
           ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+          models:
+            workspace.path === `${process.cwd()}/apps`
+              ? [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }]
+              : [],
           resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
         },
       },
@@ -835,10 +838,16 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     page.getByRole("heading").filter({ hasText: "What should we work on in " }),
   ).toBeVisible();
   await expect(page.getByText("No active task", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toBeVisible();
-  await expect(page.getByLabel("Model")).toHaveValue("e2e/model");
+  const initialPrompt = page.getByLabel("Prompt");
+  await expect(initialPrompt).toBeVisible();
+  await expect(page.getByLabel("Model")).toBeDisabled();
   await expect(page.getByLabel("Thinking level")).toHaveValue("medium");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await initialPrompt.fill("This must not create an empty task");
+  await initialPrompt.press("Enter");
+  await page.waitForTimeout(250);
   expect(createRequests).toHaveLength(0);
+  await expect(page).toHaveURL("/");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -864,6 +873,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
+  await expect(page.getByLabel("Model")).toHaveValue("e2e/model");
   expect(createRequests).toHaveLength(0);
 
   await expect(page.locator("main > header")).toBeVisible();

@@ -30,7 +30,7 @@
   async function send() {
     const submittedWorkspaceId = workspaceId;
     const submittedDraft = starter.draft;
-    if (starter.submitting || !submittedDraft.trim()) return;
+    if (starter.submitting || !submittedDraft.trim() || !selectedModel) return;
     updateStarter({ submitting: true }, submittedWorkspaceId);
     try {
       await context.taskActions.start(submittedDraft, {
