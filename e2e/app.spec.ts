@@ -165,20 +165,18 @@ test("groups worktree tasks under their source project", async ({ page, request 
                   name: "Worktree task",
                   firstMessage: "Worktree task",
                   createdAt: "2026-07-28T00:00:00.000Z",
-                  modifiedAt: "2026-07-28T00:00:00.000Z",
+                  modifiedAt: "2026-07-29T00:00:00.000Z",
                   messageCount: 1,
                 },
               ]
-            : [
-                {
-                  id: "local_task_e2e",
-                  name: "Local task",
-                  firstMessage: "Local task",
-                  createdAt: "2026-07-28T00:00:00.000Z",
-                  modifiedAt: "2026-07-28T00:00:00.000Z",
-                  messageCount: 1,
-                },
-              ],
+            : Array.from({ length: 6 }, (_, index) => ({
+                id: `local_task_e2e_${index}`,
+                name: index === 0 ? "Local task" : `Older local task ${index}`,
+                firstMessage: index === 0 ? "Local task" : `Older local task ${index}`,
+                createdAt: "2026-07-27T00:00:00.000Z",
+                modifiedAt: `2026-07-28T${String(6 - index).padStart(2, "0")}:00:00.000Z`,
+                messageCount: 1,
+              })),
         },
       },
     });
@@ -1092,6 +1090,9 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       text: "Implement the selected task",
     }),
   );
+  await expect(page).toHaveURL(/\/tasks\/worktree_task_e2e$/);
+  await page.goBack();
+  await expect(page).toHaveURL("/");
 });
 
 test("renders assistant markdown as safe interactive components", async ({

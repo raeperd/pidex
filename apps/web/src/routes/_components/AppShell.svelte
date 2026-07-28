@@ -177,9 +177,9 @@
     worktreesFor(project.id).some((worktree) => worktree.id === workspace?.id);
   const projectExpanded = (id: string) => expandedProjectIds.includes(id);
   function tasksFor(project: RecentWorkspace) {
-    const sessions = [project, ...worktreesFor(project.id)].flatMap(
-      ({ id }) => workspaceFor(id)?.sessions ?? [],
-    );
+    const sessions = [project, ...worktreesFor(project.id)]
+      .flatMap(({ id }) => workspaceFor(id)?.sessions ?? [])
+      .toSorted((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
     const query = search.trim().toLowerCase();
     if (!query || projectName(project.path).toLowerCase().includes(query)) return sessions;
     return sessions.filter((session) =>
@@ -724,7 +724,7 @@
       }
       const path = taskPath(created.taskId);
       appliedRoute = path;
-      await goto(path);
+      await goto(path, { replaceState: true });
       return true;
     } catch (cause) {
       if (worktree) await disposeCreatedWorktree(worktree, created);
