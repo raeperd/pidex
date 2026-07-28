@@ -743,6 +743,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   const { promise: creationPending, resolve: releaseCreation } = Promise.withResolvers<void>();
   let initialTaskSnapshot: Record<string, unknown> | undefined;
   let taskSnapshot: Record<string, unknown> | undefined;
+  let connectedDuringConfiguration: boolean | undefined;
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
     const body = (browserRequest.postDataJSON() as { json?: unknown } | null)?.json;
@@ -806,6 +807,9 @@ test("creates, navigates, and durably submits the first starter prompt", async (
       thinkingLevel: input.thinkingLevel,
       revision: Number(input.expectedRevision) + 1,
     };
+    connectedDuringConfiguration = await page.evaluate(() =>
+      Boolean((globalThis as typeof globalThis & { pidexTestSocket?: WebSocket }).pidexTestSocket),
+    );
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -905,6 +909,8 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(send).toBeEnabled();
   await send.click();
   await expect(prompt).toBeDisabled();
+  await expect(page.getByLabel("Model")).toBeDisabled();
+  await expect(thinking).toBeDisabled();
   releaseCreation();
 
   await expect(page.getByRole("heading", { name: "What should we work on in apps?" })).toHaveCount(
@@ -936,6 +942,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
       }),
     }),
   ]);
+  expect(connectedDuringConfiguration).toBe(false);
   if (!initialTaskSnapshot) throw new Error("Expected the starter task's initial snapshot");
   await waitForFakeWebSocket(page);
   await emitServerEvent(page, {

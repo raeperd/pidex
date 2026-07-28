@@ -102,7 +102,7 @@
                   aria-label="Model"
                   value={selectedModel}
                   onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-                  disabled={!context.shell.workspace.models.length}
+                  disabled={!context.shell.workspace.models.length || starter.submitting}
                 >
                   {#each context.shell.workspace.models as model (model.id)}<option value={model.id}
                       >{model.name}</option
@@ -122,6 +122,7 @@
                     stageConfiguration({
                       thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
                     })}
+                  disabled={starter.submitting}
                 >
                   <option value="off">Off</option><option value="minimal">Minimal</option><option
                     value="low">Low</option

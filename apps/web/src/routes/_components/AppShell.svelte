@@ -574,7 +574,7 @@
       localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
       draft = starterPrompt?.draft ?? "";
-      await afterChat(draft, !starterPrompt);
+      await afterChat(draft, !starterPrompt, !starterPrompt);
       if (sequence !== routeSequence) {
         await disposeCreatedTask(created);
         return;
@@ -584,7 +584,10 @@
       await goto(path);
       if (starterPrompt && snapshot?.chatId === created.chatId) {
         stageConfiguration(starterPrompt.configuration);
-        if (!(await applyConfigurationDraft()) || snapshot?.chatId !== created.chatId) return;
+        const configured = await applyConfigurationDraft();
+        if (snapshot?.chatId !== created.chatId) return;
+        chatConnection.connect(created.chatId);
+        if (!configured) return;
         await submitPrompt(starterPrompt.text, starterPrompt.draft, "normal");
       }
     } catch (cause) {
@@ -672,13 +675,13 @@
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
   }
-  async function afterChat(initialDraft = "", focusComposer = false) {
+  async function afterChat(initialDraft = "", focusComposer = false, connect = true) {
     drawerOpen = false;
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.taskId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
     restoreConfigurationDraft();
-    if (snapshot) chatConnection.connect(snapshot.chatId);
+    if (snapshot && connect) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
       initializeDialogValue(snapshot.extensionDialog);
