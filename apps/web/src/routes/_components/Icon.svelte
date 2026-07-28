@@ -8,6 +8,7 @@
     ChevronsDownUp,
     Copy,
     Folder,
+    FolderGit2,
     FolderOpen,
     FolderPlus,
     GripVertical,
@@ -31,6 +32,7 @@
     | "compose"
     | "copy"
     | "folder"
+    | "folder-git"
     | "folder-open"
     | "folder-plus"
     | "grip"
@@ -52,6 +54,7 @@
     compose: SquarePen,
     copy: Copy,
     folder: Folder,
+    "folder-git": FolderGit2,
     "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
     grip: GripVertical,

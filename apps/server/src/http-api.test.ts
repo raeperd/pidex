@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
@@ -17,10 +19,13 @@ import WebSocket, { type RawData } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
 
+const execFileAsync = promisify(execFile);
+
 const coveredEndpoints = [
   "system.health",
   "system.bootstrap",
   "workspaces.open",
+  "workspaces.createWorktree",
   "workspaces.reorder",
   "workspaces.sessions",
   "workspaces.trust",
@@ -47,6 +52,7 @@ describe.sequential("HTTP API endpoints", () => {
   let tempRoot: string;
   let workspacePath: string;
   let workspaceId: string;
+  let nonGitWorkspaceId: string;
   let chatId: string;
   let httpUrl: string;
   let websocketUrl: string;
@@ -60,9 +66,25 @@ describe.sequential("HTTP API endpoints", () => {
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
-    workspacePath = path.join(tempRoot, "workspace");
+    const repositoryPath = path.join(tempRoot, "repository");
+    workspacePath = path.join(repositoryPath, "workspace");
     await mkdir(path.join(workspacePath, ".pi"), { recursive: true });
     await writeFile(path.join(workspacePath, ".pi", "SYSTEM.md"), "Test system prompt.\n");
+    await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: repositoryPath });
+    await execFileAsync("git", ["add", "."], { cwd: repositoryPath });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Pidex Test",
+        "-c",
+        "user.email=pidex@example.invalid",
+        "commit",
+        "-m",
+        "Initial test project",
+      ],
+      { cwd: repositoryPath },
+    );
     workspacePath = await realpath(workspacePath);
 
     process.env.PIDEX_PROJECT_ROOTS = tempRoot;
@@ -148,6 +170,7 @@ describe.sequential("HTTP API endpoints", () => {
     const secondPath = path.join(tempRoot, "second-workspace");
     await mkdir(secondPath);
     const second = await api.workspaces.open({ path: secondPath, remember: true });
+    nonGitWorkspaceId = second.id;
 
     await api.workspaces.reorder({ workspaceIds: [second.id, first.id] });
     await api.workspaces.open({ path: first.path, remember: true });
@@ -158,6 +181,34 @@ describe.sequential("HTTP API endpoints", () => {
         { id: first.id, path: first.path },
       ],
     });
+  });
+
+  it("workspaces.createWorktree", async () => {
+    const created = await api.workspaces.createWorktree({ workspaceId });
+    const { stdout: branchOutput } = await execFileAsync("git", ["branch", "--show-current"], {
+      cwd: created.path,
+      encoding: "utf8",
+    });
+
+    expect(created).toMatchObject({ name: "workspace", path: expect.any(String) });
+    expect(created.path).toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
+    expect(branchOutput.trim()).toMatch(/^pidex\/[0-9a-f]{8}$/);
+    await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
+      recentWorkspaces: expect.arrayContaining([
+        {
+          id: created.id,
+          path: created.path,
+          sourceWorkspaceId: workspaceId,
+          worktree: true,
+        },
+      ]),
+    });
+  });
+
+  it("rejects worktree creation outside a Git repository", async () => {
+    await expect(
+      api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
+    ).rejects.toMatchObject({ code: "project_not_git", status: 400 });
   });
 
   it("workspaces.sessions", async () => {

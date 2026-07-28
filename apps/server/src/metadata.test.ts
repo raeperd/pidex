@@ -63,6 +63,26 @@ describe("metadata store", () => {
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
   });
 
+  it("keeps a worktree attached to its source project across restarts", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-worktree-"));
+    store = new MetadataStore();
+    const sourceWorkspaceId = store.rememberWorkspace("/tmp/example-project");
+    const worktreeId = store.rememberWorkspace("/tmp/example-worktree", sourceWorkspaceId);
+
+    expect(store.recent()).toEqual([
+      { id: sourceWorkspaceId, path: "/tmp/example-project" },
+      {
+        id: worktreeId,
+        path: "/tmp/example-worktree",
+        sourceWorkspaceId,
+      },
+    ]);
+
+    store.close();
+    store = new MetadataStore();
+    expect(store.workspaceProjectId(worktreeId)).toBe(sourceWorkspaceId);
+  });
+
   it("persists a manually reordered workspace list across restarts", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-order-"));
     store = new MetadataStore();

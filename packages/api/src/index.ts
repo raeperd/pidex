@@ -1,7 +1,7 @@
 import { oc, type ContractRouterClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = z
   .string()
@@ -67,7 +67,12 @@ export const workspaceSchema = z.object({
   sessions: z.array(sessionSummarySchema),
   commands: z.array(z.object({ name: z.string(), description: z.string().optional() })),
 });
-export const recentWorkspaceSchema = z.object({ id: idSchema, path: z.string().max(4096) });
+export const recentWorkspaceSchema = z.object({
+  id: idSchema,
+  path: z.string().max(4096),
+  sourceWorkspaceId: idSchema.optional(),
+  worktree: z.boolean().optional(),
+});
 export const projectCandidateSchema = z.object({
   name: z.string().min(1).max(300),
   path: z.string().max(4096),
@@ -287,6 +292,7 @@ export const pidexApiContract = {
   },
   workspaces: {
     open: oc.input(openWorkspaceSchema).output(workspaceSchema),
+    createWorktree: oc.input(workspaceIdInputSchema).output(workspaceSchema),
     reorder: oc.input(reorderWorkspacesSchema).output(recentWorkspacesResponseSchema),
     sessions: oc.input(workspaceIdInputSchema).output(sessionsResponseSchema),
     trust: oc.input(trustWorkspaceSchema.extend({ workspaceId: idSchema })).output(workspaceSchema),

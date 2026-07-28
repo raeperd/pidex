@@ -26,6 +26,86 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
 });
 
+test("groups worktree tasks under their source project", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  const csrfToken = String(bootstrap.result.csrfToken);
+  const source = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: process.cwd(), remember: false },
+    csrfToken,
+  );
+  const sourceWorkspaceId = String(source.result.id);
+  const sourcePath = String(source.result.path);
+  const worktreeWorkspaceId = "grouped_worktree_e2e";
+  const worktreePath = `${process.cwd()}/.pidex-grouped-worktree`;
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: [
+            { id: sourceWorkspaceId, path: sourcePath, worktree: false },
+            {
+              id: worktreeWorkspaceId,
+              path: worktreePath,
+              sourceWorkspaceId,
+              worktree: true,
+            },
+          ],
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const worktree = input.path === worktreePath;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...source.result,
+          id: worktree ? worktreeWorkspaceId : sourceWorkspaceId,
+          path: worktree ? worktreePath : sourcePath,
+          sessions: worktree
+            ? [
+                {
+                  id: "worktree_task_e2e",
+                  name: "Worktree task",
+                  firstMessage: "Worktree task",
+                  createdAt: "2026-07-28T00:00:00.000Z",
+                  modifiedAt: "2026-07-28T00:00:00.000Z",
+                  messageCount: 1,
+                },
+              ]
+            : [
+                {
+                  id: "local_task_e2e",
+                  name: "Local task",
+                  firstMessage: "Local task",
+                  createdAt: "2026-07-28T00:00:00.000Z",
+                  modifiedAt: "2026-07-28T00:00:00.000Z",
+                  messageCount: 1,
+                },
+              ],
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group")).toHaveCount(1);
+  await expect(projects.getByText("Local task", { exact: true })).toBeVisible();
+  await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
+});
+
 test("manually reorders projects and preserves their order after reload", async ({
   page,
   request,
@@ -714,6 +794,9 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
+  await expect(
+    page.getByTestId("chat-composer").getByRole("button", { name: "Start in Work locally" }),
+  ).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
   expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
@@ -738,6 +821,128 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect.poll(() => workspaceOpenRequests.length).toBeGreaterThan(0);
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
+});
+
+test("defers worktree creation until the first prompt is sent", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  let sourceWorkspace: Record<string, unknown> | undefined;
+  let localSnapshot: Record<string, unknown> | undefined;
+  let chatCreations = 0;
+  let worktreeCreations = 0;
+  const sentPrompts: Record<string, unknown>[] = [];
+  await installFakeWebSocket(page);
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    sourceWorkspace = {
+      ...payload.json,
+      models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+    };
+    await route.fulfill({ response, json: { ...payload, json: sourceWorkspace } });
+  });
+  await page.route("**/api/rpc/workspaces/createWorktree", async (route) => {
+    worktreeCreations += 1;
+    if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...sourceWorkspace,
+          id: "worktree_workspace_e2e",
+          path: `${process.cwd()}/.pidex-test-worktree`,
+          sessions: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    chatCreations += 1;
+    if (chatCreations === 1) {
+      if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
+      localSnapshot = {
+        chatId: "local_chat_e2e",
+        workspaceId: String(sourceWorkspace.id),
+        taskId: "local_task_e2e",
+        revision: 0,
+        runStatus: "idle",
+        model: "e2e/model",
+        thinkingLevel: "high",
+        items: [],
+        transcriptStart: 0,
+        transcriptTotal: 0,
+        steeringQueue: [],
+        followUpQueue: [],
+        stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        json: { json: localSnapshot },
+      });
+      return;
+    }
+    if (!localSnapshot) throw new Error("Expected the local task to exist");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...localSnapshot,
+          chatId: "worktree_chat_e2e",
+          taskId: "worktree_task_e2e",
+          workspaceId: "worktree_workspace_e2e",
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    sentPrompts.push(input);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          accepted: true,
+          actionId: input.actionId,
+          runId: "worktree_run_e2e",
+          status: "accepted",
+          revision: Number(input.expectedRevision) + 1,
+          replayed: false,
+        },
+      },
+    });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
+
+  const composer = page.getByTestId("chat-composer");
+  const startSelector = composer.getByRole("button", { name: "Start in Work locally" });
+  await expect(startSelector).toBeVisible();
+  await startSelector.click();
+  const startMenu = page.getByRole("menu", { name: "Start in" });
+  await expect(startMenu).toBeVisible();
+  await startMenu.getByRole("menuitemradio", { name: "New worktree" }).click();
+  await expect(composer.getByRole("button", { name: "Start in New worktree" })).toBeVisible();
+  expect(worktreeCreations).toBe(0);
+  expect(chatCreations).toBe(1);
+
+  await page.getByLabel("Prompt").fill("Implement the selected task");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => worktreeCreations).toBe(1);
+  await expect.poll(() => chatCreations).toBe(2);
+  await expect.poll(() => sentPrompts).toHaveLength(1);
+  expect(sentPrompts[0]).toEqual(
+    expect.objectContaining({
+      chatId: "worktree_chat_e2e",
+      text: "Implement the selected task",
+    }),
+  );
 });
 
 test("renders assistant markdown as safe interactive components", async ({ page, request }) => {

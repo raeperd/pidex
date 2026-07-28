@@ -6,8 +6,12 @@ import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationRuntime } from "./app-runtime.js";
 import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
 import { requestDigest, type MetadataStore } from "./metadata.js";
-import { discoverProjectCandidates } from "./project-catalog.js";
-import { canonicalWorkspace, safeError } from "./security.js";
+import {
+  createProjectWorktree,
+  discoverProjectCandidates,
+  managedWorktreesRoot,
+} from "./project-catalog.js";
+import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 
 interface HttpApiDependencies {
   csrf: string;
@@ -16,6 +20,7 @@ interface HttpApiDependencies {
 }
 
 export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies) {
+  const workspaceRoots = [...roots, managedWorktreesRoot()];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
     if (context.req.headers["x-pidex-csrf"] !== csrf)
@@ -36,9 +41,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
         runtime.runPromise(
           Effect.gen(function* () {
             const metadata = yield* Metadata;
-            const recentWorkspaces = yield* attemptOperation("metadata.recent", () =>
-              metadata.recent(),
-            );
+            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
             const projectCandidates = yield* discoverProjectCandidates(roots);
             return {
               protocolVersion: PROTOCOL_VERSION,
@@ -58,10 +61,32 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
           Effect.gen(function* () {
             const metadata = yield* Metadata;
             const manager = yield* Chats;
-            const canonical = yield* canonicalWorkspace(input.path, roots);
+            const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
             const id = yield* workspaceId(metadata, canonical, input.remember);
             return yield* attemptOperation("chats.openWorkspace", () =>
               manager.openWorkspace(id, canonical),
+            );
+          }),
+        ),
+      ),
+      createWorktree: workspaces.createWorktree.handler(({ input }) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const metadata = yield* Metadata;
+            const manager = yield* Chats;
+            const source = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(input.workspaceId),
+            );
+            const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
+            const worktreePath = yield* createProjectWorktree(canonicalSource);
+            const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+              metadata.workspaceProjectId(source.id),
+            );
+            const id = yield* attemptOperation("metadata.rememberWorkspace", () =>
+              metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
+            );
+            return yield* attemptOperation("chats.openWorkspace", () =>
+              manager.openWorkspace(id, worktreePath),
             );
           }),
         ),
@@ -73,9 +98,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             yield* attemptOperation("metadata.reorderWorkspaces", () =>
               metadata.reorderWorkspaces(input.workspaceIds),
             );
-            const recentWorkspaces = yield* attemptOperation("metadata.recent", () =>
-              metadata.recent(),
-            );
+            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
             return { recentWorkspaces };
           }),
         ),
@@ -433,6 +456,17 @@ function workspaceId(metadata: MetadataStore, canonical: string, remember: boole
       metadata.rememberWorkspace(canonical),
     );
   });
+}
+
+function recentWorkspaceRecords(metadata: MetadataStore) {
+  return attemptOperation("metadata.recent", () => metadata.recent()).pipe(
+    Effect.map((records) =>
+      records.map((record) => ({
+        ...record,
+        worktree: isDescendant(managedWorktreesRoot(), record.path),
+      })),
+    ),
+  );
 }
 
 function requireIdle(isIdle: boolean, message: string) {
