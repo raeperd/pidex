@@ -92,6 +92,7 @@
             onkeydown={keydown}
             rows="2"
             placeholder="Ask Pi to work on this project…"
+            disabled={starter.submitting}
             aria-label="Prompt"></textarea>
           <div class="chat-composer__toolbar">
             <div class="chat-composer__controls">

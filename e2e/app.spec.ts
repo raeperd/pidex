@@ -740,6 +740,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   const starterRequests: string[] = [];
   const mutations: Array<{ procedure: string; input: Record<string, unknown> }> = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
+  const { promise: creationPending, resolve: releaseCreation } = Promise.withResolvers<void>();
   let initialTaskSnapshot: Record<string, unknown> | undefined;
   let taskSnapshot: Record<string, unknown> | undefined;
   page.on("request", (browserRequest) => {
@@ -793,6 +794,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     const payload = (await response.json()) as { json: Record<string, unknown> };
     taskSnapshot = { ...payload.json, model: "e2e/model", thinkingLevel: "medium" };
     initialTaskSnapshot = { ...taskSnapshot };
+    await creationPending;
     await route.fulfill({ response, json: { ...payload, json: taskSnapshot } });
   });
   await page.route("**/api/rpc/chats/configure", async (route) => {
@@ -902,6 +904,8 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(prompt).toHaveValue("Start from the existing durable path");
   await expect(send).toBeEnabled();
   await send.click();
+  await expect(prompt).toBeDisabled();
+  releaseCreation();
 
   await expect(page.getByRole("heading", { name: "What should we work on in apps?" })).toHaveCount(
     0,
