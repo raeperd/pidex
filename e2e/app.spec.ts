@@ -34,6 +34,10 @@ test("integrates the application headers with macOS window chrome", async ({ pag
     "-webkit-app-region",
     "no-drag",
   );
+
+  await page.setViewportSize({ width: 800, height: 820 });
+  await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
+  await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
 });
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {

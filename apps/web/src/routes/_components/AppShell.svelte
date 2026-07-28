@@ -1254,7 +1254,7 @@
     inert={mobileViewport.current && drawerOpen}
   >
     <header
-      class={`z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13 ${usesIntegratedTitleBar ? "window-drag-region" : ""}`}
+      class={`z-8 flex min-h-14 flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 py-1.5 backdrop-blur-xl max-[900px]:px-2.5 max-[560px]:min-h-13 ${usesIntegratedTitleBar ? "window-drag-region max-[900px]:pl-20" : ""}`}
     >
       <button
         class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
