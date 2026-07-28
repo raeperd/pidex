@@ -19,9 +19,11 @@
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
+    "@sveltejs/vite-plugin-svelte": "catalog:",
     "@vitest/runner": "4.1.10",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
+    "svelte": "catalog:",
     "vitest": "4.1.10"
   },
   "engines": {
