@@ -179,6 +179,7 @@
       if (result !== "compact" || draft !== submittedDraft) return;
       draft = "";
       persistDraft();
+      await tick();
       resize();
     } finally {
       if (isCompaction) delete compactPendingByTask[submittedTaskId];

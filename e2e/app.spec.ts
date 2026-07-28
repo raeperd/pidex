@@ -1296,6 +1296,17 @@ test("preserves edits made while slash compaction is pending", async ({
     page.getByRole("button", { name: "Compact task (context window 10% used)" }),
   ).toBeVisible();
   await expect(prompt).toHaveValue("Draft typed while compaction is pending");
+
+  await prompt.fill(
+    "/compact Preserve decisions\nand constraints\nacross multiple sections\nincluding architecture\ntesting strategy\nknown risks\nfollow-up work\nand final outcomes",
+  );
+  const expandedHeight = await prompt.evaluate((element) => element.getBoundingClientRect().height);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactRequests).toBe(2);
+  await expect(prompt).toHaveValue("");
+  await expect
+    .poll(() => prompt.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeLessThan(expandedHeight);
 });
 
 test("ignores compact responses after navigating to another task", async ({ page, request }) => {
@@ -1527,17 +1538,19 @@ test("stages configuration without overwriting the next draft", async ({
   await expect(prompt).toBeVisible();
 
   const chatId = String(snapshot?.chatId);
+  const contextUsage = {
+    tokens: 87_000,
+    contextWindow: 258_000,
+    percent: 33.72093023255814,
+    totalProcessedTokens: 2_500_000,
+    compactsAutomatically: true,
+  };
+  snapshot = { ...snapshot, contextUsage };
   await emitServerEvent(page, {
     type: "context_usage",
     eventId: 1,
     chatId,
-    usage: {
-      tokens: 87_000,
-      contextWindow: 258_000,
-      percent: 33.72093023255814,
-      totalProcessedTokens: 2_500_000,
-      compactsAutomatically: true,
-    },
+    usage: contextUsage,
   });
   const contextMeter = page.locator(".context-meter__trigger");
   await expect(contextMeter).toBeVisible();
