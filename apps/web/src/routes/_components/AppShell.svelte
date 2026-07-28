@@ -756,6 +756,7 @@
     }
     flushScheduledTextDeltas();
     if (event.type === "snapshot") {
+      if (event.snapshot.revision < snapshot.revision) return;
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();

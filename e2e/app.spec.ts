@@ -740,6 +740,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   const starterRequests: string[] = [];
   const mutations: Array<{ procedure: string; input: Record<string, unknown> }> = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
+  let initialTaskSnapshot: Record<string, unknown> | undefined;
   let taskSnapshot: Record<string, unknown> | undefined;
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
@@ -788,6 +789,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     const response = await route.fetch();
     const payload = (await response.json()) as { json: Record<string, unknown> };
     taskSnapshot = { ...payload.json, model: "e2e/model", thinkingLevel: "medium" };
+    initialTaskSnapshot = { ...taskSnapshot };
     await route.fulfill({ response, json: { ...payload, json: taskSnapshot } });
   });
   await page.route("**/api/rpc/chats/configure", async (route) => {
@@ -920,6 +922,15 @@ test("creates, navigates, and durably submits the first starter prompt", async (
       }),
     }),
   ]);
+  if (!initialTaskSnapshot) throw new Error("Expected the starter task's initial snapshot");
+  await waitForFakeWebSocket(page);
+  await emitServerEvent(page, {
+    type: "snapshot",
+    eventId: 1,
+    chatId: String(initialTaskSnapshot.chatId),
+    snapshot: initialTaskSnapshot,
+  });
+  await expect(page.getByLabel("Thinking level")).toHaveValue("high");
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const taskUrl = page.url();

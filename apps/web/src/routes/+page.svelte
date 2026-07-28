@@ -1,14 +1,147 @@
 <script lang="ts">
+  import type { ChatSnapshot } from "@pidex/api";
   import { getAppShellContext } from "./_components/AppShellContext.svelte";
+  import type { TaskConfigurationPatch } from "./_components/AppShellContext.svelte";
   import Icon from "./_components/Icon.svelte";
-  import StarterComposer from "./_components/StarterComposer.svelte";
+
+  interface StarterState {
+    readonly draft: string;
+    readonly modelOverride: string;
+    readonly submitting: boolean;
+    readonly thinkingLevel: ChatSnapshot["thinkingLevel"];
+  }
 
   const context = getAppShellContext();
+  const defaultStarter: StarterState = {
+    draft: "",
+    modelOverride: "",
+    submitting: false,
+    thinkingLevel: "medium",
+  };
+  let starters = $state<Record<string, StarterState>>({});
+  let workspaceId = $derived(context.shell.workspace?.id ?? "");
+  let starter = $derived(starters[workspaceId] ?? defaultStarter);
+  let selectedModel = $derived(
+    context.shell.workspace?.models.some(({ id }) => id === starter.modelOverride)
+      ? starter.modelOverride
+      : (context.shell.workspace?.models[0]?.id ?? ""),
+  );
+
+  async function send() {
+    const submittedWorkspaceId = workspaceId;
+    const submittedDraft = starter.draft;
+    if (starter.submitting || !submittedDraft.trim()) return;
+    updateStarter({ submitting: true }, submittedWorkspaceId);
+    try {
+      await context.taskActions.start(submittedDraft, {
+        model: selectedModel,
+        thinkingLevel: starter.thinkingLevel,
+      });
+    } finally {
+      updateStarter({ submitting: false }, submittedWorkspaceId);
+    }
+  }
+
+  function stageConfiguration(patch: TaskConfigurationPatch) {
+    updateStarter({
+      ...(patch.model === undefined ? {} : { modelOverride: patch.model }),
+      ...(patch.thinkingLevel === undefined ? {} : { thinkingLevel: patch.thinkingLevel }),
+    });
+  }
+
+  function updateStarter(patch: Partial<StarterState>, targetWorkspaceId = workspaceId) {
+    starters[targetWorkspaceId] = { ...(starters[targetWorkspaceId] ?? defaultStarter), ...patch };
+  }
+
+  function draftInput(input: HTMLTextAreaElement) {
+    updateStarter({ draft: input.value });
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 210)}px`;
+  }
+
+  function keydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
+      event.preventDefault();
+      void send();
+    }
+  }
 </script>
 
 {#if context.shell.workspace && !(context.shell.bootstrapError && !context.shell.bootstrap)}
   {#key context.shell.workspace.id}
-    <StarterComposer workspace={context.shell.workspace} start={context.taskActions.start} />
+    <section
+      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
+      aria-labelledby="starter-heading"
+      data-testid="starter-composer"
+    >
+      <div
+        class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+      >
+        <h1
+          class="m-0 text-center text-[clamp(25px,3vw,36px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
+          id="starter-heading"
+        >
+          What should we work on in {context.shell.workspace.name}?
+        </h1>
+        <div class="chat-composer mx-auto" data-testid="chat-composer">
+          <textarea
+            class="chat-composer__input"
+            value={starter.draft}
+            oninput={(event) => draftInput(event.currentTarget)}
+            onkeydown={keydown}
+            rows="2"
+            placeholder="Ask Pi to work on this project…"
+            aria-label="Prompt"></textarea>
+          <div class="chat-composer__toolbar">
+            <div class="chat-composer__controls">
+              <label class="chat-composer__control">
+                <select
+                  class="chat-composer__select"
+                  aria-label="Model"
+                  value={selectedModel}
+                  onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
+                  disabled={!context.shell.workspace.models.length}
+                >
+                  {#each context.shell.workspace.models as model (model.id)}<option value={model.id}
+                      >{model.name}</option
+                    >{/each}
+                </select>
+              </label>
+              <span class="chat-composer__divider" aria-hidden="true"></span>
+              <label class="chat-composer__control">
+                <span class="chat-composer__control-icon" aria-hidden="true"
+                  ><Icon name="activity" size={14} /></span
+                >
+                <select
+                  class="chat-composer__select"
+                  aria-label="Thinking level"
+                  value={starter.thinkingLevel}
+                  onchange={(event) =>
+                    stageConfiguration({
+                      thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
+                    })}
+                >
+                  <option value="off">Off</option><option value="minimal">Minimal</option><option
+                    value="low">Low</option
+                  ><option value="medium">Medium</option><option value="high">High</option><option
+                    value="xhigh">Extra high</option
+                  ><option value="max">Max</option>
+                </select>
+              </label>
+            </div>
+            <button
+              class="chat-composer__send"
+              onclick={send}
+              disabled={!starter.draft.trim() ||
+                !context.shell.workspace.models.length ||
+                starter.submitting}
+              aria-label="Send"><Icon name="send" /></button
+            >
+          </div>
+        </div>
+      </div>
+    </section>
   {/key}
 {:else}
   <section
