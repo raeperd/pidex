@@ -714,13 +714,22 @@ test("retries a deep-linked task without replacing its route", async ({ page, re
   await page.getByRole("button", { name: "Retry connection" }).click();
 
   await expect(page).toHaveURL(taskPath);
-  await expect(page.getByRole("button", { name: "Rename" })).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.locator("main > header")).toHaveCount(0);
 });
 
 test("keeps search and task creation in the no-active-task experience", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
   const createRequests: unknown[] = [];
   const taskCreationRequests: string[] = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
@@ -756,6 +765,7 @@ test("keeps search and task creation in the no-active-task experience", async ({
         json: {
           ...workspace,
           models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+          resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
         },
       },
     });
@@ -799,6 +809,24 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect(page.getByLabel("Prompt")).toBeFocused();
   await expect(page.getByLabel("Thinking level")).toBeVisible();
+  await expect(page.locator("main > header")).toHaveCount(0);
+  const topControl =
+    testInfo.project.name === "mobile"
+      ? page.getByRole("button", { name: "Open tasks" })
+      : page.locator("main > .window-drag-region");
+  const resourceWarning = page.getByRole("status").filter({ hasText: "E2E resource warning" });
+  await expect(topControl).toBeVisible();
+  await expect(resourceWarning).toBeVisible();
+  const topControlBox = await topControl.boundingBox();
+  const resourceWarningBox = await resourceWarning.boundingBox();
+  if (!topControlBox || !resourceWarningBox) throw new Error("Expected visible new-task chrome");
+  expect(resourceWarningBox.y).toBeGreaterThanOrEqual(topControlBox.y + topControlBox.height);
+  if (testInfo.project.name !== "mobile") {
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await expect(page.locator("main > header")).toHaveCount(0);
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+  }
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
   expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
@@ -848,7 +876,7 @@ test("renders assistant markdown as safe interactive components", async ({
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   await emitServerEvent(page, {
@@ -949,7 +977,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   const toolItem = {
@@ -1087,7 +1115,7 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
   await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   await emitServerEvent(page, {
@@ -1351,6 +1379,21 @@ async function openTasks(page: Page) {
     await button.click();
   }
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
+}
+
+async function waitForFakeWebSocket(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              pidexTestSocket?: WebSocket;
+            }
+          ).pidexTestSocket?.readyState,
+      ),
+    )
+    .toBe(1);
 }
 
 async function installFakeWebSocket(page: Page) {
