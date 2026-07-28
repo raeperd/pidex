@@ -730,6 +730,7 @@
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path, { replaceState: true });
+      await disposeCreatedTask(previousSnapshot);
       return true;
     } catch (cause) {
       if (worktree) await disposeCreatedWorktree(worktree, created);

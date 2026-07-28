@@ -959,6 +959,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   let worktreeCreations = 0;
   let worktreeBootstrapPending = false;
   let releaseWorktreeBootstrap: (() => void) | undefined;
+  const disposedChats: string[] = [];
   const removedWorktrees: string[] = [];
   const sentPrompts: Record<string, unknown>[] = [];
   await installFakeWebSocket(page);
@@ -1000,6 +1001,15 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   await page.route("**/api/rpc/workspaces/removeWorktree", async (route) => {
     const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
     removedWorktrees.push(input.workspaceId);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ok: true } },
+    });
+  });
+  await page.route("**/api/rpc/chats/dispose", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { chatId: string } }).json;
+    disposedChats.push(input.chatId);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1110,6 +1120,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
     }),
   );
   await expect(page).toHaveURL(/\/tasks\/worktree_task_e2e$/);
+  await expect.poll(() => disposedChats).toContain("local_chat_e2e");
   await page.goBack();
   await expect(page).toHaveURL("/");
 

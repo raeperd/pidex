@@ -63,6 +63,24 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             const metadata = yield* Metadata;
             const manager = yield* Chats;
             const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
+            if (!roots.some((root) => isDescendant(root, canonical))) {
+              const rememberedId = yield* attemptOperation("metadata.workspaceId", () =>
+                metadata.workspaceId(canonical),
+              );
+              const sourceWorkspaceId = rememberedId
+                ? yield* attemptOperation("metadata.workspaceProjectId", () =>
+                    metadata.workspaceProjectId(rememberedId),
+                  )
+                : undefined;
+              if (!rememberedId || sourceWorkspaceId === rememberedId)
+                return yield* Effect.fail(
+                  HttpError.make({
+                    status: 403,
+                    code: "workspace_forbidden",
+                    message: "Project is outside WORKSPACE_ROOTS",
+                  }),
+                );
+            }
             const id = yield* workspaceId(metadata, canonical, input.remember);
             return yield* attemptOperation("chats.openWorkspace", () =>
               manager.openWorkspace(id, canonical),

@@ -52,6 +52,7 @@ describe.sequential("HTTP API endpoints", () => {
   let api: PidexApiContractClient;
   let tempRoot: string;
   let workspacePath: string;
+  let nonGitWorkspacePath: string;
   let workspaceId: string;
   let nonGitWorkspaceId: string;
   let chatId: string;
@@ -69,7 +70,9 @@ describe.sequential("HTTP API endpoints", () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
     const repositoryPath = path.join(tempRoot, "repository");
     workspacePath = path.join(repositoryPath, "workspace");
+    nonGitWorkspacePath = path.join(tempRoot, "non-git-workspace");
     await mkdir(path.join(workspacePath, ".pi"), { recursive: true });
+    await mkdir(nonGitWorkspacePath);
     await writeFile(path.join(workspacePath, ".pi", "SYSTEM.md"), "Test system prompt.\n");
     await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: repositoryPath });
     await execFileAsync("git", ["add", "."], { cwd: repositoryPath });
@@ -92,7 +95,7 @@ describe.sequential("HTTP API endpoints", () => {
     process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
     process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
-    process.env.WORKSPACE_ROOTS = tempRoot;
+    process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
 
     app = await createPidexServer();
     await listen(app);
@@ -168,9 +171,7 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("workspaces.reorder", async () => {
     const first = await api.workspaces.open({ path: workspacePath, remember: true });
-    const secondPath = path.join(tempRoot, "second-workspace");
-    await mkdir(secondPath);
-    const second = await api.workspaces.open({ path: secondPath, remember: true });
+    const second = await api.workspaces.open({ path: nonGitWorkspacePath, remember: true });
     nonGitWorkspaceId = second.id;
 
     await api.workspaces.reorder({ workspaceIds: [second.id, first.id] });
@@ -257,6 +258,15 @@ describe.sequential("HTTP API endpoints", () => {
     await expect(
       api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
     ).rejects.toMatchObject({ code: "project_not_git", status: 400 });
+  });
+
+  it("rejects unrecorded directories under the managed worktree root", async () => {
+    const unrecordedPath = path.join(tempRoot, "state", "worktrees", "unrecorded");
+    await mkdir(unrecordedPath, { recursive: true });
+
+    await expect(
+      api.workspaces.open({ path: unrecordedPath, remember: true }),
+    ).rejects.toMatchObject({ code: "workspace_forbidden", status: 403 });
   });
 
   it("workspaces.sessions", async () => {
