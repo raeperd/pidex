@@ -1338,19 +1338,6 @@
         {/if}
       </nav>
     </section>
-
-    <div
-      class="mx-0.5 flex min-h-14.5 items-center gap-2 border-t border-border px-2 py-2 text-faint"
-    >
-      <span class="flex-none"><Icon name="shield" size={15} /></span>
-      <p class="m-0 min-w-0 flex-1">
-        <strong class="block text-[10.5px] font-semibold text-muted">Local & private</strong><span
-          class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px]"
-          >Read-only limits tools, not the OS.</span
-        >
-      </p>
-      <small class="font-mono text-[9px] leading-none">{bootstrap?.piVersion ?? "Pi"}</small>
-    </div>
   </aside>
 
   <main
