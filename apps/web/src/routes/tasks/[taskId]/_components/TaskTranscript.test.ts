@@ -5,7 +5,8 @@ import TaskTranscript from "./TaskTranscript.svelte";
 
 describe("TaskTranscript", () => {
   it("renders every tool call in chronological order", () => {
-    const tools = ["pwd", "git status", "find .", "go test ./..."].map(
+    const commands = ["pwd", "git status", "find .", "go test ./..."];
+    const tools = commands.map(
       (command, index): ToolItem => ({
         type: "tool",
         id: `tool-${index}`,
@@ -31,6 +32,7 @@ describe("TaskTranscript", () => {
     }).body;
 
     expect(body).not.toContain("previous tool");
+    for (const command of commands) expect(body).toContain(command);
     expect(body.indexOf("pwd")).toBeLessThan(body.indexOf("git status"));
     expect(body.indexOf("git status")).toBeLessThan(body.indexOf("find ."));
     expect(body.indexOf("find .")).toBeLessThan(body.indexOf("go test ./..."));
