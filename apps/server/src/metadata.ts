@@ -99,10 +99,7 @@ export function makeMetadataLayer(stateDir?: string) {
   );
 }
 
-/**
- * @deprecated Use the Effect-native `Metadata` service. This synchronous facade remains until
- * the application runtime and current callers can be migrated without crossing task ownership.
- */
+/** Low-level synchronous SQLite boundary. Application code consumes it through `Metadata`. */
 export function makeMetadataStore(stateDir?: string) {
   const dir = stateDir ?? process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
   mkdirSync(dir, { recursive: true, mode: 0o700 });

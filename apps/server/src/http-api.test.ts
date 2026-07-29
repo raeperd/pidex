@@ -15,6 +15,7 @@ import {
   type PidexApiContractClient,
   type ServerEvent,
 } from "@pidex/api";
+import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
@@ -408,7 +409,8 @@ describe.sequential("HTTP API endpoints", () => {
         totalProcessedTokens: 48_000,
         compactsAutomatically: true,
       };
-      Object.defineProperty(app.manager.chat(chatId).session, "contextUsage", {
+      const chatRecord = await Effect.runPromise(app.manager.chat(chatId));
+      Object.defineProperty(chatRecord.session.state, "contextUsage", {
         configurable: true,
         value: contextUsage,
       });

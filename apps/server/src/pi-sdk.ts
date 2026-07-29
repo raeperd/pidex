@@ -14,7 +14,7 @@ import {
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import type { ContextUsage, ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
-import { Effect, Scope } from "effect";
+import { Effect, Schema, Scope } from "effect";
 import {
   acquireAdapterSession,
   bounded,
@@ -26,12 +26,11 @@ import {
   type EffectAdapterSession,
 } from "./adapter.js";
 
-interface PiSdkError {
-  readonly _tag: "PiSdkError";
-  readonly operation: string;
-  readonly message: string;
-  readonly cause: unknown;
-}
+class PiSdkError extends Schema.TaggedErrorClass<PiSdkError>()("PiSdkError", {
+  operation: Schema.String,
+  message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
 
 export interface PiSdkServiceApi {
   inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
@@ -587,10 +586,9 @@ function fromPiPromise<A>(
 }
 
 function piSdkError(operation: string, cause: unknown): PiSdkError {
-  return {
-    _tag: "PiSdkError",
+  return PiSdkError.make({
     operation,
     message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
     cause,
-  };
+  });
 }

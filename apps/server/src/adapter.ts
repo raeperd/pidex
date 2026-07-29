@@ -6,7 +6,7 @@ import type {
   TextItem,
   ToolItem,
 } from "@pidex/api";
-import { Effect, Queue, Scope, Stream } from "effect";
+import { Effect, Queue, Schema, Scope, Stream } from "effect";
 
 export type AdapterEvent =
   | { type: "message"; item: TextItem }
@@ -56,12 +56,14 @@ export interface AdapterSession {
   dispose(): void;
 }
 
-interface AdapterSessionError {
-  readonly _tag: "AdapterSessionError";
-  readonly operation: string;
-  readonly message: string;
-  readonly cause: unknown;
-}
+class AdapterSessionError extends Schema.TaggedErrorClass<AdapterSessionError>()(
+  "AdapterSessionError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
 export interface EffectAdapterSession {
   readonly state: Pick<
@@ -184,12 +186,11 @@ function attemptSync<A>(
 }
 
 function adapterSessionError(operation: string, cause: unknown): AdapterSessionError {
-  return {
-    _tag: "AdapterSessionError",
+  return AdapterSessionError.make({
     operation,
     message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
     cause,
-  };
+  });
 }
 
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
