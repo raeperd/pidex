@@ -20,7 +20,7 @@
   } = $props();
 
   let nodes = $derived(parseAgentMessage(text));
-  let thinkingLabel = $derived(thinkingSummaryLabel(thinking, complete));
+  let thinkingNodes = $derived(parseAgentMessage(thinking ?? ""));
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let sentAt = $derived.by(() => {
@@ -47,36 +47,21 @@
   onDestroy(() => {
     if (copiedTimer) clearTimeout(copiedTimer);
   });
-
-  function thinkingSummaryLabel(value: string | undefined, isComplete: boolean) {
-    if (!isComplete) return { text: "Thinking", strong: false };
-    const firstLine =
-      value
-        ?.split(/\r?\n/)
-        .find((line) => line.trim())
-        ?.trim() || "Thought";
-    const strong = /^(\*\*|__)(.+)\1$/.exec(firstLine);
-    return strong ? { text: strong[2], strong: true } : { text: firstLine, strong: false };
-  }
 </script>
 
 <article class="group/assistant mb-2 min-w-0 px-2 py-1">
   {#if thinking}
-    <details class="mb-1">
-      <summary
-        class="flex w-full cursor-pointer items-center gap-2 overflow-hidden py-2 font-mono text-[12px] leading-[1.5] text-ellipsis whitespace-nowrap italic text-faint [list-style:none]"
-        >{#if !complete}<span class="inline-flex gap-0.5"
-            ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-              class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-            ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
-            ></i></span
-          >{/if}{#if thinkingLabel.strong}<strong class="font-semibold not-italic"
-            >{thinkingLabel.text}</strong
-          >{:else}{thinkingLabel.text}{/if}</summary
-      >
-      <pre
-        class="mb-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-none border-0 bg-secondary px-2 py-2 font-mono text-[12px] leading-[1.55] text-muted">{thinking}</pre>
-    </details>
+    <div
+      class="thinking-markdown mb-2 font-mono text-[12px] leading-[1.55] italic text-faint [overflow-wrap:anywhere]"
+    >
+      {#if !complete}<span class="mb-2 inline-flex gap-0.5" aria-label="Thinking"
+          ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
+            class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
+          ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
+          ></i></span
+        >{/if}
+      <AgentMessageBody nodes={thinkingNodes} streaming={!complete} {theme} />
+    </div>
   {/if}
   <div
     class="markdown terminal-markdown font-mono text-[12.5px] leading-[1.55] text-foreground/95 [overflow-wrap:anywhere]"
@@ -138,5 +123,13 @@
     padding: 1px 4px;
     border-radius: 2px;
     color: var(--tool-argument);
+  }
+
+  .thinking-markdown :global(p) {
+    margin: 0 0 1em;
+  }
+
+  .thinking-markdown :global(p:last-child) {
+    margin-bottom: 0;
   }
 </style>
