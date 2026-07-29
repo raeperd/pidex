@@ -20,15 +20,7 @@
   } = $props();
 
   let nodes = $derived(parseAgentMessage(text));
-  let thinkingLabel = $derived.by(() => {
-    if (!complete) return "Thinking";
-    return (
-      thinking
-        ?.split(/\r?\n/)
-        .find((line) => line.trim())
-        ?.trim() || "Thought"
-    );
-  });
+  let thinkingLabel = $derived(thinkingSummaryLabel(thinking, complete));
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let sentAt = $derived.by(() => {
@@ -55,6 +47,17 @@
   onDestroy(() => {
     if (copiedTimer) clearTimeout(copiedTimer);
   });
+
+  function thinkingSummaryLabel(value: string | undefined, isComplete: boolean) {
+    if (!isComplete) return { text: "Thinking", strong: false };
+    const firstLine =
+      value
+        ?.split(/\r?\n/)
+        .find((line) => line.trim())
+        ?.trim() || "Thought";
+    const strong = /^(\*\*|__)(.+)\1$/.exec(firstLine);
+    return strong ? { text: strong[2], strong: true } : { text: firstLine, strong: false };
+  }
 </script>
 
 <article class="group/assistant mb-2 min-w-0 px-2 py-1">
@@ -67,7 +70,9 @@
               class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
             ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
             ></i></span
-          >{/if}{thinkingLabel}</summary
+          >{/if}{#if thinkingLabel.strong}<strong class="font-semibold not-italic"
+            >{thinkingLabel.text}</strong
+          >{:else}{thinkingLabel.text}{/if}</summary
       >
       <pre
         class="mb-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-none border-0 bg-secondary px-2 py-2 font-mono text-[12px] leading-[1.55] text-muted">{thinking}</pre>
