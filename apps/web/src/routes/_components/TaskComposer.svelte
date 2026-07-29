@@ -342,7 +342,7 @@
       <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
       <div class="relative flex-none" data-start-menu>
         <button
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-[11px] font-medium text-muted hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:opacity-70"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-[11px] font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
           onclick={() => (startMenuOpen = !startMenuOpen)}
           disabled={!startModeEditable || active || creatingTask}
           aria-label={`Start in ${startModeLabel}`}

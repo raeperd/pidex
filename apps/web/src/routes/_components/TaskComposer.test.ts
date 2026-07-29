@@ -80,6 +80,12 @@ describe("slashCommandSuggestions", () => {
     expect(renderComposer("/", true)).not.toContain('role="listbox"');
   });
 
+  it("does not give the disabled start mode control hover styles", () => {
+    expect(renderComposer("", true)).toContain(
+      "enabled:hover:bg-secondary enabled:hover:text-foreground",
+    );
+  });
+
   it("completes a selected command in the composer", () => {
     expect(completeSlashCommand({ name: "compact" })).toBe("/compact ");
   });
