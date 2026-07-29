@@ -10,6 +10,7 @@ pidex works with the Pi you already use. Pick a project, start or resume a task,
 
 - **Your Pi setup:** Use your existing login, models, tools, project context, and saved conversations.
 - **Tasks by project:** Find recent work quickly and return to the task you left open.
+- **Isolated worktree tasks:** Start a task on a fresh `pidex/*` branch without changing the project's current checkout.
 - **Work in view:** Follow streaming replies and tool activity, change the model or thinking level, copy a response, or stop a run.
 - **Reliable reconnects:** Pi keeps working if the browser disconnects. pidex restores the latest state when you return.
 - **Local by default:** pidex listens only on `127.0.0.1`, with no account, telemetry, public sharing, or transcript database.
@@ -31,7 +32,7 @@ If no models appear, run `pi`, enter `/login`, then restart pidex.
 ## Use pidex
 
 1. Add a project from the task sidebar.
-2. Start a new task or open a recent one.
+2. Start a task in the current checkout, create one in an isolated worktree, or open a recent task.
 3. Choose a model and thinking level, then send a prompt.
 4. Follow the response and tool activity. You can leave and reconnect without stopping Pi.
 
@@ -67,12 +68,12 @@ Project resources load only after Pi trusts the project. Assistant Markdown is s
 | `PORT`                 | Server port from 1024 to 65535                                         | `4783`         |
 | `WORKSPACE_ROOTS`      | Allowed workspace roots, separated with your platform's path delimiter | Home directory |
 | `PIDEX_PROJECT_ROOTS`  | Folders searched by the project picker                                 | `~/Projects`   |
-| `PIDEX_STATE_DIR`      | Location of the pidex metadata database                                | Platform data  |
+| `PIDEX_STATE_DIR`      | Location of pidex metadata and managed Git worktrees                   | Platform data  |
 | `PIDEX_TAILSCALE_HOST` | One allowed Tailscale Serve hostname                                   | Disabled       |
 
 Projects discovered through `PIDEX_PROJECT_ROOTS` must also be inside `WORKSPACE_ROOTS`. Production startup stops with an error if its port is busy.
 
-The desktop app stores metadata under Electron's platform-native `userData` directory, in a dedicated `state` subdirectory. On macOS this is normally `~/Library/Application Support/pidex/state/pidex.sqlite`. A standalone server defaults to `~/.pidex/pidex.sqlite`; `PIDEX_STATE_DIR` overrides either location.
+The desktop app stores metadata and managed worktrees under Electron's platform-native `userData` directory, in a dedicated `state` subdirectory. On macOS the database is normally `~/Library/Application Support/pidex/state/pidex.sqlite`. A standalone server defaults to `~/.pidex`; `PIDEX_STATE_DIR` overrides either location.
 
 ## Troubleshooting
 

@@ -458,4 +458,12 @@ export class PiSdk {
   async setWorkspaceTrust(cwd: string, trusted: boolean) {
     new ProjectTrustStore(getAgentDir()).set(cwd, trusted);
   }
+  async inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
+    const trust = new ProjectTrustStore(getAgentDir());
+    const decision = trust.get(sourceCwd);
+    if (decision !== null) trust.set(cwd, decision);
+  }
+  async clearWorkspaceTrust(cwd: string) {
+    new ProjectTrustStore(getAgentDir()).set(cwd, null);
+  }
 }

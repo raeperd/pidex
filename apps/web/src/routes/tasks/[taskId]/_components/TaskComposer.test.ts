@@ -73,6 +73,7 @@ describe("slashCommandSuggestions", () => {
 
     expect(body).toContain('role="listbox"');
     expect(body).toContain("Manually compact the session context");
+    expect(body).toContain('aria-label="Start in Work locally"');
   });
 
   it("hides commands that cannot be expanded during active delivery", () => {
@@ -98,18 +99,23 @@ function renderComposer(draft: string, active: boolean) {
       commands: [],
       compact: async () => true,
       connection: "connected",
+      creatingTask: false,
       delivery: "steer",
       draft,
       followUpCount: 0,
       hasConfigurationDraft: false,
       models: [],
       persistDraft: () => {},
+      projectName: "pidex",
       requiresAcknowledgement: false,
       runStatus: active ? "running" : "idle",
       selectedModel: "",
       selectedThinkingLevel: "low",
       send: async () => {},
+      setStartMode: () => {},
       stageConfiguration: () => {},
+      startMode: "local",
+      startModeEditable: true,
       stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
       steeringCount: 0,
       stop: async () => {},
