@@ -1525,9 +1525,6 @@
                             class="flex-none font-mono text-[10.5px] leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
-                        <span
-                          class={`size-1.5 flex-none rounded-full ${current ? "bg-primary opacity-100" : "bg-faint opacity-55"}`}
-                        ></span>
                       </button>
                     {/each}
                     {#if hiddenTasks > 0}
