@@ -2,9 +2,9 @@
   let { text }: { text: string } = $props();
 </script>
 
-<article class="mb-2 flex flex-col items-stretch">
+<article class="my-3 flex flex-col items-end px-2">
   <div
-    class="w-full rounded-none bg-secondary px-2 py-2 font-mono text-[12.5px] leading-[1.55] whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]"
+    class="w-fit max-w-[85%] rounded-3xl border border-border-strong bg-secondary px-4 py-3 font-sans text-[13px] leading-[1.55] font-medium whitespace-pre-wrap text-foreground [overflow-wrap:anywhere] max-[560px]:max-w-[92%] max-[560px]:px-3.5 max-[560px]:py-2.5"
   >
     {text}
   </div>
