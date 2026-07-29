@@ -1,5 +1,3 @@
-name: CI
-
 on:
   push:
     branches:
@@ -25,8 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.9
-        with:
-          run_install: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .node-version
@@ -49,8 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.9
-        with:
-          run_install: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .node-version
