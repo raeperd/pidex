@@ -21,8 +21,12 @@ interface HttpApiDependencies {
   roots: string[];
 }
 
-export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
-  const workspaceRoots = [...roots, managedWorktreesRoot()];
+export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function* ({
+  csrf,
+  roots,
+}: HttpApiDependencies) {
+  const managedWorktreeRoot = yield* managedWorktreesRoot();
+  const workspaceRoots = [...roots, managedWorktreeRoot];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
     if (context.req.headers["x-pidex-csrf"] !== csrf)
@@ -41,7 +45,7 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
       })),
       bootstrap: implementation.system.bootstrap.effect(function* () {
         const metadata = yield* Metadata;
-        const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata, managedWorktreeRoot);
         const projectCandidates = yield* discoverProjectCandidates(roots);
         return {
           protocolVersion: PROTOCOL_VERSION,
@@ -143,7 +147,7 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
       reorder: workspaces.reorder.effect(function* (_, input) {
         const metadata = yield* Metadata;
         yield* metadata.reorderWorkspaces(input.workspaceIds);
-        const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata, managedWorktreeRoot);
         return { recentWorkspaces };
       }),
       sessions: workspaces.sessions.effect(function* (_, input) {
@@ -352,7 +356,7 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
       }),
     }),
   });
-}
+});
 
 const protocolErrors = os.middleware(async ({ next }) => {
   try {
@@ -384,12 +388,12 @@ function workspaceId(metadata: MetadataService, canonical: string, remember: boo
   });
 }
 
-function recentWorkspaceRecords(metadata: MetadataService) {
+function recentWorkspaceRecords(metadata: MetadataService, managedWorktreeRoot: string) {
   return metadata.recent().pipe(
     Effect.map((records) =>
       records.map((record) => ({
         ...record,
-        worktree: isDescendant(managedWorktreesRoot(), record.path),
+        worktree: isDescendant(managedWorktreeRoot, record.path),
       })),
     ),
   );
