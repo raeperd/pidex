@@ -96,6 +96,10 @@ pnpm start          # Run the built browser app and server
 pnpm start:desktop  # Run the built desktop app
 ```
 
+Tests live beside the code they exercise and use real local dependencies when they are fast and
+deterministic. Outside-in Playwright workflows live in `e2e/`, grouped by product behavior; shared
+browser helpers stay in `e2e/support.ts`.
+
 The packaged app is ad-hoc signed for local development, so it does not require an Apple
 Developer account. It is not notarized or intended for distribution.
 

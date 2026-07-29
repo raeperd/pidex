@@ -17,15 +17,12 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "api", testMatch: "**/*.api.spec.ts" },
     {
       name: "chromium",
-      testIgnore: "**/*.api.spec.ts",
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
-      testIgnore: "**/*.api.spec.ts",
       use: { ...devices["Pixel 7"] },
     },
   ],
