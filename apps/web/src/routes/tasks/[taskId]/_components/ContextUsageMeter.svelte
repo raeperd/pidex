@@ -1,11 +1,25 @@
 <script lang="ts">
   import type { ContextUsage } from "@pidex/api";
+  import { onDestroy } from "svelte";
 
   const RADIUS = 9.75;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
   let { usage }: { usage: ContextUsage } = $props();
+  const componentId = $props.id();
+  const detailsId = `${componentId}-details`;
 
+  let pinned = $state(false);
+  let hovered = $state(false);
+  let focused = $state(false);
+  let dismissed = $state(false);
+  let horizontalShift = $state(0);
+  let triggerElement: HTMLButtonElement | undefined;
+  let observedToolbar: HTMLElement | undefined;
+  let toolbarMutationObserver: MutationObserver | undefined;
+  let toolbarResizeObserver: ResizeObserver | undefined;
+  let repositionFrame: number | undefined;
+  let expanded = $derived(pinned || (!dismissed && (hovered || focused)));
   let normalizedPercent = $derived(Math.max(0, Math.min(100, usage.percent ?? 0)));
   let percentageLabel = $derived(formatPercentage(usage.percent));
   let dashOffset = $derived(CIRCUMFERENCE * (1 - normalizedPercent / 100));
@@ -15,6 +29,106 @@
       ? `Context window ${percentageLabel} used`
       : "Context window usage is being calculated",
   );
+
+  function toggleDetails(event: MouseEvent) {
+    positionDetails(event.currentTarget);
+    pinned = !pinned;
+    dismissed = !pinned;
+  }
+
+  function showOnHover(event: PointerEvent) {
+    if (event.pointerType === "touch") return;
+    positionDetails(event.currentTarget);
+    hovered = true;
+    dismissed = false;
+  }
+
+  function hideAfterHover() {
+    hovered = false;
+  }
+
+  function showOnFocus(event: FocusEvent) {
+    positionDetails(event.currentTarget);
+    focused = true;
+    dismissed = false;
+  }
+
+  function hideAfterFocus() {
+    focused = false;
+  }
+
+  function closeDetails() {
+    pinned = false;
+    dismissed = true;
+  }
+
+  function handleDocumentPointerDown(event: PointerEvent) {
+    if (!expanded || isInsideMeter(event.target)) return;
+    closeDetails();
+  }
+
+  function handleDocumentKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !expanded) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeDetails();
+  }
+
+  function handleWindowResize() {
+    if (triggerElement) positionDetails(triggerElement);
+  }
+
+  function positionDetails(target: EventTarget | null) {
+    if (!(target instanceof HTMLButtonElement)) return;
+    triggerElement = target;
+    observeToolbar(target.parentElement?.parentElement);
+    const details = target.parentElement?.querySelector<HTMLElement>(".context-meter__popover");
+    if (!details) return;
+
+    const anchorRight = target.getBoundingClientRect().right;
+    const baseLeft = anchorRight - details.offsetWidth;
+    const baseRight = anchorRight;
+    const viewportInset = 16;
+    if (baseLeft < viewportInset) horizontalShift = viewportInset - baseLeft;
+    else if (baseRight > innerWidth - viewportInset)
+      horizontalShift = innerWidth - viewportInset - baseRight;
+    else horizontalShift = 0;
+  }
+
+  function observeToolbar(toolbar: HTMLElement | null | undefined) {
+    if (!toolbar || toolbar === observedToolbar) return;
+    disconnectToolbarObservers();
+    observedToolbar = toolbar;
+    toolbarMutationObserver = new MutationObserver(repositionExpandedDetails);
+    toolbarMutationObserver.observe(toolbar, { childList: true });
+    toolbarResizeObserver = new ResizeObserver(repositionExpandedDetails);
+    toolbarResizeObserver.observe(toolbar);
+  }
+
+  function repositionExpandedDetails() {
+    if (repositionFrame !== undefined) cancelAnimationFrame(repositionFrame);
+    repositionFrame = requestAnimationFrame(() => {
+      repositionFrame = undefined;
+      if (expanded && triggerElement) positionDetails(triggerElement);
+    });
+  }
+
+  function disconnectToolbarObservers() {
+    if (repositionFrame !== undefined) cancelAnimationFrame(repositionFrame);
+    toolbarMutationObserver?.disconnect();
+    toolbarResizeObserver?.disconnect();
+    repositionFrame = undefined;
+    toolbarMutationObserver = undefined;
+    toolbarResizeObserver = undefined;
+    observedToolbar = undefined;
+  }
+
+  function isInsideMeter(target: EventTarget | null) {
+    if (!(target instanceof Element)) return false;
+    return (
+      target.closest("[data-context-meter]")?.getAttribute("data-context-meter") === componentId
+    );
+  }
 
   function formatPercentage(value: number | null) {
     if (value === null || !Number.isFinite(value)) return null;
@@ -28,14 +142,26 @@
     if (value < 1_000_000) return `${Math.round(value / 1_000)}k`;
     return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
   }
+
+  onDestroy(disconnectToolbarObservers);
 </script>
 
-<div class="context-meter relative inline-flex flex-none">
-  <span
-    class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] bg-transparent text-primary"
-    role="img"
+<svelte:window onresize={handleWindowResize} />
+<svelte:document onpointerdown={handleDocumentPointerDown} onkeydown={handleDocumentKeydown} />
+
+<div class="context-meter relative inline-flex flex-none" data-context-meter={componentId}>
+  <button
+    class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] border-0 border-none bg-transparent text-primary transition-[background-color] duration-[140ms] ease-[ease] hover:bg-secondary focus-visible:bg-secondary"
+    type="button"
     aria-label={ariaLabel}
-    title="Context window usage"
+    aria-describedby={detailsId}
+    aria-controls={detailsId}
+    aria-expanded={expanded}
+    onclick={toggleDetails}
+    onfocus={showOnFocus}
+    onblur={hideAfterFocus}
+    onpointerenter={showOnHover}
+    onpointerleave={hideAfterHover}
   >
     <svg class="size-4.5 [rotate:-90deg]" viewBox="0 0 24 24" aria-hidden="true">
       <circle
@@ -46,8 +172,8 @@
       />
       <circle
         class={[
-          "fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
-          overloaded ? "stroke-danger" : "stroke-current",
+          "context-meter__progress fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "context-meter__progress--danger stroke-danger" : "stroke-current",
         ]}
         cx="12"
         cy="12"
@@ -56,11 +182,20 @@
         stroke-dashoffset={dashOffset}
       />
     </svg>
-  </span>
+  </button>
 
   <div
-    class="pointer-events-none absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid w-64 translate-y-1 gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted opacity-0 shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] delay-0 duration-[120ms] ease-[ease] [.context-meter:hover_&]:translate-y-0 [.context-meter:hover_&]:opacity-100 [.context-meter:hover_&]:delay-150 motion-reduce:transition-none"
+    class={[
+      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
+      expanded
+        ? "pointer-events-auto opacity-100 [translate:var(--context-popover-shift,0)_0] delay-150"
+        : "pointer-events-none opacity-0 [translate:var(--context-popover-shift,0)_0.25rem] delay-0",
+    ]}
+    id={detailsId}
     role="tooltip"
+    aria-hidden={!expanded}
+    data-open={expanded}
+    style:--context-popover-shift={`${horizontalShift}px`}
   >
     <div class="flex items-center justify-between gap-3">
       <strong class="font-semibold text-muted">Context Window</strong>
@@ -86,8 +221,8 @@
     >
       <span
         class={[
-          "block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
-          overloaded ? "bg-danger" : "bg-primary",
+          "context-meter__bar-fill block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "context-meter__bar-fill--danger bg-danger" : "bg-primary",
         ]}
         style:width={`${normalizedPercent}%`}
       ></span>
