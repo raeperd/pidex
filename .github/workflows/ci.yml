@@ -68,7 +68,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Package unsigned macOS app
         run: |
-          ulimit -n 10240
+          ulimit -n 65536
           pnpm package:desktop
         env:
           CSC_FOR_PULL_REQUEST: "true"
