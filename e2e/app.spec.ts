@@ -187,8 +187,12 @@ test("groups worktree tasks under their source project", async ({ page, request 
 
   const projects = page.getByRole("navigation", { name: "Projects" });
   await expect(projects.getByRole("group")).toHaveCount(1);
-  await expect(projects.getByText("Local task", { exact: true })).toBeVisible();
-  await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
+  const localTask = projects.getByRole("button", { name: /Local task/ });
+  const worktreeTask = projects.getByRole("button", { name: /Worktree task/ });
+  await expect(localTask).toBeVisible();
+  await expect(worktreeTask).toBeVisible();
+  await expect(localTask.locator("[data-worktree-indicator]")).toHaveCount(0);
+  await expect(worktreeTask.locator("[data-worktree-indicator]")).toBeVisible();
 
   openedPaths.length = 0;
   await page.evaluate(({ path }) => localStorage.setItem("pidex:last-project", path), {

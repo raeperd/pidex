@@ -177,7 +177,12 @@
   const projectExpanded = (id: string) => expandedProjectIds.includes(id);
   function tasksFor(project: RecentWorkspace) {
     const sessions = [project, ...worktreesFor(project.id)]
-      .flatMap(({ id }) => workspaceFor(id)?.sessions ?? [])
+      .flatMap((member) =>
+        (workspaceFor(member.id)?.sessions ?? []).map((session) => ({
+          ...session,
+          worktree: member.worktree === true,
+        })),
+      )
       .toSorted((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
     const query = search.trim().toLowerCase();
     if (!query || projectName(project.path).toLowerCase().includes(query)) return sessions;
@@ -1531,6 +1536,12 @@
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
                         >
+                        {#if task.worktree}<span
+                            class="grid size-4 flex-none rotate-90 place-items-center text-faint"
+                            data-worktree-indicator
+                            aria-label="Worktree"
+                            title="Worktree"><Icon name="worktree" size={14} /></span
+                          >{/if}
                         {#if current && active}<span
                             class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
                             ><i

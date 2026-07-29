@@ -18,6 +18,7 @@
     PencilLine,
     Search,
     ShieldCheck,
+    Split,
     Square,
     SquarePen,
     Wrench,
@@ -47,6 +48,7 @@
     | "sidebar-expand"
     | "stop"
     | "tool"
+    | "worktree"
     | "x";
 
   const icons: Record<IconName, LucideIcon> = {
@@ -71,6 +73,7 @@
     "sidebar-expand": PanelLeftOpen,
     stop: Square,
     tool: Wrench,
+    worktree: Split,
     x: X,
   };
 
