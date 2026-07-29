@@ -1,5 +1,69 @@
+<script lang="ts" module>
+  import type { Workspace } from "@pidex/api";
+
+  export type ComposerCommand = Workspace["commands"][number];
+
+  export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
+    return [
+      { name: "compact", description: "Manually compact the session context" },
+      ...commands.filter((command) => command.name !== "compact"),
+    ];
+  }
+
+  export function slashCommandSuggestions(
+    draft: string,
+    commands: ComposerCommand[],
+  ): ComposerCommand[] {
+    const match = /^\/([^\s]*)$/.exec(draft);
+    if (!match) return [];
+    const query = match[1].toLowerCase();
+    return commands.filter((command) => command.name.toLowerCase().startsWith(query));
+  }
+
+  export function completeSlashCommand(command: ComposerCommand): string {
+    return `/${command.name} `;
+  }
+
+  export function nextSlashCommand(
+    commands: ComposerCommand[],
+    current: ComposerCommand | undefined,
+    direction: -1 | 1,
+  ): ComposerCommand | undefined {
+    if (commands.length === 0) return undefined;
+    const currentIndex = current
+      ? commands.findIndex((command) => command.name === current.name)
+      : -1;
+    if (currentIndex < 0) return commands[0];
+    return commands[(currentIndex + direction + commands.length) % commands.length];
+  }
+
+  export function parseCompactCommand(draft: string): { instructions?: string } | undefined {
+    const match = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
+    if (!match) return undefined;
+    const instructions = match[1]?.trim();
+    return instructions ? { instructions } : {};
+  }
+
+  export async function submitComposerDraft(
+    draft: string,
+    actions: {
+      compact: (instructions?: string) => Promise<boolean>;
+      send: () => Promise<void>;
+    },
+  ): Promise<"compact" | "compact-failed" | "prompt"> {
+    const command = parseCompactCommand(draft);
+    if (!command) {
+      await actions.send();
+      return "prompt";
+    }
+    const compacted = await actions.compact(command.instructions);
+    return compacted ? "compact" : "compact-failed";
+  }
+</script>
+
 <script lang="ts">
-  import type { ChatSnapshot, ContextUsage, Workspace } from "@pidex/api";
+  import type { ChatSnapshot, ContextUsage } from "@pidex/api";
+  import { tick } from "svelte";
   import type { ConnectionState } from "../../../_components/AppShellConnection";
   import type {
     TaskConfigurationPatch,
@@ -14,6 +78,8 @@
   let {
     active,
     clearQueue,
+    commands,
+    compact,
     connection,
     contextUsage,
     delivery = $bindable(),
@@ -31,9 +97,12 @@
     stats,
     steeringCount,
     stop,
+    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
+    commands: Workspace["commands"];
+    compact: (instructions?: string) => Promise<boolean>;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
     delivery: TaskDelivery;
@@ -51,9 +120,28 @@
     stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;
+    taskId: string;
   } = $props();
 
   let promptInput = $state<HTMLTextAreaElement>();
+  let compactPendingByTask = $state<Record<string, boolean>>({});
+  let compactPending = $derived(compactPendingByTask[taskId] ?? false);
+  let idleSubmissionDisabled = $derived(
+    !draft.trim() ||
+      !models.length ||
+      connection !== "connected" ||
+      requiresAcknowledgement ||
+      compactPending,
+  );
+  const componentId = $props.id();
+  const commandListId = `${componentId}-commands`;
+  let commandCatalog = $derived(composerCommands(commands));
+  let commandSuggestions = $derived(active ? [] : slashCommandSuggestions(draft, commandCatalog));
+  let selectedCommandName = $state("");
+  let selectedSuggestion = $derived(
+    commandSuggestions.find((command) => command.name === selectedCommandName) ??
+      commandSuggestions[0],
+  );
 
   export function focus() {
     promptInput?.focus();
@@ -70,11 +158,66 @@
     resize();
   }
 
+  function completeCommand(command: ComposerCommand) {
+    draft = completeSlashCommand(command);
+    selectedCommandName = "";
+    persistDraft();
+    resize();
+    promptInput?.focus();
+  }
+
+  async function moveCommandSelection(direction: -1 | 1) {
+    const nextCommand = nextSlashCommand(commandSuggestions, selectedSuggestion, direction);
+    selectedCommandName = nextCommand?.name ?? "";
+    if (!nextCommand) return;
+    await tick();
+    document
+      .getElementById(`${commandListId}-${nextCommand.name}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }
+
+  async function submitDraft() {
+    if (compactPending) return;
+    const submittedDraft = draft;
+    const submittedTaskId = taskId;
+    const isCompaction = parseCompactCommand(submittedDraft) !== undefined;
+    if (isCompaction) compactPendingByTask[submittedTaskId] = true;
+    try {
+      const result = await submitComposerDraft(submittedDraft, { compact, send });
+      if (result !== "compact" || draft !== submittedDraft) return;
+      draft = "";
+      persistDraft();
+      await tick();
+      resize();
+    } finally {
+      if (isCompaction) delete compactPendingByTask[submittedTaskId];
+    }
+  }
+
   function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.keyCode === 229) return;
+    if (selectedSuggestion && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      void moveCommandSelection(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (
+      selectedSuggestion &&
+      ((event.key === "Tab" &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey) ||
+        (event.key === "Enter" && !event.shiftKey && draft !== `/${selectedSuggestion.name}`))
+    ) {
+      event.preventDefault();
+      completeCommand(selectedSuggestion);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      void send();
+      if (compactPending || (!active && idleSubmissionDisabled)) return;
+      void (active ? send() : submitDraft());
     }
   }
 </script>
@@ -97,9 +240,37 @@
     </div>
   {/if}
   <div
-    class="mx-auto w-full max-w-3xl overflow-visible rounded-[22px] border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)] max-[560px]:rounded-[19px]"
+    class="relative mx-auto w-full max-w-3xl overflow-visible rounded-[22px] border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)] max-[560px]:rounded-[19px]"
     data-testid="chat-composer"
   >
+    {#if commandSuggestions.length > 0}
+      <div
+        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-[0_18px_48px_rgb(0_0_0/24%)]"
+        id={commandListId}
+        role="listbox"
+        aria-label="Commands"
+      >
+        {#each commandSuggestions as command (command.name)}
+          <button
+            class={[
+              "flex w-full items-center gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left hover:bg-secondary",
+              command === selectedSuggestion && "bg-secondary",
+            ]}
+            id={`${commandListId}-${command.name}`}
+            type="button"
+            role="option"
+            aria-selected={command === selectedSuggestion}
+            onclick={() => completeCommand(command)}
+          >
+            <span class="w-30 flex-none font-mono text-xs font-medium text-primary"
+              >/{command.name}</span
+            >
+            <span class="min-w-0 text-[11px] text-muted">{command.description ?? "Pi command"}</span
+            >
+          </button>
+        {/each}
+      </div>
+    {/if}
     <textarea
       class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
       bind:this={promptInput}
@@ -112,6 +283,14 @@
         : active
           ? "Add guidance while Pi works…"
           : "Ask Pi to work on this project…"}
+      aria-autocomplete="list"
+      aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
+      aria-activedescendant={selectedSuggestion
+        ? `${commandListId}-${selectedSuggestion.name}`
+        : undefined}
+      aria-expanded={commandSuggestions.length > 0}
+      aria-haspopup="listbox"
+      role="combobox"
       aria-label="Prompt"></textarea>
     <div
       class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-10.5 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
@@ -187,17 +366,14 @@
           <button
             class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-40"
             onclick={send}
-            disabled={!draft.trim() || connection !== "connected"}
+            disabled={!draft.trim() || connection !== "connected" || compactPending}
             aria-label="Queue">Queue</button
           >
         {:else}
           <button
             class="inline-grid size-8.5 flex-none place-items-center rounded-[999px] border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
-            onclick={send}
-            disabled={!draft.trim() ||
-              !models.length ||
-              connection !== "connected" ||
-              requiresAcknowledgement}
+            onclick={submitDraft}
+            disabled={idleSubmissionDisabled}
             aria-label="Send"><Icon name="send" /></button
           >
         {/if}

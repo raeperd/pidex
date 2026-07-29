@@ -5,8 +5,6 @@
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
   let { usage }: { usage: ContextUsage } = $props();
-  const componentId = $props.id();
-  const detailsId = `${componentId}-details`;
 
   let normalizedPercent = $derived(Math.max(0, Math.min(100, usage.percent ?? 0)));
   let percentageLabel = $derived(formatPercentage(usage.percent));
@@ -33,11 +31,11 @@
 </script>
 
 <div class="context-meter relative inline-flex flex-none">
-  <button
-    class="inline-grid size-8 place-items-center rounded-[999px] border-0 border-none bg-transparent text-primary transition-[background-color] duration-[140ms] ease-[ease] hover:bg-secondary focus-visible:bg-secondary"
-    type="button"
+  <span
+    class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] bg-transparent text-primary"
+    role="img"
     aria-label={ariaLabel}
-    aria-describedby={detailsId}
+    title="Context window usage"
   >
     <svg class="size-4.5 [rotate:-90deg]" viewBox="0 0 24 24" aria-hidden="true">
       <circle
@@ -58,11 +56,10 @@
         stroke-dashoffset={dashOffset}
       />
     </svg>
-  </button>
+  </span>
 
   <div
-    class="pointer-events-none absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid w-64 translate-y-1 gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted opacity-0 shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] delay-0 duration-[120ms] ease-[ease] [.context-meter:hover_&]:translate-y-0 [.context-meter:hover_&]:opacity-100 [.context-meter:hover_&]:delay-150 [.context-meter:focus-within_&]:translate-y-0 [.context-meter:focus-within_&]:opacity-100 [.context-meter:focus-within_&]:delay-150 motion-reduce:transition-none"
-    id={detailsId}
+    class="pointer-events-none absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid w-64 translate-y-1 gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted opacity-0 shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] delay-0 duration-[120ms] ease-[ease] [.context-meter:hover_&]:translate-y-0 [.context-meter:hover_&]:opacity-100 [.context-meter:hover_&]:delay-150 motion-reduce:transition-none"
     role="tooltip"
   >
     <div class="flex items-center justify-between gap-3">
