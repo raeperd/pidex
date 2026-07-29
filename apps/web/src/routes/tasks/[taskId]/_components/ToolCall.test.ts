@@ -15,9 +15,11 @@ describe("toolCallHeader", () => {
   });
 
   it("renders path tools as concise actions and targets", () => {
-    expect(toolCallHeader("read", JSON.stringify({ path: "README.md" }))).toEqual({
-      label: "Read",
-      detail: "README.md",
+    expect(
+      toolCallHeader("read", JSON.stringify({ path: "README.md", offset: 1, limit: 800 })),
+    ).toEqual({
+      label: "read",
+      detail: "README.md:1-800",
     });
     expect(toolCallHeader("grep", JSON.stringify({ pattern: "TODO", path: "src" }))).toEqual({
       label: "Searched",

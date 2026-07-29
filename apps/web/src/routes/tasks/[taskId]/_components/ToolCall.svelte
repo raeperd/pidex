@@ -16,8 +16,7 @@
     const args = parseArguments(argumentSummary);
     if (!args) return { label: name, detail: argumentSummary.trim() };
     if (name === "bash") return { label: "$", detail: text(args.command) || "…" };
-    if (name === "read")
-      return { label: "Read", detail: text(args.path) || text(args.file_path) || "…" };
+    if (name === "read") return { label: "read", detail: readDetail(args) };
     if (name === "grep")
       return {
         label: "Searched",
@@ -84,8 +83,21 @@
       .join(" ");
   }
 
+  function readDetail(args: Record<string, unknown>): string {
+    const path = text(args.path) || text(args.file_path) || "…";
+    const offset = number(args.offset);
+    const limit = number(args.limit);
+    if (offset === undefined && limit === undefined) return path;
+    const start = offset ?? 1;
+    return `${path}:${start}${limit === undefined ? "" : `-${start + limit - 1}`}`;
+  }
+
   function text(value: unknown): string {
     return typeof value === "string" ? value : "";
+  }
+
+  function number(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   }
 </script>
 
@@ -117,6 +129,9 @@
   let normalizedOutput = $derived(toolCallOutputText(output));
   let preview = $derived(toolCallPreview(normalizedOutput));
   let lines = $derived(expanded ? normalizedOutput.replace(/\s+$/, "").split("\n") : preview.lines);
+  let readOutputCollapsed = $derived(
+    name === "read" && status !== "error" && Boolean(normalizedOutput) && !expanded,
+  );
   let timing = $derived(
     startedAt === undefined
       ? undefined
@@ -137,21 +152,25 @@
   <button
     type="button"
     class="block w-full cursor-pointer border-0 border-none bg-transparent p-0 text-left text-inherit"
+    aria-label={`${header.label}${header.detail ? ` ${header.detail}` : ""}${readOutputCollapsed ? " (click to expand)" : ""}`}
     aria-expanded={expanded}
     onclick={() => (expanded = !expanded)}
   >
     <span class="block font-semibold whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]"
-      ><span>{header.label}</span>{" "}{#if header.detail}<span
-          class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}>{header.detail}</span
+      ><span>{header.label}</span>
+      {#if header.detail}<span class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}
+          >{header.detail}</span
+        >{/if}{#if readOutputCollapsed}<span class="ml-[0.5ch] font-normal text-faint"
+          >(click to expand)</span
         >{/if}</span
     >
-    {#if !expanded && preview.skipped > 0}
+    {#if !readOutputCollapsed && !expanded && preview.skipped > 0}
       <span class="mt-[0.5em] block text-faint"
         >… ({preview.skipped} earlier lines, click to expand)</span
       >
     {/if}
   </button>
-  {#if normalizedOutput}
+  {#if normalizedOutput && !readOutputCollapsed}
     <pre
       class="tool-call__output mt-[0.5em] mb-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{lines.join(
         "\n",
