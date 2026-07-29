@@ -50,6 +50,7 @@ jobs:
 
   package-desktop:
     name: Package desktop
+    if: github.event_name == 'push'
     runs-on: macos-14
     timeout-minutes: 10
 
