@@ -218,10 +218,9 @@
   <pre><code
       >{#await highlighted}{code}{:then result}{#if result}{#each result.lines as line, lineIndex (lineIndex)}{#each line as token, tokenIndex (tokenIndex)}<span
                 style:color={token.color}
-                style:font-style={token.italic ? "italic" : undefined}
-                style:font-weight={token.bold ? "700" : undefined}
-                style:text-decoration={token.underline ? "underline" : undefined}
-                >{token.content}</span
+                class:italic={token.italic}
+                class:font-bold={token.bold}
+                class:underline={token.underline}>{token.content}</span
               >{/each}{#if lineIndex < result.lines.length - 1}{newline}{/if}{/each}{:else}{code}{/if}{/await}</code
     ></pre>
 </div>

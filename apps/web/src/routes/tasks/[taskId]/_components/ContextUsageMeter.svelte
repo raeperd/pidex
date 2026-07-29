@@ -30,17 +30,25 @@
   }
 </script>
 
-<div class="context-meter">
+<div class="context-meter relative inline-flex flex-none">
   <span
-    class="context-meter__trigger"
+    class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] bg-transparent text-primary"
     role="img"
     aria-label={ariaLabel}
     title="Context window usage"
   >
-    <svg class="context-meter__ring" viewBox="0 0 24 24" aria-hidden="true">
-      <circle class="context-meter__track" cx="12" cy="12" r={RADIUS} />
+    <svg class="size-4.5 [rotate:-90deg]" viewBox="0 0 24 24" aria-hidden="true">
       <circle
-        class={["context-meter__progress", overloaded && "context-meter__progress--danger"]}
+        class="fill-none [stroke-width:3] [stroke:color-mix(in_srgb,var(--faint)_26%,transparent)]"
+        cx="12"
+        cy="12"
+        r={RADIUS}
+      />
+      <circle
+        class={[
+          "fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "stroke-danger" : "stroke-current",
+        ]}
         cx="12"
         cy="12"
         r={RADIUS}
@@ -50,21 +58,26 @@
     </svg>
   </span>
 
-  <div class="context-meter__popover" role="tooltip">
-    <div class="context-meter__heading">
-      <strong>Context Window</strong>
+  <div
+    class="pointer-events-none absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid w-64 translate-y-1 gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted opacity-0 shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] delay-0 duration-[120ms] ease-[ease] [.context-meter:hover_&]:translate-y-0 [.context-meter:hover_&]:opacity-100 [.context-meter:hover_&]:delay-150 motion-reduce:transition-none"
+    role="tooltip"
+  >
+    <div class="flex items-center justify-between gap-3">
+      <strong class="font-semibold text-muted">Context Window</strong>
       {#if percentageLabel}
-        <span
+        <span class="font-mono text-[10px] whitespace-nowrap tabular-nums"
           >{percentageLabel} · {formatTokens(usage.tokens)}/{formatTokens(
             usage.contextWindow,
           )}</span
         >
       {:else}
-        <span>{formatTokens(usage.tokens)}/{formatTokens(usage.contextWindow)}</span>
+        <span class="font-mono text-[10px] whitespace-nowrap tabular-nums"
+          >{formatTokens(usage.tokens)}/{formatTokens(usage.contextWindow)}</span
+        >
       {/if}
     </div>
     <div
-      class="context-meter__bar"
+      class="h-1.5 overflow-hidden rounded-[999px] bg-[color-mix(in_srgb,var(--faint)_18%,transparent)]"
       role="progressbar"
       aria-label="Context window usage"
       aria-valuemin="0"
@@ -72,148 +85,21 @@
       aria-valuenow={usage.percent === null ? undefined : Math.round(normalizedPercent)}
     >
       <span
-        class={["context-meter__bar-fill", overloaded && "context-meter__bar-fill--danger"]}
+        class={[
+          "block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          overloaded ? "bg-danger" : "bg-primary",
+        ]}
         style:width={`${normalizedPercent}%`}
       ></span>
     </div>
-    <div class="context-meter__processed">
-      <span>Total processed</span><strong>{formatTokens(usage.totalProcessedTokens)}</strong>
+    <div class="flex items-center justify-between gap-3">
+      <span class="text-faint">Total processed</span><strong
+        class="font-mono text-[10px] font-semibold whitespace-nowrap text-muted tabular-nums"
+        >{formatTokens(usage.totalProcessedTokens)}</strong
+      >
     </div>
     {#if usage.compactsAutomatically}
-      <p>Pi automatically compacts its context when needed.</p>
+      <p class="mt-0.5 mb-0 text-faint">Pi automatically compacts its context when needed.</p>
     {/if}
   </div>
 </div>
-
-<style>
-  .context-meter {
-    position: relative;
-    display: inline-flex;
-    flex: none;
-  }
-
-  .context-meter__trigger {
-    display: inline-grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--primary);
-  }
-
-  .context-meter__ring {
-    width: 1.125rem;
-    height: 1.125rem;
-    rotate: -90deg;
-  }
-
-  .context-meter__track,
-  .context-meter__progress {
-    fill: none;
-    stroke-width: 3;
-  }
-
-  .context-meter__track {
-    stroke: color-mix(in srgb, var(--faint) 26%, transparent);
-  }
-
-  .context-meter__progress {
-    stroke: currentColor;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 500ms ease-out;
-  }
-
-  .context-meter__progress--danger {
-    stroke: var(--danger);
-  }
-
-  .context-meter__popover {
-    position: absolute;
-    right: 0;
-    bottom: calc(100% + 0.625rem);
-    z-index: 20;
-    display: grid;
-    width: 16rem;
-    gap: 0.625rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    background: color-mix(in srgb, var(--card) 96%, transparent);
-    box-shadow: 0 18px 48px rgb(0 0 0 / 24%);
-    color: var(--muted);
-    font-size: 0.6875rem;
-    line-height: 1.4;
-    opacity: 0;
-    pointer-events: none;
-    translate: 0 0.25rem;
-    transition:
-      opacity 120ms ease 0ms,
-      translate 120ms ease 0ms;
-  }
-
-  .context-meter:hover .context-meter__popover {
-    opacity: 1;
-    translate: 0 0;
-    transition-delay: 150ms;
-  }
-
-  .context-meter__heading,
-  .context-meter__processed {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .context-meter__heading strong,
-  .context-meter__processed strong {
-    color: var(--muted);
-    font-weight: 600;
-  }
-
-  .context-meter__heading span,
-  .context-meter__processed strong {
-    font-family: var(--mono);
-    font-size: 0.625rem;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .context-meter__bar {
-    height: 0.375rem;
-    overflow: hidden;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--faint) 18%, transparent);
-  }
-
-  .context-meter__bar-fill {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--primary);
-    transition: width 500ms ease-out;
-  }
-
-  .context-meter__bar-fill--danger {
-    background: var(--danger);
-  }
-
-  .context-meter__processed span {
-    color: var(--faint);
-  }
-
-  .context-meter__popover p {
-    margin: 0.125rem 0 0;
-    color: var(--faint);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .context-meter__progress,
-    .context-meter__bar-fill,
-    .context-meter__popover {
-      transition: none;
-    }
-  }
-</style>
