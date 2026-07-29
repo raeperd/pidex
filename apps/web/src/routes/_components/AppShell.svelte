@@ -33,6 +33,11 @@
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+  interface StarterPrompt {
+    readonly configuration: ChatConfiguration;
+    readonly draft: string;
+    readonly text: string;
+  }
 
   let { children }: { children: Snippet } = $props();
 
@@ -237,6 +242,9 @@
       get retryingConnection() {
         return retryingConnection;
       },
+      get routeReady() {
+        return routeReady;
+      },
       get routeLoading() {
         return routeLoading;
       },
@@ -297,6 +305,7 @@
       loadToolOutput,
       persistDraft,
       send,
+      start: startTask,
       setDelivery: (value) => (delivery = value),
       setDraft: (value) => (draft = value),
       setStartMode: (value) => {
@@ -635,7 +644,12 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  async function newTask(target = workspace) {
+  async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
+    const text = submittedDraft.trim();
+    if (!text) return;
+    await newTask(workspace, { configuration, draft: submittedDraft, text });
+  }
+  async function newTask(target = workspace, starterPrompt?: StarterPrompt) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
     let created: ChatSnapshot | undefined;
@@ -660,8 +674,8 @@
       rememberWorkspace(rememberedTarget);
       localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
-      draft = "";
-      await afterChat("", true);
+      draft = starterPrompt?.draft ?? "";
+      await afterChat(draft, !starterPrompt, !starterPrompt);
       if (sequence !== routeSequence) {
         await disposeCreatedTask(created);
         return;
@@ -669,6 +683,14 @@
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path);
+      if (starterPrompt && snapshot?.chatId === created.chatId) {
+        stageConfiguration(starterPrompt.configuration);
+        const configured = await applyConfigurationDraft();
+        if (snapshot?.chatId !== created.chatId) return;
+        chatConnection.connect(created.chatId);
+        if (!configured) return;
+        await submitPrompt(starterPrompt.text, starterPrompt.draft, "normal");
+      }
     } catch (cause) {
       if (sequence !== routeSequence) {
         if (created) await disposeCreatedTask(created);
@@ -828,13 +850,13 @@
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
   }
-  async function afterChat(initialDraft = "", focusComposer = false) {
+  async function afterChat(initialDraft = "", focusComposer = false, connect = true) {
     drawerOpen = false;
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.taskId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
     restoreConfigurationDraft();
-    if (snapshot) chatConnection.connect(snapshot.chatId);
+    if (snapshot && connect) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
       initializeDialogValue(snapshot.extensionDialog);
@@ -912,6 +934,7 @@
     }
     flushScheduledTextDeltas();
     if (event.type === "snapshot") {
+      if (event.snapshot.revision < snapshot.revision) return;
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();

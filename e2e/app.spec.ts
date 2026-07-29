@@ -259,14 +259,26 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
     .getByRole("button", { name: new RegExp(`^(Add|Open) ${projectName}$`) })
     .click();
 
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${projectName}?` }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Model")).toBeVisible();
+  await expect(page.getByLabel("Thinking level")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toContain(`/${projectName}`);
 
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Loading project" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bring Pi with you." })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${projectName}?` }),
+  ).toBeVisible();
   await openTasks(page);
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
 });
@@ -975,7 +987,7 @@ test("retries a deep-linked task without replacing its route", async ({ page, re
   await expect(page.locator("main > header")).toHaveCount(0);
 });
 
-test("keeps search and task creation in the no-active-task experience", async ({
+test("creates, navigates, and durably submits the first starter prompt", async ({
   page,
   request,
 }, testInfo) => {
@@ -988,8 +1000,13 @@ test("keeps search and task creation in the no-active-task experience", async ({
     });
   });
   const createRequests: unknown[] = [];
-  const taskCreationRequests: string[] = [];
+  const starterRequests: string[] = [];
+  const mutations: Array<{ procedure: string; input: Record<string, unknown> }> = [];
   const workspaceOpenRequests: Array<{ path: string; remember?: boolean }> = [];
+  const { promise: creationPending, resolve: releaseCreation } = Promise.withResolvers<void>();
+  let initialTaskSnapshot: Record<string, unknown> | undefined;
+  let taskSnapshot: Record<string, unknown> | undefined;
+  let connectedDuringConfiguration: boolean | undefined;
   page.on("request", (browserRequest) => {
     const path = new URL(browserRequest.url()).pathname;
     const body = (browserRequest.postDataJSON() as { json?: unknown } | null)?.json;
@@ -1005,10 +1022,16 @@ test("keeps search and task creation in the no-active-task experience", async ({
       workspaceOpenRequests.push(body as { path: string; remember?: boolean });
     if (
       browserRequest.method() === "POST" &&
-      (path === "/api/rpc/workspaces/open" || path === "/api/rpc/chats/create")
+      [
+        "/api/rpc/workspaces/open",
+        "/api/rpc/chats/create",
+        "/api/rpc/chats/configure",
+        "/api/rpc/chats/sendMessage",
+      ].includes(path)
     )
-      taskCreationRequests.push(path);
+      starterRequests.push(path);
   });
+  await installFakeWebSocket(page);
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     const response = await route.fetch();
     const payload = (await response.json()) as { json: Record<string, unknown> };
@@ -1021,8 +1044,58 @@ test("keeps search and task creation in the no-active-task experience", async ({
         ...payload,
         json: {
           ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+          models:
+            workspace.path === `${process.cwd()}/apps`
+              ? [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }]
+              : [],
           resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    taskSnapshot = { ...payload.json, model: "e2e/model", thinkingLevel: "medium" };
+    initialTaskSnapshot = { ...taskSnapshot };
+    await creationPending;
+    await route.fulfill({ response, json: { ...payload, json: taskSnapshot } });
+  });
+  await page.route("**/api/rpc/chats/configure", async (route) => {
+    if (!taskSnapshot) throw new Error("Expected the starter to create a task first");
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    mutations.push({ procedure: "configure", input });
+    taskSnapshot = {
+      ...taskSnapshot,
+      thinkingLevel: input.thinkingLevel,
+      revision: Number(input.expectedRevision) + 1,
+    };
+    connectedDuringConfiguration = await page.evaluate(() =>
+      Boolean((globalThis as typeof globalThis & { pidexTestSocket?: WebSocket }).pidexTestSocket),
+    );
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: taskSnapshot },
+    });
+  });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    if (!taskSnapshot) throw new Error("Expected the starter to create a task first");
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    mutations.push({ procedure: "send", input });
+    const revision = Number(input.expectedRevision) + 1;
+    taskSnapshot = { ...taskSnapshot, revision };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          accepted: true,
+          actionId: input.actionId,
+          runId: "run_starter_e2e",
+          status: "accepted",
+          revision,
+          replayed: false,
         },
       },
     });
@@ -1030,10 +1103,25 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(
+    page.getByRole("heading").filter({ hasText: "What should we work on in " }),
+  ).toBeVisible();
   await expect(page.getByText("No active task", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toHaveCount(0);
-  await expect(page.getByLabel("Thinking level")).toHaveCount(0);
+  const initialPrompt = page.getByLabel("Prompt");
+  await expect(initialPrompt).toBeVisible();
+  await expect(page.getByLabel("Model")).toBeDisabled();
+  await expect(page.getByLabel("Thinking level")).toHaveValue("medium");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await initialPrompt.fill("This must not create an empty task");
+  await initialPrompt.press("Enter");
+  await page.waitForTimeout(250);
+  expect(createRequests).toHaveLength(0);
+  await expect(page).toHaveURL("/");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 900)
+    await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
 
   await openTasks(page);
   await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toHaveCount(0);
@@ -1048,28 +1136,16 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await page.getByRole("button", { name: "Add project", exact: true }).click();
   const projectDialog = page.getByRole("dialog", { name: "Add a project" });
   await projectDialog.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toHaveCount(0);
-
-  await openTasks(page);
-  taskCreationRequests.length = 0;
-  await Promise.all([
-    page.waitForRequest(
-      (browserRequest) =>
-        browserRequest.method() === "POST" &&
-        new URL(browserRequest.url()).pathname === "/api/rpc/chats/create",
-    ),
-    page.getByRole("button", { name: "New task in apps" }).click(),
-  ]);
-
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toHaveCount(0);
-  await expect(page.getByLabel("Prompt")).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toBeFocused();
-  await expect(page.getByLabel("Thinking level")).toBeVisible();
   await expect(
-    page.getByTestId("chat-composer").getByRole("button", { name: "Start in Work locally" }),
+    page.getByRole("heading", { name: "What should we work on in apps?" }),
   ).toBeVisible();
-  await expect(page.locator("main > header")).toHaveCount(0);
+  const prompt = page.getByLabel("Prompt");
+  const thinking = page.getByLabel("Thinking level");
+  await expect(prompt).toBeVisible();
+  await expect(page.getByLabel("Model")).toHaveValue("e2e/model");
+  expect(createRequests).toHaveLength(0);
+
+  await expect(page.locator("main > header")).toBeVisible();
   const topControl =
     testInfo.project.name === "mobile"
       ? page.getByRole("button", { name: "Open tasks" })
@@ -1079,24 +1155,75 @@ test("keeps search and task creation in the no-active-task experience", async ({
   await expect(resourceWarning).toBeVisible();
   const topControlBox = await topControl.boundingBox();
   const resourceWarningBox = await resourceWarning.boundingBox();
-  if (!topControlBox || !resourceWarningBox) throw new Error("Expected visible new-task chrome");
+  if (!topControlBox || !resourceWarningBox) throw new Error("Expected visible starter chrome");
   expect(resourceWarningBox.y).toBeGreaterThanOrEqual(topControlBox.y + topControlBox.height);
   if (testInfo.project.name !== "mobile") {
     await page.getByRole("button", { name: "Collapse sidebar" }).click();
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
-    await expect(page.locator("main > header")).toHaveCount(0);
+    await expect(page.locator("main > header")).toBeVisible();
     await page.getByRole("button", { name: "Expand sidebar" }).click();
   }
+
+  starterRequests.length = 0;
+  await thinking.selectOption("high");
+  await prompt.fill("Start from the existing durable path");
+  const send = page.getByRole("button", { name: "Send" });
+  await expect(prompt).toHaveValue("Start from the existing durable path");
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect(prompt).toBeDisabled();
+  await expect(page.getByLabel("Model")).toBeDisabled();
+  await expect(thinking).toBeDisabled();
+  releaseCreation();
+
+  await expect(page.getByRole("heading", { name: "What should we work on in apps?" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Thinking level")).toBeVisible();
   expect(createRequests).toHaveLength(1);
   expect(createRequests[0]).toEqual(expect.objectContaining({ workspaceId: expect.any(String) }));
-  expect(taskCreationRequests).toEqual(["/api/rpc/workspaces/open", "/api/rpc/chats/create"]);
+  await expect
+    .poll(() => starterRequests)
+    .toEqual([
+      "/api/rpc/workspaces/open",
+      "/api/rpc/chats/create",
+      "/api/rpc/chats/configure",
+      "/api/rpc/chats/sendMessage",
+    ]);
+  expect(mutations).toEqual([
+    expect.objectContaining({
+      procedure: "configure",
+      input: expect.objectContaining({ thinkingLevel: "high" }),
+    }),
+    expect.objectContaining({
+      procedure: "send",
+      input: expect.objectContaining({
+        text: "Start from the existing durable path",
+        delivery: "normal",
+        actionId: expect.any(String),
+      }),
+    }),
+  ]);
+  expect(connectedDuringConfiguration).toBe(false);
+  if (!initialTaskSnapshot) throw new Error("Expected the starter task's initial snapshot");
+  await waitForFakeWebSocket(page);
+  await emitServerEvent(page, {
+    type: "snapshot",
+    eventId: 1,
+    chatId: String(initialTaskSnapshot.chatId),
+    snapshot: initialTaskSnapshot,
+  });
+  await expect(page.getByLabel("Thinking level")).toHaveValue("high");
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const taskUrl = page.url();
   const otherWorkspacePath = `${process.cwd()}/packages`;
   await rememberWorkspace(request, otherWorkspacePath);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "What should we work on in apps?" }),
+  ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(taskUrl);
   await expect(page.getByLabel("Prompt")).toBeVisible();
@@ -1309,7 +1436,9 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
     .poll(() => removedWorktrees)
     .toEqual(["worktree_workspace_e2e", "worktree_workspace_e2e"]);
   await expect.poll(() => sentPrompts).toHaveLength(1);
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${workspaceName}?` }),
+  ).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toBe(String(sourceWorkspace?.path));
@@ -1711,6 +1840,7 @@ test("preserves edits made while slash compaction is pending", async ({
   const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
@@ -2182,6 +2312,7 @@ test("stages configuration without overwriting the next draft", async ({
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   const contextUsage = {
@@ -2316,6 +2447,7 @@ async function openTasks(page: Page) {
     await expect(button).toBeVisible();
     await button.click();
   }
+  await expect(page.getByRole("status", { name: "Loading project" })).toHaveCount(0);
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
 }
 

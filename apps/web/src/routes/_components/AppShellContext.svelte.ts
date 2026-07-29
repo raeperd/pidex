@@ -41,6 +41,7 @@ export interface AppShellContext {
     readonly bootstrapError: string;
     readonly connection: ConnectionState;
     readonly retryingConnection: boolean;
+    readonly routeReady: boolean;
     readonly routeLoading: boolean;
     readonly workspace: Workspace | undefined;
   };
@@ -69,6 +70,7 @@ export interface AppShellContext {
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
     send(): Promise<void>;
+    start(draft: string, configuration: TaskConfigurationPatch): Promise<void>;
     setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
     setStartMode(mode: TaskStartMode): void;
