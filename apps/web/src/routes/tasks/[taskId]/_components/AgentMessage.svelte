@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import Icon from "../../../_components/Icon.svelte";
   import AgentMessageBody from "./AgentMessageBody.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
   import type { HighlightTheme } from "./AgentMessageCodeBlock.svelte";
@@ -19,6 +20,7 @@
   } = $props();
 
   let nodes = $derived(parseAgentMessage(text));
+  let thinkingNodes = $derived(parseAgentMessage(thinking ?? ""));
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let sentAt = $derived.by(() => {
@@ -47,35 +49,43 @@
   });
 </script>
 
-<article class="group/assistant mb-5 min-w-0 px-1 pt-0.5 pb-1">
+<article class="group/assistant my-6 min-w-0 px-2 py-1">
   {#if thinking}
-    <details class="mb-2.5 border-b border-border/70">
-      <summary
-        class="flex w-max cursor-pointer items-center gap-2 pt-1 pb-2 text-[11px] text-faint [list-style:none]"
-        >{#if !complete}<span class="inline-flex gap-0.5"
-            ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-              class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-            ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
-            ></i></span
-          >{/if}{complete ? "Thought" : "Thinking"}</summary
-      >
-      <pre
-        class="mb-2.5 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/70 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-muted dark:bg-[#111113]">{thinking}</pre>
-    </details>
+    <div
+      class="thinking-markdown mb-2 font-mono text-[12px] leading-[1.55] italic text-faint [overflow-wrap:anywhere]"
+    >
+      {#if !complete}<span class="mb-2 inline-flex gap-0.5" aria-label="Thinking"
+          ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
+            class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
+          ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
+          ></i></span
+        >{/if}
+      <AgentMessageBody nodes={thinkingNodes} streaming={!complete} {theme} />
+    </div>
   {/if}
-  <div class="markdown text-sm leading-[1.72] text-foreground/95 [overflow-wrap:anywhere]">
+  <div
+    class="markdown terminal-markdown font-mono text-[12.5px] leading-[1.55] text-foreground/95 [overflow-wrap:anywhere]"
+  >
     <AgentMessageBody {nodes} streaming={!complete} {theme} />
   </div>
   {#if complete && text.trim()}
     <footer
       class="mt-2 flex items-center gap-2 text-[10.5px] text-faint opacity-70 transition-opacity group-hover/assistant:opacity-100 focus-within:opacity-100"
     >
-      <button
-        type="button"
-        class="rounded px-1 py-0.5 font-medium hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-        aria-label={copied ? "Response copied" : "Copy response"}
-        onclick={() => void copyResponse()}>{copied ? "Copied" : "Copy"}</button
-      >
+      <span class="group/copy relative inline-flex">
+        <button
+          type="button"
+          class="grid size-6 place-items-center rounded text-faint hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+          aria-label={copied ? "Response copied" : "Copy response"}
+          onclick={() => void copyResponse()}
+        >
+          <Icon name={copied ? "check" : "copy"} size={13} />
+        </button>
+        <span
+          class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-1/2 z-20 -translate-x-1/2 rounded-md border border-border-strong bg-card px-2 py-1 text-[10.5px] leading-none whitespace-nowrap text-foreground opacity-0 shadow-lg transition-opacity duration-100 group-hover/copy:opacity-100 group-focus-within/copy:opacity-100"
+          role="tooltip">{copied ? "Copied" : "Copy"}</span
+        >
+      </span>
       {#if sentAt && formattedTimestamp}
         <span aria-hidden="true">·</span>
         <time datetime={timestamp} title={sentAt.toLocaleString()}>{formattedTimestamp}</time>
@@ -83,3 +93,43 @@
     </footer>
   {/if}
 </article>
+
+<style>
+  .terminal-markdown :global(h1),
+  .terminal-markdown :global(h2),
+  .terminal-markdown :global(h3),
+  .terminal-markdown :global(h4),
+  .terminal-markdown :global(h5),
+  .terminal-markdown :global(h6) {
+    margin: 1.15em 0 0.55em;
+    color: var(--warning);
+    font-size: 1em;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.55;
+  }
+
+  .terminal-markdown :global(p),
+  .terminal-markdown :global(ul),
+  .terminal-markdown :global(ol) {
+    margin-block: 0.55em;
+  }
+
+  .terminal-markdown :global(li + li) {
+    margin-top: 0.15em;
+  }
+
+  .terminal-markdown :global(code:not(pre code)) {
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: var(--tool-argument);
+  }
+
+  .thinking-markdown :global(p) {
+    margin: 0 0 1rem;
+  }
+
+  .thinking-markdown :global(p:last-child) {
+    margin-bottom: 0;
+  }
+</style>

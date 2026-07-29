@@ -5,6 +5,7 @@ import type {
   ModelInfo,
   SessionSummary,
   TextItem,
+  TranscriptItem,
   ToolItem,
 } from "@pidex/api";
 import { Effect, Queue, Scope, Stream } from "effect";
@@ -18,6 +19,12 @@ export type AdapterEvent =
   | { type: "context_usage"; usage: ContextUsage }
   | { type: "settled" }
   | { type: "dialog"; dialog?: ExtensionDialog };
+
+interface AdapterToolOutput {
+  readonly id: string;
+  readonly text: string;
+  readonly sourceTruncated: boolean;
+}
 
 export interface AdapterSessionInfo extends SessionSummary {
   nativeId: string;
@@ -34,7 +41,8 @@ export interface AdapterWorkspaceInfo {
 export interface AdapterSession {
   readonly nativeId: string;
   readonly nativePath: string | undefined;
-  readonly messages: TextItem[];
+  readonly messages: TranscriptItem[];
+  readonly toolOutputs: ReadonlyMap<string, AdapterToolOutput>;
   readonly model: string | undefined;
   readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly sessionName: string | undefined;
@@ -70,6 +78,7 @@ export interface EffectAdapterSession {
     | "nativeId"
     | "nativePath"
     | "messages"
+    | "toolOutputs"
     | "model"
     | "thinkingLevel"
     | "sessionName"

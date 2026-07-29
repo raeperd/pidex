@@ -12,8 +12,9 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type ExtensionUIContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { ContextUsage, ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
+import type { ContextUsage, ExtensionDialog, TextItem, TranscriptItem, ToolItem } from "@pidex/api";
 import { Effect, Scope } from "effect";
 import {
   acquireAdapterSession,
@@ -68,11 +69,77 @@ const thinkingOf = (content: unknown): string =>
           (part): part is { type: string; thinking?: string } =>
             typeof part === "object" && part !== null && "type" in part,
         )
-        .map((part) => (part.type === "thinking" ? (part.thinking ?? "") : ""))
-        .join("")
+        .map((part) => (part.type === "thinking" ? part.thinking?.trim() : undefined))
+        .filter((thinking): thinking is string => Boolean(thinking))
+        .join("\n\n")
     : "";
 const messageId = (message: { role: string; timestamp?: number }) =>
   `${message.role}-${message.timestamp ?? Date.now()}`;
+
+function transcriptItems(entries: SessionEntry[]) {
+  const items: TranscriptItem[] = [];
+  const toolOutputs = new Map<string, { id: string; text: string; sourceTruncated: boolean }>();
+  const toolIndexes = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "user" || message.role === "assistant") {
+      const item: TextItem = {
+        type: message.role,
+        id: entry.id,
+        text: textOf(message.content),
+        complete: true,
+        timestamp: entry.timestamp,
+      };
+      const thinking = thinkingOf(message.content);
+      if (thinking) item.thinking = thinking;
+      items.push(item);
+      if (message.role === "assistant")
+        for (const part of message.content) {
+          if (part.type !== "toolCall") continue;
+          const argumentSummary = bounded(part.arguments, 800);
+          toolIndexes.set(part.id, items.length);
+          items.push({
+            type: "tool",
+            id: part.id,
+            name: part.name,
+            argumentSummary: argumentSummary.text,
+            state: "running",
+            preview: "",
+            truncated: argumentSummary.truncated,
+          });
+        }
+      continue;
+    }
+    if (message.role !== "toolResult") continue;
+    const toolIndex = toolIndexes.get(message.toolCallId);
+    if (toolIndex === undefined) continue;
+    const tool = items[toolIndex];
+    if (!tool || tool.type !== "tool") continue;
+    const output = boundedResource(textOf(message.content));
+    const preview = bounded(output.text);
+    let resolved: ToolItem = {
+      ...tool,
+      state: message.isError ? "error" : "success",
+      preview: preview.text,
+      truncated: tool.truncated || preview.truncated || output.sourceTruncated,
+    };
+    if (preview.truncated || output.sourceTruncated) {
+      const resourceId = randomUUID().replaceAll("-", "");
+      toolOutputs.set(resourceId, { id: resourceId, ...output });
+      resolved = { ...resolved, resourceId, outputSize: output.text.length };
+    }
+    items[toolIndex] = resolved;
+  }
+  for (const [index, item] of items.entries())
+    if (item.type === "tool" && item.state === "running")
+      items[index] = {
+        ...item,
+        state: "error",
+        preview: "Tool execution was interrupted before a result was recorded.",
+      };
+  return { items, toolOutputs };
+}
 
 function resolvedSessionDir(
   cwd: string,
@@ -108,6 +175,7 @@ const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic =
 function makePiSession(session: AgentSession) {
   const nativeId = session.sessionId;
   const nativePath = session.sessionFile;
+  const restoredTranscript = transcriptItems(session.sessionManager.buildContextEntries());
   const listeners = new Set<(event: AdapterEvent) => void>();
   const pendingDialogs = new Map<string, (value: string | boolean | null) => void>();
   const unsubscribe = session.subscribe(handle);
@@ -119,24 +187,11 @@ function makePiSession(session: AgentSession) {
         emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
     });
   }
-  function readMessages(): TextItem[] {
-    return session.sessionManager.buildContextEntries().flatMap((entry) => {
-      if (
-        entry.type !== "message" ||
-        (entry.message.role !== "user" && entry.message.role !== "assistant")
-      )
-        return [];
-      const item: TextItem = {
-        type: entry.message.role,
-        id: entry.id,
-        text: textOf(entry.message.content),
-        complete: true,
-        timestamp: entry.timestamp,
-      };
-      const thinking = thinkingOf(entry.message.content);
-      if (thinking) item.thinking = thinking;
-      return [item];
-    });
+  function readMessages(): TranscriptItem[] {
+    return restoredTranscript.items;
+  }
+  function readToolOutputs() {
+    return restoredTranscript.toolOutputs;
   }
   function readModel() {
     return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
@@ -399,6 +454,9 @@ function makePiSession(session: AgentSession) {
     nativePath,
     get messages() {
       return readMessages();
+    },
+    get toolOutputs() {
+      return readToolOutputs();
     },
     get model() {
       return readModel();
