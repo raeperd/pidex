@@ -365,8 +365,9 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   // Every delta lands in order even though a frame batches several of them together.
   await expect(page.getByRole("heading", { name: "Streamed heading" })).toBeVisible();
   await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
-  await page.getByText("Thinking", { exact: true }).click();
-  await expect(page.locator("details pre")).toHaveText("weighing options");
+  const thinking = page.locator(".thinking-markdown");
+  await expect(thinking).toContainText("weighing options");
+  await expect(thinking.locator("details")).toHaveCount(0);
 
   await emitServerEvent(page, {
     type: "message",
@@ -382,8 +383,8 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
     },
   });
 
-  await expect(page.getByText("Thought", { exact: true })).toBeVisible();
-  await expect(page.getByText("Thinking", { exact: true })).toHaveCount(0);
+  await expect(thinking).toContainText("weighing options");
+  await expect(page.getByText("Thought", { exact: true })).toHaveCount(0);
 });
 
 test("preserves edits made while slash compaction is pending", async ({
