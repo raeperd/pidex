@@ -10,6 +10,7 @@
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
+    "package:desktop": "pnpm build && pnpm --filter @pidex/desktop run package",
     "start": "pnpm --filter @pidex/server start",
     "start:desktop": "pnpm --filter @pidex/desktop start",
     "smoke:pi": "node scripts/pi-smoke.mjs",

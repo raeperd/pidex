@@ -47,3 +47,25 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Run end-to-end tests
         run: pnpm test:e2e
+
+  package-desktop:
+    name: Package desktop
+    if: github.event_name == 'push'
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          check-latest: true
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Package desktop
+        run: pnpm package:desktop
