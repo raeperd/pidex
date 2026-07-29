@@ -13,7 +13,7 @@ import {
 } from "@pidex/api";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
-import { ResponseValidationPlugin } from "@orpc/contract/plugins";
+import { ResponseValidationLinkPlugin } from "@orpc/contract/plugins";
 
 type Delivery = "normal" | "steer" | "follow-up";
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
@@ -29,9 +29,9 @@ export class PidexApiClient {
     if (!stored) localStorage.setItem("pidex:client-id", this.clientId);
 
     const link = new RPCLink({
-      url: new URL("/api/rpc", location.href),
+      url: "/api/rpc",
       headers: () => ({ "X-Pidex-CSRF": this.csrfToken }),
-      plugins: [new ResponseValidationPlugin(pidexApiContract)],
+      plugins: [new ResponseValidationLinkPlugin(pidexApiContract)],
     });
     this.client = createORPCClient(link);
   }

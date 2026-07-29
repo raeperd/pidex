@@ -13,7 +13,7 @@ const appIconPath = app.isPackaged
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
 const localUrl = `http://127.0.0.1:${port}`;
 const apiClient: PidexApiContractClient = createORPCClient(
-  new RPCLink({ url: new URL("/api/rpc", localUrl) }),
+  new RPCLink({ origin: localUrl, url: "/api/rpc" }),
 );
 let serverChild: ChildProcess | undefined;
 let quitting = false;

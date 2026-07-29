@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { ChatManager } from "./chat-manager.js";
-import { applicationError, type ApplicationError } from "./errors.js";
+import { applicationError } from "./errors.js";
 import { MetadataStore } from "./metadata.js";
 import { PiSdk } from "./pi-sdk.js";
 
@@ -12,11 +12,7 @@ export class PiAgent extends Context.Service<PiAgent, PiSdk>()("@pidex/server/Pi
 
 export class Chats extends Context.Service<Chats, ChatManager>()("@pidex/server/Chats") {}
 
-type ApplicationServices = Metadata | PiAgent | Chats;
-export type ApplicationRuntime = ManagedRuntime.ManagedRuntime<
-  ApplicationServices,
-  ApplicationError
->;
+export type ApplicationServices = Metadata | PiAgent | Chats;
 
 export function makeApplicationRuntime() {
   return ManagedRuntime.make(ApplicationLive);

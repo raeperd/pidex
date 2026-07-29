@@ -1,4 +1,4 @@
-import { oc, type ContractRouterClient } from "@orpc/contract";
+import { oc, type RouterContractClient } from "@orpc/contract";
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 8;
@@ -324,7 +324,7 @@ export const pidexApiContract = {
   },
 };
 
-export type PidexApiContractClient = ContractRouterClient<typeof pidexApiContract>;
+export type PidexApiContractClient = RouterContractClient<typeof pidexApiContract>;
 
 export type ModelInfo = z.infer<typeof modelSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;

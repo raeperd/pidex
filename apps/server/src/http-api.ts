@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import type { WithEffectContext } from "@orpc/experimental-effect";
+import "@orpc/experimental-effect/extensions/effect";
 import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex/api";
 import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
-import { Chats, Metadata, PiAgent, type ApplicationRuntime } from "./app-runtime.js";
+import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
 import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
 import { requestDigest, type MetadataStore } from "./metadata.js";
 import {
@@ -17,15 +19,14 @@ import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 interface HttpApiDependencies {
   csrf: string;
   roots: string[];
-  runtime: ApplicationRuntime;
 }
 
-export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies) {
+export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
   const workspaceRoots = [...roots, managedWorktreesRoot()];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
     if (context.req.headers["x-pidex-csrf"] !== csrf)
-      throw new ORPCError("csrf", { status: 403, message: "Invalid CSRF token" });
+      throw new ORPCError("csrf", { message: "Invalid CSRF token" });
     return next();
   });
   const implementation = base.use(protocolErrors);
@@ -38,484 +39,396 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
         ok: true,
         protocolVersion: PROTOCOL_VERSION,
       })),
-      bootstrap: implementation.system.bootstrap.handler(() =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
-            const projectCandidates = yield* discoverProjectCandidates(roots);
-            return {
-              protocolVersion: PROTOCOL_VERSION,
-              csrfToken: csrf,
-              piVersion: "0.80.10",
-              recentWorkspaces,
-              projectCandidates,
-              warning: "Pi runs with your host user permissions and has no built-in sandbox.",
-            };
-          }),
-        ),
-      ),
+      bootstrap: implementation.system.bootstrap.effect(function* () {
+        const metadata = yield* Metadata;
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
+        const projectCandidates = yield* discoverProjectCandidates(roots);
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          csrfToken: csrf,
+          piVersion: "0.80.10",
+          recentWorkspaces,
+          projectCandidates,
+          warning: "Pi runs with your host user permissions and has no built-in sandbox.",
+        };
+      }),
     },
     workspaces: workspaces.router({
-      open: workspaces.open.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
-            if (!roots.some((root) => isDescendant(root, canonical))) {
-              const rememberedId = yield* attemptOperation("metadata.workspaceId", () =>
-                metadata.workspaceId(canonical),
+      open: workspaces.open.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
+        if (!roots.some((root) => isDescendant(root, canonical))) {
+          const rememberedId = yield* attemptOperation("metadata.workspaceId", () =>
+            metadata.workspaceId(canonical),
+          );
+          const sourceWorkspaceId = rememberedId
+            ? yield* attemptOperation("metadata.workspaceProjectId", () =>
+                metadata.workspaceProjectId(rememberedId),
+              )
+            : undefined;
+          if (!rememberedId || sourceWorkspaceId === rememberedId)
+            return yield* Effect.fail(
+              HttpError.make({
+                status: 403,
+                code: "workspace_forbidden",
+                message: "Project is outside WORKSPACE_ROOTS",
+              }),
+            );
+        }
+        const id = yield* workspaceId(metadata, canonical, input.remember);
+        return yield* attemptOperation("chats.openWorkspace", () =>
+          manager.openWorkspace(id, canonical),
+        );
+      }),
+      createWorktree: workspaces.createWorktree.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const pi = yield* PiAgent;
+        const source = yield* attemptOperation("chats.workspace", () =>
+          manager.workspace(input.workspaceId),
+        );
+        const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
+        const worktreePath = yield* createProjectWorktree(canonicalSource);
+        let id: string | undefined;
+        return yield* Effect.gen(function* () {
+          yield* attemptOperation("pi.inheritWorkspaceTrust", () =>
+            pi.inheritWorkspaceTrust(canonicalSource, worktreePath),
+          );
+          const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+            metadata.workspaceProjectId(source.id),
+          );
+          const createdWorkspaceId = yield* attemptOperation("metadata.rememberWorkspace", () =>
+            metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
+          );
+          id = createdWorkspaceId;
+          const opened = yield* attemptOperation("chats.openWorkspace", () =>
+            manager.openWorkspace(createdWorkspaceId, worktreePath),
+          );
+          yield* attemptOperation("chats.markWorkspaceDisposable", () =>
+            manager.markWorkspaceDisposable(createdWorkspaceId),
+          );
+          return opened;
+        }).pipe(
+          Effect.onError(() =>
+            Effect.gen(function* () {
+              yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
+                Effect.catch(() => Effect.void),
               );
-              const sourceWorkspaceId = rememberedId
-                ? yield* attemptOperation("metadata.workspaceProjectId", () =>
-                    metadata.workspaceProjectId(rememberedId),
-                  )
-                : undefined;
-              if (!rememberedId || sourceWorkspaceId === rememberedId)
-                return yield* Effect.fail(
-                  HttpError.make({
-                    status: 403,
-                    code: "workspace_forbidden",
-                    message: "Project is outside WORKSPACE_ROOTS",
-                  }),
-                );
-            }
-            const id = yield* workspaceId(metadata, canonical, input.remember);
-            return yield* attemptOperation("chats.openWorkspace", () =>
-              manager.openWorkspace(id, canonical),
-            );
-          }),
-        ),
-      ),
-      createWorktree: workspaces.createWorktree.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const pi = yield* PiAgent;
-            const source = yield* attemptOperation("chats.workspace", () =>
-              manager.workspace(input.workspaceId),
-            );
-            const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
-            const worktreePath = yield* createProjectWorktree(canonicalSource);
-            let id: string | undefined;
-            return yield* Effect.gen(function* () {
-              yield* attemptOperation("pi.inheritWorkspaceTrust", () =>
-                pi.inheritWorkspaceTrust(canonicalSource, worktreePath),
-              );
-              const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
-                metadata.workspaceProjectId(source.id),
-              );
-              const createdWorkspaceId = yield* attemptOperation("metadata.rememberWorkspace", () =>
-                metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
-              );
-              id = createdWorkspaceId;
-              const opened = yield* attemptOperation("chats.openWorkspace", () =>
-                manager.openWorkspace(createdWorkspaceId, worktreePath),
-              );
-              yield* attemptOperation("chats.markWorkspaceDisposable", () =>
-                manager.markWorkspaceDisposable(createdWorkspaceId),
-              );
-              return opened;
-            }).pipe(
-              Effect.onError(() =>
-                Effect.gen(function* () {
-                  yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
-                    Effect.catch(() => Effect.void),
-                  );
-                  yield* attemptOperation("pi.clearWorkspaceTrust", () =>
-                    pi.clearWorkspaceTrust(worktreePath),
-                  ).pipe(Effect.catch(() => Effect.void));
-                  const createdWorkspaceId = id;
-                  if (createdWorkspaceId)
-                    yield* attemptOperation("metadata.forgetWorkspace", () =>
-                      metadata.forgetWorkspace(createdWorkspaceId),
-                    ).pipe(Effect.catch(() => Effect.void));
-                }),
-              ),
-            );
-          }),
-        ),
-      ),
-      removeWorktree: workspaces.removeWorktree.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const pi = yield* PiAgent;
-            const worktree = yield* attemptOperation("chats.workspace", () =>
-              manager.workspace(input.workspaceId),
-            );
-            const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
-              metadata.workspaceProjectId(input.workspaceId),
-            );
-            if (sourceWorkspaceId === input.workspaceId)
-              return yield* Effect.fail(
-                HttpError.make({
-                  status: 400,
-                  code: "workspace_not_managed_worktree",
-                  message: "Workspace is not a managed Pidex worktree",
-                }),
-              );
-            const source = yield* attemptOperation("chats.workspace", () =>
-              manager.workspace(sourceWorkspaceId),
-            );
-            const canRemove = yield* attemptOperation("chats.workspaceCanBeRemoved", () =>
-              manager.workspaceCanBeRemoved(worktree.id),
-            );
-            if (!canRemove)
-              return yield* Effect.fail(
-                HttpError.make({
-                  status: 409,
-                  code: "worktree_has_tasks",
-                  message: "Only a newly created worktree without task history can be removed",
-                }),
-              );
-            yield* removeProjectWorktree(source.path, worktree.path);
-            yield* attemptOperation("pi.clearWorkspaceTrust", () =>
-              pi.clearWorkspaceTrust(worktree.path),
-            ).pipe(Effect.catch(() => Effect.void));
-            yield* attemptOperation("chats.forgetWorkspace", () =>
-              manager.forgetWorkspace(worktree.id),
-            );
-            yield* attemptOperation("metadata.forgetWorkspace", () =>
-              metadata.forgetWorkspace(worktree.id),
-            );
-            return { ok: true };
-          }),
-        ),
-      ),
-      reorder: workspaces.reorder.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            yield* attemptOperation("metadata.reorderWorkspaces", () =>
-              metadata.reorderWorkspaces(input.workspaceIds),
-            );
-            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
-            return { recentWorkspaces };
-          }),
-        ),
-      ),
-      sessions: workspaces.sessions.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const sessions = yield* attemptOperation("chats.refreshSessions", () =>
-              manager.refreshSessions(input.workspaceId),
-            );
-            return { sessions };
-          }),
-        ),
-      ),
-      trust: workspaces.trust.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const pi = yield* PiAgent;
-            const record = yield* attemptOperation("chats.workspace", () =>
-              manager.workspace(input.workspaceId),
-            );
-            yield* attemptOperation("pi.setWorkspaceTrust", () =>
-              pi.setWorkspaceTrust(record.path, input.trusted),
-            );
-            return yield* attemptOperation("chats.openWorkspace", () =>
-              manager.openWorkspace(record.id, record.path),
-            );
-          }),
-        ),
-      ),
+              yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+                pi.clearWorkspaceTrust(worktreePath),
+              ).pipe(Effect.catch(() => Effect.void));
+              const createdWorkspaceId = id;
+              if (createdWorkspaceId)
+                yield* attemptOperation("metadata.forgetWorkspace", () =>
+                  metadata.forgetWorkspace(createdWorkspaceId),
+                ).pipe(Effect.catch(() => Effect.void));
+            }),
+          ),
+        );
+      }),
+      removeWorktree: workspaces.removeWorktree.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const pi = yield* PiAgent;
+        const worktree = yield* attemptOperation("chats.workspace", () =>
+          manager.workspace(input.workspaceId),
+        );
+        const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+          metadata.workspaceProjectId(input.workspaceId),
+        );
+        if (sourceWorkspaceId === input.workspaceId)
+          return yield* Effect.fail(
+            HttpError.make({
+              status: 400,
+              code: "workspace_not_managed_worktree",
+              message: "Workspace is not a managed Pidex worktree",
+            }),
+          );
+        const source = yield* attemptOperation("chats.workspace", () =>
+          manager.workspace(sourceWorkspaceId),
+        );
+        const canRemove = yield* attemptOperation("chats.workspaceCanBeRemoved", () =>
+          manager.workspaceCanBeRemoved(worktree.id),
+        );
+        if (!canRemove)
+          return yield* Effect.fail(
+            HttpError.make({
+              status: 409,
+              code: "worktree_has_tasks",
+              message: "Only a newly created worktree without task history can be removed",
+            }),
+          );
+        yield* removeProjectWorktree(source.path, worktree.path);
+        yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+          pi.clearWorkspaceTrust(worktree.path),
+        ).pipe(Effect.catch(() => Effect.void));
+        yield* attemptOperation("chats.forgetWorkspace", () =>
+          manager.forgetWorkspace(worktree.id),
+        );
+        yield* attemptOperation("metadata.forgetWorkspace", () =>
+          metadata.forgetWorkspace(worktree.id),
+        );
+        return { ok: true };
+      }),
+      reorder: workspaces.reorder.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        yield* attemptOperation("metadata.reorderWorkspaces", () =>
+          metadata.reorderWorkspaces(input.workspaceIds),
+        );
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
+        return { recentWorkspaces };
+      }),
+      sessions: workspaces.sessions.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const sessions = yield* attemptOperation("chats.refreshSessions", () =>
+          manager.refreshSessions(input.workspaceId),
+        );
+        return { sessions };
+      }),
+      trust: workspaces.trust.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const pi = yield* PiAgent;
+        const record = yield* attemptOperation("chats.workspace", () =>
+          manager.workspace(input.workspaceId),
+        );
+        yield* attemptOperation("pi.setWorkspaceTrust", () =>
+          pi.setWorkspaceTrust(record.path, input.trusted),
+        );
+        return yield* attemptOperation("chats.openWorkspace", () =>
+          manager.openWorkspace(record.id, record.path),
+        );
+      }),
     }),
     chats: chats.router({
-      create: chats.create.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.create", () =>
-              manager.create(input.workspaceId),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      create: chats.create.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.create", () =>
+          manager.create(input.workspaceId),
+        );
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      resume: chats.resume.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.resume", () => manager.resume(input.taskId));
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      get: chats.get.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      dispose: chats.dispose.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        yield* attemptOperation("chats.dispose", () => manager.dispose(chat));
+        return { ok: true };
+      }),
+      sendMessage: chats.sendMessage.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const action = {
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          requestDigest: requestDigest({
+            text: input.text,
+            delivery: input.delivery,
+            runId: input.runId ?? null,
           }),
-        ),
-      ),
-      resume: chats.resume.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.resume", () =>
-              manager.resume(input.taskId),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        };
+        if (input.delivery === "normal") {
+          const outcome = yield* attemptOperation("metadata.acceptPrompt", () =>
+            metadata.acceptPrompt(action),
+          );
+          yield* attemptOperation("chats.startPrompt", () =>
+            manager.startPrompt(chat, input.text, outcome),
+          );
+          return outcome;
+        }
+        const runId = input.runId;
+        const delivery = input.delivery;
+        if (!runId)
+          return yield* Effect.fail(
+            HttpError.make({
+              status: 400,
+              code: "validation",
+              message: "An active run ID is required for queued instructions",
+            }),
+          );
+        const outcome = yield* attemptOperation("metadata.acceptRunMutation", () =>
+          metadata.acceptRunMutation({ ...action, runId, kind: delivery }),
+        );
+        return yield* attemptOperation("chats.deliverDuringRun", () =>
+          manager.deliverDuringRun(chat, input.text, delivery, outcome),
+        );
+      }),
+      abort: chats.abort.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const outcome = yield* attemptOperation("metadata.acceptStop", () =>
+          metadata.acceptStop({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            runId: input.runId,
+            requestDigest: requestDigest({ runId: input.runId }),
           }),
-        ),
-      ),
-      get: chats.get.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        );
+        return yield* attemptOperation("chats.abort", () => manager.abort(chat, outcome));
+      }),
+      acknowledgeInterrupted: chats.acknowledgeInterrupted.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const outcome = yield* attemptOperation("metadata.acknowledgeInterrupted", () =>
+          metadata.acknowledgeInterrupted({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            requestDigest: requestDigest({ acknowledge: chat.run?.runId ?? null }),
           }),
-        ),
-      ),
-      dispose: chats.dispose.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            yield* attemptOperation("chats.dispose", () => manager.dispose(chat));
-            return { ok: true };
+        );
+        yield* attemptOperation("chats.acknowledgeInterrupted", () =>
+          manager.acknowledgeInterrupted(chat, outcome),
+        );
+        return outcome;
+      }),
+      toolOutput: chats.toolOutput.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        return yield* attemptOperation("chats.toolOutput", () =>
+          manager.toolOutput(chat, input.resourceId, input.offset, input.limit),
+        );
+      }),
+      transcript: chats.transcript.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        return yield* attemptOperation("chats.transcript", () =>
+          manager.transcriptPage(chat, input.before, input.limit),
+        );
+      }),
+      clearQueue: chats.clearQueue.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
+          metadata.acceptSessionMutation({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            kind: "clear-queue",
+            requestDigest: requestDigest({ clearQueue: true }),
           }),
-        ),
-      ),
-      sendMessage: chats.sendMessage.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            const action = {
-              actionId: input.actionId,
-              clientId: input.clientId,
-              expectedRevision: input.expectedRevision,
-              sessionKey: chat.sessionKey,
-              requestDigest: requestDigest({
-                text: input.text,
-                delivery: input.delivery,
-                runId: input.runId ?? null,
-              }),
-            };
-            if (input.delivery === "normal") {
-              const outcome = yield* attemptOperation("metadata.acceptPrompt", () =>
-                metadata.acceptPrompt(action),
-              );
-              yield* attemptOperation("chats.startPrompt", () =>
-                manager.startPrompt(chat, input.text, outcome),
-              );
-              return outcome;
-            }
-            const runId = input.runId;
-            const delivery = input.delivery;
-            if (!runId)
-              return yield* Effect.fail(
-                HttpError.make({
-                  status: 400,
-                  code: "validation",
-                  message: "An active run ID is required for queued instructions",
-                }),
-              );
-            const outcome = yield* attemptOperation("metadata.acceptRunMutation", () =>
-              metadata.acceptRunMutation({ ...action, runId, kind: delivery }),
-            );
-            return yield* attemptOperation("chats.deliverDuringRun", () =>
-              manager.deliverDuringRun(chat, input.text, delivery, outcome),
-            );
+        );
+        yield* attemptOperation("chats.clearQueue", () =>
+          manager.performMutation(chat, outcome, () => manager.clear(chat)),
+        );
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      configure: chats.configure.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        yield* requireIdle(chat.session.isIdle, "Configuration can only change while idle");
+        const workspace = yield* attemptOperation("chats.workspace", () =>
+          manager.workspace(chat.workspaceId),
+        );
+        const modelAvailable = workspace.info.models.some((model) => model.id === input.model);
+        if (input.model && !modelAvailable)
+          return yield* Effect.fail(
+            HttpError.make({
+              status: 400,
+              code: "model_unavailable",
+              message: "Model is no longer available",
+            }),
+          );
+        const patch = {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
+        };
+        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
+          metadata.acceptSessionMutation({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            kind: "config",
+            requestDigest: requestDigest(patch),
           }),
-        ),
-      ),
-      abort: chats.abort.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            const outcome = yield* attemptOperation("metadata.acceptStop", () =>
-              metadata.acceptStop({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                runId: input.runId,
-                requestDigest: requestDigest({ runId: input.runId }),
-              }),
-            );
-            return yield* attemptOperation("chats.abort", () => manager.abort(chat, outcome));
+        );
+        yield* attemptOperation("chats.configure", () =>
+          manager.performMutation(chat, outcome, () => manager.configure(chat, patch)),
+        );
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      rename: chats.rename.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
+          metadata.acceptSessionMutation({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            kind: "rename",
+            requestDigest: requestDigest({ name: input.name }),
           }),
-        ),
-      ),
-      acknowledgeInterrupted: chats.acknowledgeInterrupted.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            const outcome = yield* attemptOperation("metadata.acknowledgeInterrupted", () =>
-              metadata.acknowledgeInterrupted({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                requestDigest: requestDigest({ acknowledge: chat.run?.runId ?? null }),
-              }),
-            );
-            yield* attemptOperation("chats.acknowledgeInterrupted", () =>
-              manager.acknowledgeInterrupted(chat, outcome),
-            );
-            return outcome;
+        );
+        yield* attemptOperation("chats.rename", () =>
+          manager.performMutation(chat, outcome, () => manager.rename(chat, input.name)),
+        );
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      compact: chats.compact.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        yield* requireIdle(chat.session.isIdle, "Compaction can only run while idle");
+        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
+          metadata.acceptSessionMutation({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            kind: "compact",
+            requestDigest: requestDigest({ instructions: input.instructions ?? null }),
           }),
-        ),
-      ),
-      toolOutput: chats.toolOutput.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            return yield* attemptOperation("chats.toolOutput", () =>
-              manager.toolOutput(chat, input.resourceId, input.offset, input.limit),
-            );
+        );
+        yield* attemptOperation("chats.compact", () =>
+          manager.performMutation(chat, outcome, () => manager.compact(chat, input.instructions)),
+        );
+        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+      }),
+      answerDialog: chats.answerDialog.effect(function* (_, input) {
+        const metadata = yield* Metadata;
+        const manager = yield* Chats;
+        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        yield* validateDialogResponse(chat.extensionDialog, input.requestId, input.value);
+        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
+          metadata.acceptSessionMutation({
+            actionId: input.actionId,
+            clientId: input.clientId,
+            expectedRevision: input.expectedRevision,
+            sessionKey: chat.sessionKey,
+            kind: "dialog",
+            requestDigest: requestDigest({ requestId: input.requestId, value: input.value }),
           }),
-        ),
-      ),
-      transcript: chats.transcript.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            return yield* attemptOperation("chats.transcript", () =>
-              manager.transcriptPage(chat, input.before, input.limit),
-            );
-          }),
-        ),
-      ),
-      clearQueue: chats.clearQueue.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-              metadata.acceptSessionMutation({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                kind: "clear-queue",
-                requestDigest: requestDigest({ clearQueue: true }),
-              }),
-            );
-            yield* attemptOperation("chats.clearQueue", () =>
-              manager.performMutation(chat, outcome, () => manager.clear(chat)),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
-          }),
-        ),
-      ),
-      configure: chats.configure.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            yield* requireIdle(chat.session.isIdle, "Configuration can only change while idle");
-            const workspace = yield* attemptOperation("chats.workspace", () =>
-              manager.workspace(chat.workspaceId),
-            );
-            const modelAvailable = workspace.info.models.some((model) => model.id === input.model);
-            if (input.model && !modelAvailable)
-              return yield* Effect.fail(
-                HttpError.make({
-                  status: 400,
-                  code: "model_unavailable",
-                  message: "Model is no longer available",
-                }),
-              );
-            const patch = {
-              ...(input.model ? { model: input.model } : {}),
-              ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
-            };
-            const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-              metadata.acceptSessionMutation({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                kind: "config",
-                requestDigest: requestDigest(patch),
-              }),
-            );
-            yield* attemptOperation("chats.configure", () =>
-              manager.performMutation(chat, outcome, () => manager.configure(chat, patch)),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
-          }),
-        ),
-      ),
-      rename: chats.rename.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-              metadata.acceptSessionMutation({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                kind: "rename",
-                requestDigest: requestDigest({ name: input.name }),
-              }),
-            );
-            yield* attemptOperation("chats.rename", () =>
-              manager.performMutation(chat, outcome, () => manager.rename(chat, input.name)),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
-          }),
-        ),
-      ),
-      compact: chats.compact.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            yield* requireIdle(chat.session.isIdle, "Compaction can only run while idle");
-            const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-              metadata.acceptSessionMutation({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                kind: "compact",
-                requestDigest: requestDigest({ instructions: input.instructions ?? null }),
-              }),
-            );
-            yield* attemptOperation("chats.compact", () =>
-              manager.performMutation(chat, outcome, () =>
-                manager.compact(chat, input.instructions),
-              ),
-            );
-            return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
-          }),
-        ),
-      ),
-      answerDialog: chats.answerDialog.handler(({ input }) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const metadata = yield* Metadata;
-            const manager = yield* Chats;
-            const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-            yield* validateDialogResponse(chat.extensionDialog, input.requestId, input.value);
-            const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-              metadata.acceptSessionMutation({
-                actionId: input.actionId,
-                clientId: input.clientId,
-                expectedRevision: input.expectedRevision,
-                sessionKey: chat.sessionKey,
-                kind: "dialog",
-                requestDigest: requestDigest({ requestId: input.requestId, value: input.value }),
-              }),
-            );
-            yield* attemptOperation("chats.answerDialog", () =>
-              manager.performMutation(chat, outcome, () =>
-                chat.session.respondToDialog(input.requestId, input.value),
-              ),
-            );
-            return { ok: true };
-          }),
-        ),
-      ),
+        );
+        yield* attemptOperation("chats.answerDialog", () =>
+          manager.performMutation(chat, outcome, () =>
+            chat.session.respondToDialog(input.requestId, input.value),
+          ),
+        );
+        return { ok: true };
+      }),
     }),
   });
 }
@@ -528,13 +441,14 @@ const protocolErrors = os.middleware(async ({ next }) => {
     const protocolError =
       error instanceof HttpError || error instanceof ActionProtocolError ? error : undefined;
     throw new ORPCError(protocolError?.code ?? "internal_error", {
-      status: protocolError?.status ?? 500,
       message: safeError(error),
     });
   }
 });
 
-type RpcApiContext = { req: IncomingMessage };
+interface RpcApiContext extends WithEffectContext<ApplicationServices> {
+  req: IncomingMessage;
+}
 
 function workspaceId(metadata: MetadataStore, canonical: string, remember: boolean | undefined) {
   return Effect.gen(function* () {

@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
 
 const execFileAsync = promisify(execFile);
+let lastRpcResponseStatus: number | undefined;
 
 const coveredEndpoints = [
   "system.health",
@@ -222,10 +223,11 @@ describe.sequential("HTTP API endpoints", () => {
 
     const dirtyFile = path.join(created.path, "unsaved-worktree-change.txt");
     await writeFile(dirtyFile, "Do not delete this change.\n");
-    await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).rejects.toMatchObject({
-      code: "worktree_remove_failed",
-      status: 400,
-    });
+    await expectRpcError(
+      api.workspaces.removeWorktree({ workspaceId: created.id }),
+      "worktree_remove_failed",
+      400,
+    );
     await expect(access(dirtyFile)).resolves.toBeUndefined();
     await rm(dirtyFile);
 
@@ -248,25 +250,30 @@ describe.sequential("HTTP API endpoints", () => {
   });
 
   it("rejects removing a local workspace as a managed worktree", async () => {
-    await expect(api.workspaces.removeWorktree({ workspaceId })).rejects.toMatchObject({
-      code: "workspace_not_managed_worktree",
-      status: 400,
-    });
+    await expectRpcError(
+      api.workspaces.removeWorktree({ workspaceId }),
+      "workspace_not_managed_worktree",
+      400,
+    );
   });
 
   it("rejects worktree creation outside a Git repository", async () => {
-    await expect(
+    await expectRpcError(
       api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
-    ).rejects.toMatchObject({ code: "project_not_git", status: 400 });
+      "project_not_git",
+      400,
+    );
   });
 
   it("rejects unrecorded directories under the managed worktree root", async () => {
     const unrecordedPath = path.join(tempRoot, "state", "worktrees", "unrecorded");
     await mkdir(unrecordedPath, { recursive: true });
 
-    await expect(
+    await expectRpcError(
       api.workspaces.open({ path: unrecordedPath, remember: true }),
-    ).rejects.toMatchObject({ code: "workspace_forbidden", status: 403 });
+      "workspace_forbidden",
+      403,
+    );
   });
 
   it("workspaces.sessions", async () => {
@@ -306,10 +313,7 @@ describe.sequential("HTTP API endpoints", () => {
     });
     await api.chats.dispose({ chatId: created.chatId });
 
-    await expect(api.chats.resume({ taskId: "missing_task_12345" })).rejects.toMatchObject({
-      code: "internal_error",
-      status: 500,
-    });
+    await expectRpcError(api.chats.resume({ taskId: "missing_task_12345" }), "internal_error", 500);
   });
 
   it("chats.get", async () => {
@@ -321,41 +325,44 @@ describe.sequential("HTTP API endpoints", () => {
   it("chats.sendMessage", async () => {
     const chat = await currentChat();
 
-    await expect(
+    await expectRpcError(
       api.chats.sendMessage({
         ...actionFor(chat, 1),
         text: "This must not reach a model",
         delivery: "normal",
       }),
-    ).rejects.toMatchObject({ code: "stale_revision", status: 409 });
+      "stale_revision",
+      409,
+    );
   });
 
   it("chats.abort", async () => {
     const chat = await currentChat();
 
-    await expect(
+    await expectRpcError(
       api.chats.abort({ ...actionFor(chat), runId: "missing_run_12345" }),
-    ).rejects.toMatchObject({ code: "run_mismatch", status: 409 });
+      "run_mismatch",
+      409,
+    );
   });
 
   it("chats.acknowledgeInterrupted", async () => {
     const chat = await currentChat();
 
-    await expect(api.chats.acknowledgeInterrupted(actionFor(chat))).rejects.toMatchObject({
-      code: "run_mismatch",
-      status: 409,
-    });
+    await expectRpcError(api.chats.acknowledgeInterrupted(actionFor(chat)), "run_mismatch", 409);
   });
 
   it("chats.toolOutput", async () => {
-    await expect(
+    await expectRpcError(
       api.chats.toolOutput({
         chatId,
         resourceId: "missing_resource_12345",
         offset: 0,
         limit: 1024,
       }),
-    ).rejects.toMatchObject({ code: "internal_error", status: 500 });
+      "internal_error",
+      500,
+    );
   });
 
   it("chats.transcript", async () => {
@@ -434,21 +441,25 @@ describe.sequential("HTTP API endpoints", () => {
   it("chats.compact", async () => {
     const chat = await currentChat();
 
-    await expect(
+    await expectRpcError(
       api.chats.compact({ ...actionFor(chat, 1), instructions: "Do not run" }),
-    ).rejects.toMatchObject({ code: "stale_revision", status: 409 });
+      "stale_revision",
+      409,
+    );
   });
 
   it("chats.answerDialog", async () => {
     const chat = await currentChat();
 
-    await expect(
+    await expectRpcError(
       api.chats.answerDialog({
         ...actionFor(chat),
         requestId: "missing_dialog_12345",
         value: null,
       }),
-    ).rejects.toMatchObject({ code: "dialog_mismatch", status: 409 });
+      "dialog_mismatch",
+      409,
+    );
   });
 
   it("chats.dispose", async () => {
@@ -471,11 +482,10 @@ describe.sequential("HTTP API endpoints", () => {
     await api.chats.dispose({ chatId: created.chatId });
     await api.workspaces.open({ path: worktree.path, remember: true });
 
-    await expect(api.workspaces.removeWorktree({ workspaceId: worktree.id })).rejects.toMatchObject(
-      {
-        code: "worktree_has_tasks",
-        status: 409,
-      },
+    await expectRpcError(
+      api.workspaces.removeWorktree({ workspaceId: worktree.id }),
+      "worktree_has_tasks",
+      409,
     );
   });
 
@@ -485,11 +495,23 @@ describe.sequential("HTTP API endpoints", () => {
 });
 
 function createClient(url: string, csrfToken?: string): PidexApiContractClient {
+  const endpoint = new URL(url);
   const link = new RPCLink({
-    url,
+    origin: endpoint.origin,
+    url: endpoint.pathname as `/${string}`,
+    fetch: async (requestUrl, init) => {
+      const response = await fetch(requestUrl, init);
+      lastRpcResponseStatus = response.status;
+      return response;
+    },
     ...(csrfToken ? { headers: { "x-pidex-csrf": csrfToken } } : {}),
   });
   return createORPCClient(link);
+}
+
+async function expectRpcError(operation: Promise<unknown>, code: string, status: number) {
+  await expect(operation).rejects.toMatchObject({ code });
+  expect(lastRpcResponseStatus).toBe(status);
 }
 
 function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
