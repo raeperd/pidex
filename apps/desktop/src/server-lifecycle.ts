@@ -1,4 +1,4 @@
-import { Duration, Effect, Schedule } from "effect";
+import { Duration, Effect, Schedule, type Scope } from "effect";
 
 export interface DesktopServerError {
   readonly _tag: "DesktopServerError";
@@ -7,25 +7,18 @@ export interface DesktopServerError {
   readonly cause: unknown;
 }
 
-export interface ServerProcess {
-  readonly exited: Effect.Effect<void, DesktopServerError>;
-  readonly stop: Effect.Effect<void>;
-}
-
-export const superviseServer = Effect.fn("desktop.server.supervise")(function* (
-  spawnServer: Effect.Effect<ServerProcess, DesktopServerError>,
+export const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
+  runServer: Effect.Effect<void, DesktopServerError, Scope.Scope | R>,
 ) {
-  const runServer = Effect.scoped(
-    Effect.acquireRelease(spawnServer, (server) => server.stop).pipe(
-      Effect.flatMap((server) => server.exited),
-    ),
-  ).pipe(Effect.catch((error) => Effect.logWarning(`${error.message}: ${String(error.cause)}`)));
+  const runScoped = Effect.scoped(runServer).pipe(
+    Effect.catch((error) => Effect.logWarning(`${error.message}: ${String(error.cause)}`)),
+  );
   const restartSchedule = Schedule.exponential("300 millis", 2).pipe(
     Schedule.modifyDelay(({ duration }) =>
       Effect.succeed(Duration.min(duration, Duration.seconds(5))),
     ),
   );
-  return yield* runServer.pipe(Effect.repeat(restartSchedule));
+  return yield* runScoped.pipe(Effect.repeat(restartSchedule));
 });
 
 export const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function* (

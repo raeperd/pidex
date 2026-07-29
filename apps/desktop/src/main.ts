@@ -1,18 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { healthSchema, type PidexApiContractClient } from "@pidex/api";
-import { NodeRuntime } from "@effect/platform-node";
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
-import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { Deferred, Effect, Ref } from "effect";
-import {
-  desktopServerError,
-  superviseServer,
-  waitForServer,
-  type DesktopServerError,
-  type ServerProcess,
-} from "./server-lifecycle.js";
+import { Deferred, Effect, Ref, Stream } from "effect";
+import { ChildProcess } from "effect/unstable/process";
+import { desktopServerError, superviseServer, waitForServer } from "./server-lifecycle.js";
 
 const main = Effect.scoped(
   Effect.gen(function* () {
@@ -42,11 +36,10 @@ const main = Effect.scoped(
   }),
 ).pipe(
   Effect.tapError((error) =>
-    Effect.sync(() => {
-      console.error(`Pidex cannot start: ${error.message}`);
-      app.quit();
-    }),
+    Effect.sync(() => console.error(`Pidex cannot start: ${error.message}`)),
   ),
+  Effect.ensuring(Effect.sync(() => app.quit())),
+  Effect.provide(NodeServices.layer),
 );
 
 NodeRuntime.runMain(main, { disableErrorReporting: true });
@@ -81,7 +74,8 @@ function registerAppLifecycle(quit: Deferred.Deferred<void>) {
             ),
           );
       };
-      const onBeforeQuit = () => {
+      const onBeforeQuit = (event: Electron.Event) => {
+        event.preventDefault();
         Effect.runFork(Deferred.succeed(quit, undefined));
       };
       app.on("activate", onActivate);
@@ -144,73 +138,54 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
   });
 });
 
-function spawnServer(
+const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   stateDirectory: string,
   logs: Ref.Ref<ReadonlyArray<string>>,
-): Effect.Effect<ServerProcess, DesktopServerError> {
-  return Effect.try({
-    try: () => {
-      const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
-      const serverDirectory = app.isPackaged
-        ? path.join(process.resourcesPath, "server")
-        : path.join(repositoryRoot, "apps/server");
-      const child = spawn(process.execPath, [path.join(serverDirectory, "dist/main.js")], {
-        cwd: app.isPackaged ? process.resourcesPath : repositoryRoot,
-        env: {
-          ...process.env,
-          ELECTRON_RUN_AS_NODE: "1",
-          PIDEX_STATE_DIR: stateDirectory,
-          PORT: String(port),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const onData = (chunk: Buffer) => Effect.runFork(remember(logs, chunk));
-      child.stdout?.on("data", onData);
-      child.stderr?.on("data", onData);
-      return { child, onData };
+) {
+  const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
+  const serverDirectory = app.isPackaged
+    ? path.join(process.resourcesPath, "server")
+    : path.join(repositoryRoot, "apps/server");
+  const command = ChildProcess.make(
+    process.execPath,
+    [path.join(serverDirectory, "dist/main.js")],
+    {
+      cwd: app.isPackaged ? process.resourcesPath : repositoryRoot,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        PIDEX_STATE_DIR: stateDirectory,
+        PORT: String(port),
+      },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      killSignal: "SIGTERM",
+      forceKillAfter: "5 seconds",
     },
-    catch: (cause) =>
-      desktopServerError("server.spawn", "Pidex could not start its server process", cause),
-  }).pipe(
-    Effect.map(({ child, onData }) => ({
-      exited: awaitExit(child),
-      stop: stopServer(child, onData),
-    })),
   );
-}
+  const handle = yield* command.pipe(
+    Effect.mapError((cause) =>
+      desktopServerError("server.spawn", "Pidex could not start its server process", cause),
+    ),
+  );
+  yield* handle.all.pipe(
+    Stream.decodeText(),
+    Stream.splitLines,
+    Stream.filter((line) => line.length > 0),
+    Stream.runForEach((line) => remember(logs, line)),
+    Effect.catch((error) => Effect.logWarning(`Pidex server output stopped: ${String(error)}`)),
+    Effect.forkScoped,
+  );
+  yield* handle.exitCode.pipe(
+    Effect.mapError((cause) =>
+      desktopServerError("server.process", "The Pidex server process failed", cause),
+    ),
+  );
+});
 
-function awaitExit(child: ChildProcess): Effect.Effect<void, DesktopServerError> {
-  if (child.exitCode !== null || child.signalCode !== null) return Effect.void;
-  return Effect.callback((resume) => {
-    const onExit = () => resume(Effect.void);
-    const onError = (cause: Error) =>
-      resume(
-        Effect.fail(desktopServerError("server.process", "The Pidex server process failed", cause)),
-      );
-    child.once("exit", onExit);
-    child.once("error", onError);
-    return Effect.sync(() => {
-      child.off("exit", onExit);
-      child.off("error", onError);
-    });
-  });
-}
-
-function stopServer(child: ChildProcess, onData: (chunk: Buffer) => void) {
-  return Effect.try(() => {
-    child.stdout?.off("data", onData);
-    child.stderr?.off("data", onData);
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-  }).pipe(Effect.catch(() => Effect.void));
-}
-
-function remember(logs: Ref.Ref<ReadonlyArray<string>>, chunk: Buffer) {
-  const lines = chunk
-    .toString("utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.slice(0, 2000));
-  return Ref.update(logs, (current) => [...current, ...lines].slice(-200));
+function remember(logs: Ref.Ref<ReadonlyArray<string>>, line: string) {
+  return Ref.update(logs, (current) => [...current, line.slice(0, 2000)].slice(-200));
 }
 
 const checkServerHealth = Effect.tryPromise({

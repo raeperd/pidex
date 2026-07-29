@@ -1,24 +1,17 @@
 import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Ref } from "effect";
-import {
-  desktopServerError,
-  superviseServer,
-  waitForServer,
-  type ServerProcess,
-} from "./server-lifecycle.js";
+import { desktopServerError, superviseServer, waitForServer } from "./server-lifecycle.js";
 
 it.effect("releases the server process when supervision is interrupted", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
     const exited = yield* Deferred.make<void>();
     const stopped = yield* Ref.make(false);
-    const process: ServerProcess = {
-      exited: Deferred.await(exited),
-      stop: Ref.set(stopped, true),
-    };
-    const spawn = Deferred.succeed(started, undefined).pipe(Effect.as(process));
+    const runServer = Effect.acquireRelease(Deferred.succeed(started, undefined), () =>
+      Ref.set(stopped, true),
+    ).pipe(Effect.andThen(Deferred.await(exited)));
 
-    const fiber = yield* superviseServer(spawn).pipe(Effect.forkScoped);
+    const fiber = yield* superviseServer(runServer).pipe(Effect.forkScoped);
     yield* Deferred.await(started);
     yield* Fiber.interrupt(fiber);
 
