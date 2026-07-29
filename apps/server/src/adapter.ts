@@ -1,4 +1,5 @@
 import type {
+  ChatSnapshot,
   ContextUsage,
   ExtensionDialog,
   ModelInfo,
@@ -51,7 +52,7 @@ export interface AdapterSession {
   }): Promise<void>;
   rename(name: string): void;
   compact(instructions?: string): Promise<void>;
-  getStats(): { messages: number; toolCalls: number; tokens: number; cost: number };
+  getStats(): ChatSnapshot["stats"];
   respondToDialog(requestId: string, value: string | boolean | null): void;
   dispose(): void;
 }
@@ -87,10 +88,7 @@ export interface EffectAdapterSession {
   }): Effect.Effect<void, AdapterSessionError>;
   rename(name: string): Effect.Effect<void, AdapterSessionError>;
   compact(instructions?: string): Effect.Effect<void, AdapterSessionError>;
-  getStats(): Effect.Effect<
-    { messages: number; toolCalls: number; tokens: number; cost: number },
-    AdapterSessionError
-  >;
+  getStats(): Effect.Effect<ChatSnapshot["stats"], AdapterSessionError>;
   respondToDialog(
     requestId: string,
     value: string | boolean | null,

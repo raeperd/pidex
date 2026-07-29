@@ -86,6 +86,14 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
+  it("renders the Pi session footer", () => {
+    const body = renderComposer("", false);
+
+    expect(body).toContain("~/Projects/pidex (main)");
+    expect(body).toContain("↑1.0k ↓250 R2.0k W100 CH66.7% $1.234 (sub) 25.0%/272k (auto)");
+    expect(body).toContain("gpt-5.6-sol • high");
+  });
+
   it("completes a selected command in the composer", () => {
     expect(completeSlashCommand({ name: "compact" })).toBe("/compact ");
   });
@@ -106,22 +114,49 @@ function renderComposer(draft: string, active: boolean) {
       compact: async () => true,
       configure: async () => true,
       connection: "connected",
+      contextUsage: {
+        tokens: 68_000,
+        contextWindow: 272_000,
+        percent: 25,
+        totalProcessedTokens: 3_350,
+        compactsAutomatically: true,
+      },
       creatingTask: false,
       delivery: "steer",
       draft,
       followUpCount: 0,
-      models: [],
+      models: [
+        {
+          id: "openai/gpt-5.6-sol",
+          provider: "openai",
+          name: "GPT-5.6 Sol",
+          reasoning: true,
+        },
+      ],
       persistDraft: () => {},
+      projectPath: "~/Projects/pidex",
+      gitBranch: "main",
       projectName: "pidex",
       requiresAcknowledgement: false,
       runStatus: active ? "running" : "idle",
-      selectedModel: "",
-      selectedThinkingLevel: "low",
+      selectedModel: "openai/gpt-5.6-sol",
+      selectedThinkingLevel: "high",
       send: async () => {},
       setStartMode: () => {},
       startMode: "local",
       startModeEditable: true,
-      stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+      stats: {
+        messages: 2,
+        toolCalls: 1,
+        tokens: 3_350,
+        inputTokens: 1_000,
+        outputTokens: 250,
+        cacheReadTokens: 2_000,
+        cacheWriteTokens: 100,
+        cacheHitRate: 66.666,
+        cost: 1.234,
+        subscription: true,
+      },
       steeringCount: 0,
       stop: async () => {},
       taskId: "task_test",

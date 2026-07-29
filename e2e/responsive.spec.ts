@@ -91,7 +91,7 @@ test("scales mobile task and composer targets without changing desktop density",
           transcriptTotal: 0,
           steeringQueue: [],
           followUpQueue: [],
-          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
         },
       },
     });

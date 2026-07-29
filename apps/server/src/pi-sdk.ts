@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -25,6 +28,8 @@ import {
   type AdapterWorkspaceInfo,
   type EffectAdapterSession,
 } from "./adapter.js";
+
+const execFileAsync = promisify(execFile);
 
 interface PiSdkError {
   readonly _tag: "PiSdkError";
@@ -375,6 +380,9 @@ function makePiSession(session: AgentSession) {
       toolCalls: stats.toolCalls,
       tokens: stats.tokens.total,
       cost: stats.cost,
+      subscription: session.model
+        ? session.modelRuntime.isUsingOAuth(session.model.provider)
+        : false,
     };
   }
   function respondToDialog(requestId: string, value: string | boolean | null) {
@@ -458,6 +466,24 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
     const { trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
+    const home = os.homedir();
+    const relativeToHome = path.relative(home, cwd);
+    const displayPath =
+      relativeToHome === ""
+        ? "~"
+        : relativeToHome !== ".." &&
+            !relativeToHome.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relativeToHome)
+          ? `~${path.sep}${relativeToHome}`
+          : cwd;
+    let gitBranch: string | undefined;
+    try {
+      const { stdout } = await execFileAsync("git", ["branch", "--show-current"], {
+        cwd,
+        encoding: "utf8",
+      });
+      gitBranch = stdout.trim() || "detached";
+    } catch {}
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
       ...loader
         .getSkills()
@@ -475,6 +501,8 @@ export function makePiSdk(options: PiSdkOptions = {}) {
         ),
     ].slice(0, 50);
     return {
+      displayPath,
+      ...(gitBranch ? { gitBranch } : {}),
       models: (await modelRuntime.getAvailable()).map((model) => ({
         id: `${model.provider}/${model.id}`,
         provider: model.provider,

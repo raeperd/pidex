@@ -90,6 +90,8 @@
     followUpCount,
     models,
     persistDraft,
+    projectPath,
+    gitBranch,
     projectName,
     requiresAcknowledgement,
     runStatus,
@@ -117,6 +119,8 @@
     followUpCount: number;
     models: Workspace["models"];
     persistDraft: () => void;
+    projectPath: string;
+    gitBranch?: string;
     projectName: string;
     requiresAcknowledgement: boolean;
     runStatus: ChatSnapshot["runStatus"];
@@ -155,6 +159,54 @@
     commandSuggestions.find((command) => command.name === selectedCommandName) ??
       commandSuggestions[0],
   );
+  let footerPath = $derived(`${projectPath}${gitBranch ? ` (${gitBranch})` : ""}`);
+  let selectedModelInfo = $derived(models.find((model) => model.id === selectedModel));
+  let footerUsage = $derived(formatFooterUsage(stats, contextUsage));
+  let footerModel = $derived(
+    formatFooterModel(selectedModel, selectedModelInfo?.reasoning ?? false, selectedThinkingLevel),
+  );
+
+  function formatFooterUsage(sessionStats: ChatSnapshot["stats"], usage: ContextUsage | undefined) {
+    const parts: string[] = [];
+    if (sessionStats.inputTokens) parts.push(`↑${formatFooterTokens(sessionStats.inputTokens)}`);
+    if (sessionStats.outputTokens) parts.push(`↓${formatFooterTokens(sessionStats.outputTokens)}`);
+    if (sessionStats.cacheReadTokens)
+      parts.push(`R${formatFooterTokens(sessionStats.cacheReadTokens)}`);
+    if (sessionStats.cacheWriteTokens)
+      parts.push(`W${formatFooterTokens(sessionStats.cacheWriteTokens)}`);
+    if (
+      (sessionStats.cacheReadTokens > 0 || sessionStats.cacheWriteTokens > 0) &&
+      sessionStats.cacheHitRate !== null
+    )
+      parts.push(`CH${sessionStats.cacheHitRate.toFixed(1)}%`);
+    if (sessionStats.cost || sessionStats.subscription)
+      parts.push(`$${sessionStats.cost.toFixed(3)}${sessionStats.subscription ? " (sub)" : ""}`);
+    if (usage) {
+      const percent = usage.percent === null ? "?" : `${usage.percent.toFixed(1)}%`;
+      const automatic = usage.compactsAutomatically ? " (auto)" : "";
+      parts.push(`${percent}/${formatFooterTokens(usage.contextWindow)}${automatic}`);
+    }
+    return parts.join(" ");
+  }
+
+  function formatFooterModel(
+    model: string,
+    reasoning: boolean,
+    thinkingLevel: ChatSnapshot["thinkingLevel"],
+  ) {
+    const slash = model.indexOf("/");
+    const name = slash < 0 ? model : model.slice(slash + 1);
+    if (!reasoning) return name || "no-model";
+    return thinkingLevel === "off" ? `${name} • thinking off` : `${name} • ${thinkingLevel}`;
+  }
+
+  function formatFooterTokens(count: number) {
+    if (count < 1_000) return count.toString();
+    if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
+    if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
+    if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+    return `${Math.round(count / 1_000_000)}M`;
+  }
 
   export function focus() {
     promptInput?.focus();
@@ -495,13 +547,17 @@
     </div>
   </div>
   <div
-    class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[900px]:text-[10.5px] max-[560px]:pt-1"
+    class="mx-auto grid w-full max-w-3xl gap-0.5 px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[900px]:text-[10.5px] max-[560px]:pt-1"
     data-testid="composer-stats"
   >
-    <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-      >{stats.messages} messages · {stats.tokens.toLocaleString()} tokens · ${stats.cost.toFixed(
-        4,
-      )}</span
+    <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={footerPath}
+      >{footerPath}</span
     >
+    <div class="flex min-w-0 items-center justify-between gap-4">
+      <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{footerUsage}</span>
+      <span class="min-w-0 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
+        >{footerModel}</span
+      >
+    </div>
   </div>
 </footer>

@@ -1,7 +1,7 @@
 import { oc, type RouterContractClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = z
   .string()
@@ -136,6 +136,7 @@ const statsSchema = z.object({
   toolCalls: z.number(),
   tokens: z.number(),
   cost: z.number(),
+  subscription: z.boolean(),
 });
 export const contextUsageSchema = z.object({
   tokens: z.number().int().nonnegative().nullable(),
