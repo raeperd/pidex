@@ -31,8 +31,6 @@
 
   let transcript = $state<HTMLElement>();
   let nearBottom = $state(true);
-  let expandedToolGroups = $state<Record<string, boolean>>({});
-  let rows = $derived(buildTranscriptRows(items));
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
 
   export function scrollLatest() {
@@ -58,31 +56,6 @@
   function onScroll() {
     if (transcript)
       nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
-  }
-
-  type TranscriptRow =
-    | { type: "item"; id: string; item: Exclude<TranscriptItem, ToolItem> }
-    | { type: "tools"; id: string; items: ToolItem[] };
-
-  function buildTranscriptRows(sourceItems: TranscriptItem[]): TranscriptRow[] {
-    const result: TranscriptRow[] = [];
-    for (let index = 0; index < sourceItems.length;) {
-      const item = sourceItems[index];
-      if (!item) break;
-      if (item.type !== "tool") {
-        result.push({ type: "item", id: item.id, item });
-        index += 1;
-        continue;
-      }
-
-      const tools: ToolItem[] = [];
-      while (sourceItems[index]?.type === "tool") {
-        tools.push(sourceItems[index] as ToolItem);
-        index += 1;
-      }
-      result.push({ type: "tools", id: `tools:${tools[0]?.id}`, items: tools });
-    }
-    return result;
   }
 </script>
 
@@ -138,46 +111,21 @@
           ? "Loading earlier messages…"
           : `Load earlier messages · ${transcriptStart.toLocaleString()} remaining`}</button
       >{/if}
-    {#each rows as row (row.id)}
-      {#if row.type === "item"}
-        {@const item = row.item}
-        {#if item.type === "user"}
-          <UserMessage text={item.text} />
-        {:else if item.type === "assistant"}
-          <AgentMessage
-            complete={item.complete}
-            text={item.text}
-            thinking={item.thinking}
-            timestamp={item.timestamp}
-            theme={darkMode.current ? "dark" : "light"}
-          />
-        {:else if item.type === "notice"}
-          <TaskNotice level={item.level} text={item.text} />
-        {/if}
-      {:else}
-        {@const collapsibleItems = row.items
-          .slice(0, -2)
-          .filter((item) => item.state === "success")}
-        {@const collapsibleIds = new Set(collapsibleItems.map((item) => item.id))}
-        {@const hiddenCount = collapsibleItems.length}
-        {@const expanded = Boolean(expandedToolGroups[row.id])}
-        {#if hiddenCount > 0}
-          <button
-            type="button"
-            class="mx-1 my-1 flex items-center gap-1 rounded-md px-1 py-1 text-[11px] font-medium text-muted hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? "Hide" : "Show"} ${hiddenCount} previous tool ${hiddenCount === 1 ? "call" : "calls"}`}
-            onclick={() => (expandedToolGroups = { ...expandedToolGroups, [row.id]: !expanded })}
-          >
-            {expanded ? "Hide" : "Show"}
-            {hiddenCount} previous tool {hiddenCount === 1 ? "call" : "calls"}
-          </button>
-        {/if}
-        {#each row.items as item (item.id)}
-          {#if expanded || !collapsibleIds.has(item.id)}
-            {@render toolCall(item)}
-          {/if}
-        {/each}
+    {#each items as item (item.id)}
+      {#if item.type === "user"}
+        <UserMessage text={item.text} />
+      {:else if item.type === "assistant"}
+        <AgentMessage
+          complete={item.complete}
+          text={item.text}
+          thinking={item.thinking}
+          timestamp={item.timestamp}
+          theme={darkMode.current ? "dark" : "light"}
+        />
+      {:else if item.type === "notice"}
+        <TaskNotice level={item.level} text={item.text} />
+      {:else if item.type === "tool"}
+        {@render toolCall(item)}
       {/if}
     {/each}
   </div>
