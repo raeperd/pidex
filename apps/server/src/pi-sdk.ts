@@ -375,6 +375,9 @@ function makePiSession(session: AgentSession) {
       toolCalls: stats.toolCalls,
       tokens: stats.tokens.total,
       cost: stats.cost,
+      subscription: session.model
+        ? session.modelRuntime.isUsingOAuth(session.model.provider)
+        : false,
     };
   }
   function respondToDialog(requestId: string, value: string | boolean | null) {

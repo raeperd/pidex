@@ -2,7 +2,6 @@ import { createContext } from "svelte";
 import type { Bootstrap, ChatSnapshot, ToolItem, Workspace } from "@pidex/api";
 import type { ConnectionState } from "./AppShellConnection";
 
-export type TaskDelivery = "follow-up" | "steer";
 export type TaskStartMode = "local" | "worktree";
 
 export interface TaskConfigurationPatch {
@@ -47,10 +46,10 @@ export interface AppShellContext {
   };
   readonly task: {
     readonly active: boolean;
+    readonly compactPending: boolean;
+    readonly configurationPending: boolean;
     readonly creatingTask: boolean;
-    readonly delivery: TaskDelivery;
     readonly draft: string;
-    readonly hasConfigurationDraft: boolean;
     readonly loadingEarlier: boolean;
     readonly selectedModel: string;
     readonly selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
@@ -66,15 +65,14 @@ export interface AppShellContext {
     attachTranscript(controller: TaskTranscriptController | undefined): void;
     clearQueue(): Promise<void>;
     compact(instructions?: string): Promise<boolean>;
+    configure(patch: TaskConfigurationPatch): Promise<boolean>;
     loadEarlier(): Promise<void>;
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
     send(): Promise<void>;
     start(draft: string, configuration: TaskConfigurationPatch): Promise<void>;
-    setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
     setStartMode(mode: TaskStartMode): void;
-    stageConfiguration(patch: TaskConfigurationPatch): void;
     stop(): Promise<void>;
   };
   readonly projectActions: {

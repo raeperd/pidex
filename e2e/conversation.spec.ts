@@ -442,7 +442,9 @@ test("preserves edits made while slash compaction is pending", async ({
     status: "compacting",
     revision: Number(snapshot?.revision),
   });
-  await expect(page.getByRole("button", { name: "Queue" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
   if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
     await page.evaluate(
@@ -494,7 +496,10 @@ test("preserves edits made while slash compaction is pending", async ({
   }
 });
 
-test("ignores compact responses after navigating to another task", async ({ page, request }) => {
+test("isolates pending task operations while navigating between tasks", async ({
+  page,
+  request,
+}) => {
   await installFakeWebSocket(page);
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const opened = await rpcRequest<{ id: string }>(
@@ -541,7 +546,10 @@ test("ignores compact responses after navigating to another task", async ({ page
     totalProcessedTokens: 20,
     compactsAutomatically: true,
   };
+  const { promise: configurationPending, resolve: releaseConfiguration } =
+    Promise.withResolvers<void>();
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let configurationRequested = false;
   let compactRequested = false;
 
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -605,12 +613,42 @@ test("ignores compact responses after navigating to another task", async ({ page
       },
     });
   });
+  await page.route("**/api/rpc/chats/configure", async (route) => {
+    configurationRequested = true;
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await configurationPending;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...first.result,
+          thinkingLevel: input.thinkingLevel,
+          revision: Number(input.expectedRevision) + 1,
+        },
+      },
+    });
+  });
 
   await page.goto(`/tasks/${String(first.result.taskId)}`);
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
+  const thinking = page.getByLabel("Thinking level");
+  const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
+  const configurationResponse = page.waitForResponse("**/api/rpc/chats/configure");
+  await thinking.selectOption(nextThinking);
+  await expect.poll(() => configurationRequested).toBe(true);
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(thinking).toBeEnabled();
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(thinking).toBeDisabled();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(thinking).toBeEnabled();
+  releaseConfiguration();
+  await configurationResponse;
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
   await prompt.fill("/compact");
@@ -621,6 +659,13 @@ test("ignores compact responses after navigating to another task", async ({ page
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await prompt.fill("Message for the second task");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(prompt).toHaveValue("Message for the second task");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   releaseCompaction();
@@ -747,8 +792,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
   await expect(searchInput).toHaveCount(0);
   if (testInfo.project.name === "mobile") await page.keyboard.press("Escape");
 
-  await page.getByLabel("Thinking level").focus();
-  await page.keyboard.press("Tab");
+  await contextMeter.focus();
   await expect(contextMeter).toBeFocused();
   await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
 
@@ -796,7 +840,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
     .toBe(true);
 });
 
-test("stages configuration without overwriting the next draft", async ({
+test("persists idle configuration immediately without overwriting the draft", async ({
   page,
   request,
 }, testInfo) => {
@@ -905,27 +949,31 @@ test("stages configuration without overwriting the next draft", async ({
   await expect(contextDetails).toContainText("Context Window");
   await expect(contextDetails).toContainText("34% · 87k/258k");
   await expect(contextDetails).toContainText("Total processed2.5m");
+  await expect(contextDetails).not.toContainText("Session cost");
   await expect(contextDetails).toContainText("Pi automatically compacts its context when needed.");
   await expect(contextDetails.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "34");
 
   const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
   await thinking.selectOption(nextThinking);
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
-  expect(mutations).toEqual([]);
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
+  await expect(thinking).toBeDisabled();
+  await prompt.fill("Draft while configuration is pending");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  if (testInfo.project.name !== "mobile") await prompt.press("Enter");
+  expect(mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  releaseConfiguration();
+  await expect(thinking).toBeEnabled();
+  await expect(thinking).toHaveValue(nextThinking);
+  await expect(prompt).toHaveValue("Draft while configuration is pending");
 
-  await prompt.fill("Start the first turn");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await page.getByRole("button", { name: "Send" }).click();
-  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
-  await prompt.fill("Draft the next turn while configuration is pending");
-  releaseConfiguration();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
   expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: nextThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
-  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
-  await expect(prompt).toHaveValue("Draft the next turn while configuration is pending");
 
   mutations.length = 0;
   await emitServerEvent(page, {
@@ -942,29 +990,19 @@ test("stages configuration without overwriting the next draft", async ({
     },
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
-  await expect(thinking).toBeEnabled();
+  await expect(thinking).toBeDisabled();
   await expect(contextMeter).toHaveRole("button");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
-  const stagedThinking = nextThinking === "high" ? "medium" : "high";
-  await thinking.selectOption(stagedThinking);
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
-  expect(mutations).toEqual([]);
+  await expect(page.getByLabel("Delivery mode")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  await prompt.fill("Start the next turn");
+  if (testInfo.project.name !== "mobile") await prompt.press("Enter");
+  await expect(prompt).toHaveValue("Start the next turn");
+  expect(mutations).toHaveLength(0);
+  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
 
-  await page.getByLabel("Delivery mode").selectOption("steer");
-  await prompt.fill("/compact");
-  if (testInfo.project.name === "mobile") await page.getByRole("button", { name: "Queue" }).click();
-  else await prompt.press("Enter");
-  await expect.poll(() => mutations).toHaveLength(1);
-  expect(mutations[0]).toEqual(
-    expect.objectContaining({
-      procedure: "send",
-      input: expect.objectContaining({ delivery: "steer" }),
-    }),
-  );
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
-
-  mutations.length = 0;
   await emitServerEvent(page, {
     type: "run_status",
     eventId: 3,
@@ -972,11 +1010,17 @@ test("stages configuration without overwriting the next draft", async ({
     status: "idle",
     revision: 50,
   });
-  await prompt.fill("Start the next turn");
+  await expect(thinking).toBeEnabled();
+  await expect(prompt).toHaveValue("Start the next turn");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  const updatedThinking = nextThinking === "high" ? "medium" : "high";
+  await thinking.selectOption(updatedThinking);
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: updatedThinking }));
+
   await page.getByRole("button", { name: "Send" }).click();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
-  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: stagedThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });

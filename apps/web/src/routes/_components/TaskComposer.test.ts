@@ -80,6 +80,28 @@ describe("slashCommandSuggestions", () => {
     expect(renderComposer("/", true)).not.toContain('role="listbox"');
   });
 
+  it("shows only the stop action while active, even when a draft is present", () => {
+    const body = renderComposer("Send this after the response", true);
+
+    expect(body).toContain('aria-label="Stop"');
+    expect(body).not.toContain('aria-label="Delivery mode"');
+    expect(body).not.toContain('aria-label="Queue"');
+    expect(body).not.toContain('aria-label="Send"');
+  });
+
+  it("does not give the disabled start mode control hover styles", () => {
+    expect(renderComposer("", true)).toContain(
+      "enabled:hover:bg-secondary enabled:hover:text-foreground",
+    );
+  });
+
+  it("renders context details without a stats strip or session cost", () => {
+    const body = renderComposer("", false);
+
+    expect(body).not.toContain('data-testid="composer-stats"');
+    expect(body).not.toContain("Session cost");
+  });
+
   it("completes a selected command in the composer", () => {
     expect(completeSlashCommand({ name: "compact" })).toBe("/compact ");
   });
@@ -98,28 +120,40 @@ function renderComposer(draft: string, active: boolean) {
       clearQueue: async () => {},
       commands: [],
       compact: async () => true,
+      compactPending: false,
+      configure: async () => true,
+      configurationPending: false,
       connection: "connected",
+      contextUsage: {
+        tokens: 68_000,
+        contextWindow: 272_000,
+        percent: 25,
+        totalProcessedTokens: 3_350,
+        compactsAutomatically: true,
+      },
       creatingTask: false,
-      delivery: "steer",
       draft,
       followUpCount: 0,
-      hasConfigurationDraft: false,
-      models: [],
+      models: [
+        {
+          id: "openai/gpt-5.6-sol",
+          provider: "openai",
+          name: "GPT-5.6 Sol",
+          reasoning: true,
+        },
+      ],
       persistDraft: () => {},
       projectName: "pidex",
       requiresAcknowledgement: false,
       runStatus: active ? "running" : "idle",
-      selectedModel: "",
-      selectedThinkingLevel: "low",
+      selectedModel: "openai/gpt-5.6-sol",
+      selectedThinkingLevel: "high",
       send: async () => {},
       setStartMode: () => {},
-      stageConfiguration: () => {},
       startMode: "local",
       startModeEditable: true,
-      stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
       steeringCount: 0,
       stop: async () => {},
-      taskId: "task_test",
     },
   }).body;
 }

@@ -91,7 +91,7 @@ test("scales mobile task and composer targets while preserving responsive densit
           transcriptTotal: 0,
           steeringQueue: [],
           followUpQueue: [],
-          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
         },
       },
     });
@@ -141,10 +141,7 @@ test("scales mobile task and composer targets while preserving responsive densit
   const model = page.getByLabel("Model");
   const send = page.getByRole("button", { name: "Send" });
   await expect(model).toHaveCSS("font-size", "11px");
-  await expect(page.getByTestId("composer-stats")).toHaveCSS(
-    "font-size",
-    mobile ? "10.5px" : "9.5px",
-  );
+  await expect(page.getByTestId("composer-stats")).toHaveCount(0);
   await expect(send).toHaveCSS("width", mobile ? "40px" : "34px");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
@@ -169,9 +166,7 @@ test("scales mobile task and composer targets while preserving responsive densit
     "width",
     mobile ? "38px" : "34px",
   );
-  await expect(page.getByRole("button", { name: "Queue" })).toHaveCSS(
-    "height",
-    mobile ? "38px" : "34px",
-  );
-  await expect(page.getByLabel("Delivery mode")).toHaveCSS("font-size", mobile ? "11px" : "10.5px");
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByLabel("Delivery mode")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
 });

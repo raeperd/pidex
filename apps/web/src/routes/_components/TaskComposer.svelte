@@ -64,12 +64,9 @@
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
+  import type { Attachment } from "svelte/attachments";
   import type { ConnectionState } from "./AppShellConnection";
-  import type {
-    TaskConfigurationPatch,
-    TaskDelivery,
-    TaskStartMode,
-  } from "./AppShellContext.svelte";
+  import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
 
@@ -81,13 +78,14 @@
     clearQueue,
     commands,
     compact,
+    compactPending,
+    configure,
+    configurationPending,
     connection,
     contextUsage,
     creatingTask,
-    delivery = $bindable(),
     draft = $bindable(),
     followUpCount,
-    hasConfigurationDraft,
     models,
     persistDraft,
     projectName,
@@ -97,25 +95,23 @@
     selectedThinkingLevel,
     send,
     setStartMode,
-    stageConfiguration,
     startMode,
     startModeEditable,
-    stats,
     steeringCount,
     stop,
-    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
     commands: Workspace["commands"];
     compact: (instructions?: string) => Promise<boolean>;
+    compactPending: boolean;
+    configure: (patch: TaskConfigurationPatch) => Promise<boolean>;
+    configurationPending: boolean;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
     creatingTask: boolean;
-    delivery: TaskDelivery;
     draft: string;
     followUpCount: number;
-    hasConfigurationDraft: boolean;
     models: Workspace["models"];
     persistDraft: () => void;
     projectName: string;
@@ -125,26 +121,22 @@
     selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     send: () => Promise<void>;
     setStartMode: (mode: TaskStartMode) => void;
-    stageConfiguration: (patch: TaskConfigurationPatch) => void;
     startMode: TaskStartMode;
     startModeEditable: boolean;
-    stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;
-    taskId: string;
   } = $props();
 
-  let promptInput = $state<HTMLTextAreaElement>();
+  let promptInput: HTMLTextAreaElement | undefined;
   let startMenuOpen = $state(false);
   let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
-  let compactPendingByTask = $state<Record<string, boolean>>({});
-  let compactPending = $derived(compactPendingByTask[taskId] ?? false);
   let idleSubmissionDisabled = $derived(
     !draft.trim() ||
       !models.length ||
       connection !== "connected" ||
       requiresAcknowledgement ||
       creatingTask ||
+      configurationPending ||
       compactPending,
   );
   const componentId = $props.id();
@@ -167,6 +159,13 @@
     promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
   }
 
+  const attachPromptInput: Attachment<HTMLTextAreaElement> = (element) => {
+    promptInput = element;
+    return () => {
+      if (promptInput === element) promptInput = undefined;
+    };
+  };
+
   function draftInput() {
     persistDraft();
     resize();
@@ -178,6 +177,25 @@
     persistDraft();
     resize();
     promptInput?.focus();
+  }
+
+  async function updateConfiguration(patch: TaskConfigurationPatch) {
+    if (configurationPending || active || creatingTask || connection !== "connected") return;
+    await configure(patch);
+  }
+
+  function updateThinkingLevel(value: string) {
+    if (
+      value !== "off" &&
+      value !== "minimal" &&
+      value !== "low" &&
+      value !== "medium" &&
+      value !== "high" &&
+      value !== "xhigh" &&
+      value !== "max"
+    )
+      return;
+    void updateConfiguration({ thinkingLevel: value });
   }
 
   async function moveCommandSelection(direction: -1 | 1) {
@@ -193,19 +211,12 @@
   async function submitDraft() {
     if (compactPending) return;
     const submittedDraft = draft;
-    const submittedTaskId = taskId;
-    const isCompaction = parseCompactCommand(submittedDraft) !== undefined;
-    if (isCompaction) compactPendingByTask[submittedTaskId] = true;
-    try {
-      const result = await submitComposerDraft(submittedDraft, { compact, send });
-      if (result !== "compact" || draft !== submittedDraft) return;
-      draft = "";
-      persistDraft();
-      await tick();
-      resize();
-    } finally {
-      if (isCompaction) delete compactPendingByTask[submittedTaskId];
-    }
+    const result = await submitComposerDraft(submittedDraft, { compact, send });
+    if (result !== "compact" || draft !== submittedDraft) return;
+    draft = "";
+    persistDraft();
+    await tick();
+    resize();
   }
 
   function keydown(event: KeyboardEvent) {
@@ -230,8 +241,8 @@
     }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      if (compactPending || (!active && idleSubmissionDisabled)) return;
-      void (active ? send() : submitDraft());
+      if (active || compactPending || idleSubmissionDisabled) return;
+      void submitDraft();
     }
   }
 
@@ -319,7 +330,7 @@
       <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
       <div class="relative flex-none" data-start-menu>
         <button
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-[11px] font-medium text-muted hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:opacity-70"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-[11px] font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
           onclick={() => (startMenuOpen = !startMenuOpen)}
           disabled={!startModeEditable || active || creatingTask}
           aria-label={`Start in ${startModeLabel}`}
@@ -366,7 +377,7 @@
     </div>
     <textarea
       class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
-      bind:this={promptInput}
+      {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
       onkeydown={keydown}
@@ -374,7 +385,7 @@
       placeholder={connection !== "connected"
         ? "Draft locally while the host reconnects…"
         : active
-          ? "Add guidance while Pi works…"
+          ? "Draft your next message…"
           : "Ask Pi to work on this project…"}
       aria-autocomplete="list"
       aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
@@ -401,8 +412,12 @@
             ]}
             aria-label="Model"
             value={selectedModel}
-            onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-            disabled={!models.length}
+            onchange={(event) => void updateConfiguration({ model: event.currentTarget.value })}
+            disabled={!models.length ||
+              active ||
+              creatingTask ||
+              configurationPending ||
+              connection !== "connected"}
           >
             {#each models as model (model.id)}<option value={model.id}>{model.name}</option>{/each}
           </select>
@@ -423,10 +438,8 @@
             ]}
             aria-label="Thinking level"
             value={selectedThinkingLevel}
-            onchange={(event) =>
-              stageConfiguration({
-                thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
-              })}
+            onchange={(event) => updateThinkingLevel(event.currentTarget.value)}
+            disabled={active || creatingTask || configurationPending || connection !== "connected"}
           >
             <option value="off">Off</option><option value="minimal">Minimal</option><option
               value="low">Low</option
@@ -435,32 +448,15 @@
             ><option value="max">Max</option>
           </select>
         </label>
-        {#if hasConfigurationDraft}<span
-            class="ml-1 flex-none rounded-full bg-primary/12 px-1.75 py-0.75 text-[10px] font-[650] tracking-[0.01em] whitespace-nowrap text-primary max-[560px]:text-[10.5px]"
-            >Next turn</span
-          >{/if}
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
         {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
         {#if active}
-          <select
-            class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground max-[900px]:h-9 max-[900px]:text-[11px]"
-            bind:value={delivery}
-            aria-label="Delivery mode"
-            ><option value="steer">Steer</option><option value="follow-up">Follow-up</option
-            ></select
-          >
           <button
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
             onclick={stop}
             disabled={connection !== "connected"}
             aria-label="Stop"><Icon name="stop" /></button
-          >
-          <button
-            class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover max-[900px]:h-9.5 disabled:opacity-40"
-            onclick={send}
-            disabled={!draft.trim() || connection !== "connected" || compactPending}
-            aria-label="Queue">Queue</button
           >
         {:else}
           <button
@@ -472,15 +468,5 @@
         {/if}
       </div>
     </div>
-  </div>
-  <div
-    class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[900px]:text-[10.5px] max-[560px]:pt-1"
-    data-testid="composer-stats"
-  >
-    <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-      >{stats.messages} messages · {stats.tokens.toLocaleString()} tokens · ${stats.cost.toFixed(
-        4,
-      )}</span
-    >
   </div>
 </footer>

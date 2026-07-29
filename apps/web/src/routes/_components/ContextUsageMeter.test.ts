@@ -22,5 +22,6 @@ describe("ContextUsageMeter", () => {
     expect(body).toContain('aria-expanded="false"');
     expect(body).toContain('role="tooltip"');
     expect(body).toContain('aria-hidden="true"');
+    expect(body).not.toContain("Session cost");
   });
 });
