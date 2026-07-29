@@ -133,6 +133,45 @@ describe.sequential("HTTP API endpoints", () => {
     });
   });
 
+  it("rejects invalid oRPC transport requests", async () => {
+    const bootstrap = await publicApi.system.bootstrap({});
+    const invalid = await rawRpcRequest(httpUrl, "chats/create", {}, bootstrap.csrfToken);
+    expect(invalid.response.status).toBe(400);
+    expect(invalid.result).toEqual(
+      expect.objectContaining({ code: "BAD_REQUEST", message: "Input validation failed" }),
+    );
+
+    const malformed = await fetch(`${httpUrl}/api/rpc/chats/create`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-pidex-csrf": bootstrap.csrfToken,
+      },
+      body: "{",
+    });
+    expect(malformed.status).toBe(400);
+    await expect(rawRpcResult(malformed)).resolves.toEqual(
+      expect.objectContaining({ code: "BAD_REQUEST" }),
+    );
+
+    const missingCsrf = await rawRpcRequest(httpUrl, "chats/create", {
+      workspaceId: "workspace_12345",
+    });
+    expect(missingCsrf.response.status).toBe(403);
+    expect(missingCsrf.result).toEqual(
+      expect.objectContaining({ code: "csrf", message: "Invalid CSRF token" }),
+    );
+
+    const oversized = await rawRpcRequest(
+      httpUrl,
+      "chats/create",
+      { workspaceId: "x".repeat(70 * 1024) },
+      bootstrap.csrfToken,
+    );
+    expect(oversized.response.status).toBe(413);
+    expect(oversized.result).toEqual(expect.objectContaining({ code: "PAYLOAD_TOO_LARGE" }));
+  });
+
   it("workspaces.open", async () => {
     const result = await api.workspaces.open({ path: workspacePath, remember: true });
 
@@ -445,6 +484,29 @@ async function requestJson(url: string, headers: Record<string, string>) {
     req.once("error", reject);
     req.end();
   });
+}
+
+async function rawRpcRequest(
+  origin: string,
+  procedure: string,
+  input: unknown,
+  csrfToken?: string,
+) {
+  const headers = new Headers({ "content-type": "application/json" });
+  if (csrfToken) headers.set("x-pidex-csrf", csrfToken);
+  const response = await fetch(`${origin}/api/rpc/${procedure}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ json: input }),
+  });
+  return { response, result: await rawRpcResult(response) };
+}
+
+async function rawRpcResult(response: Response) {
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !("json" in payload))
+    throw new Error("Expected an oRPC JSON envelope");
+  return payload.json;
 }
 
 function preserveEnvironment<const Key extends string>(keys: readonly Key[]) {

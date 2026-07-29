@@ -94,6 +94,10 @@ pnpm start          # Run the built browser app and server
 pnpm start:desktop  # Run the built desktop app
 ```
 
+Tests live beside the code they exercise and use real local dependencies when they are fast and
+deterministic. Outside-in Playwright workflows live in `e2e/`, grouped by product behavior; shared
+browser helpers stay in `e2e/support.ts`.
+
 To inspect the Pi SDK without sending a model request:
 
 ```sh

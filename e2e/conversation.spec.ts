@@ -1,0 +1,829 @@
+import { expect, test, type Page } from "@playwright/test";
+import { basename } from "node:path";
+import {
+  emitServerEvent,
+  installFakeWebSocket,
+  openTasks,
+  rememberWorkspace,
+  rpcRequest,
+} from "./support";
+
+test("renders assistant markdown as safe interactive components", async ({
+  context,
+  page,
+  request,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_markdown_e2e",
+      text: `# Rendered result
+
+**Safe Markdown**
+
+Entity text: AT&amp;T &copy;
+
+- [x] component renderer
+
+| Name | State |
+| --- | --- |
+| Markdown | ready |
+
+\`\`\`ts title="src/example.ts"
+const answer = 42;
+\`\`\`
+
+<script>globalThis.compromised = true</script>
+
+![tracker](https://tracker.example/pixel.png)
+
+[unsafe](javascript:alert(1))`,
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
+  await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
+  await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
+  await expect(page.getByRole("listitem").filter({ hasText: "component renderer" })).toHaveText(
+    "component renderer",
+  );
+  await expect(page.getByRole("region", { name: "Scrollable table" })).toContainText(
+    "Markdownready",
+  );
+  await expect(page.getByTitle("src/example.ts")).toBeVisible();
+  await expect(page.getByText("const answer = 42;", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Wrap lines" }).click();
+  await expect(page.getByRole("button", { name: "Disable line wrap" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("<script>globalThis.compromised = true</script>")).toBeVisible();
+  await expect(page.getByText("[remote image disabled: tracker]", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "unsafe" })).toHaveCount(0);
+  expect(await page.evaluate(() => "compromised" in globalThis)).toBe(false);
+
+  await expect(page.locator('time[datetime="2026-07-27T00:00:00.000Z"]')).toBeVisible();
+  await page.getByRole("button", { name: "Copy response" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("# Rendered result");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 2,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_invalid_timestamp_e2e",
+      text: "Response with a malformed timestamp",
+      complete: true,
+      timestamp: "not-a-date",
+    },
+  });
+
+  await expect(
+    page.getByText("Response with a malformed timestamp", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('time[datetime="not-a-date"]')).toHaveCount(0);
+});
+
+test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+
+  const chatId = String(snapshot?.chatId);
+  const toolItem = {
+    type: "tool",
+    id: "tool_bash_e2e",
+    name: "bash",
+    argumentSummary: JSON.stringify({ command: "ls -la" }),
+    preview: "",
+    truncated: false,
+  };
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 1,
+    chatId,
+    item: { ...toolItem, state: "running" },
+  });
+  const toolBlock = page.getByRole("button", { name: "$ ls -la" });
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByText(/^Elapsed \d+\.\d+s$/)).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 2,
+    chatId,
+    item: {
+      ...toolItem,
+      state: "error",
+      preview: JSON.stringify({
+        content: [
+          {
+            type: "text",
+            text: ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+          },
+        ],
+      }),
+    },
+  });
+
+  const hint = page.getByText("earlier lines, click to expand");
+  await expect(hint).toContainText("2 earlier lines");
+  await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
+  await expect(page.locator(".tool-call__output")).not.toContainText("one");
+  await expect(page.locator(".tool-call__output")).toContainText("seven");
+  await expect(page.locator(".tool-call__output")).not.toContainText('"type": "text"');
+
+  await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
+  await toolBlock.click();
+  await expect(page.locator(".tool-call__output")).toContainText("one");
+  await expect(hint).toHaveCount(0);
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 3,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_running_e2e",
+      argumentSummary: JSON.stringify({ command: "sleep 10" }),
+      state: "running",
+    },
+  });
+
+  // A tool whose run was never observed reports no duration rather than a fabricated 0.0s.
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 4,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_restored_e2e",
+      argumentSummary: JSON.stringify({ command: "pnpm build" }),
+      state: "success",
+      preview: "done",
+    },
+  });
+  const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
+  await expect(restored).toBeVisible();
+  await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 5,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_read_e2e",
+      name: "read",
+      argumentSummary: JSON.stringify({ path: "README.md" }),
+      state: "success",
+      preview: JSON.stringify({ content: [{ type: "text", text: "project readme" }] }),
+    },
+  });
+
+  await emitServerEvent(page, {
+    type: "tool",
+    eventId: 6,
+    chatId,
+    item: {
+      ...toolItem,
+      id: "tool_grep_e2e",
+      name: "grep",
+      argumentSummary: JSON.stringify({ pattern: "TODO", path: "src" }),
+      state: "success",
+      preview: "no matches",
+    },
+  });
+
+  const earlierTools = page.getByRole("button", { name: "Show 1 previous tool call" });
+  await expect(earlierTools).toBeVisible();
+  await expect(toolBlock).toBeVisible();
+  await expect(page.getByRole("button", { name: "$ sleep 10" })).toBeVisible();
+  await expect(restored).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read README.md" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Searched TODO · src" })).toBeVisible();
+  await earlierTools.click();
+  await expect(page.getByRole("button", { name: "Hide 1 previous tool call" })).toBeVisible();
+  await expect(restored).toBeVisible();
+});
+
+test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  let snapshot: Record<string, unknown> | undefined;
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+
+  const chatId = String(snapshot?.chatId);
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "",
+      complete: false,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  const deltas = [
+    ["text", "# Streamed"],
+    ["thinking", "weighing "],
+    ["text", " heading\n\nBody "],
+    ["thinking", "options"],
+    ["text", "text."],
+  ] as const;
+  let eventId = 2;
+  for (const [channel, delta] of deltas) {
+    await emitServerEvent(page, {
+      type: "text_delta",
+      eventId: eventId++,
+      chatId,
+      itemId: "assistant_stream_e2e",
+      channel,
+      delta,
+    });
+  }
+
+  // Every delta lands in order even though a frame batches several of them together.
+  await expect(page.getByRole("heading", { name: "Streamed heading" })).toBeVisible();
+  await expect(page.getByText("Body text.", { exact: true })).toBeVisible();
+  await page.getByText("Thinking", { exact: true }).click();
+  await expect(page.locator("details pre")).toHaveText("weighing options");
+
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: eventId++,
+    chatId,
+    item: {
+      type: "assistant",
+      id: "assistant_stream_e2e",
+      text: "# Streamed heading\n\nBody text.",
+      thinking: "weighing options",
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+
+  await expect(page.getByText("Thought", { exact: true })).toBeVisible();
+  await expect(page.getByText("Thinking", { exact: true })).toHaveCount(0);
+});
+
+test("preserves edits made while slash compaction is pending", async ({
+  page,
+  request,
+}, testInfo) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let compactInput: Record<string, unknown> | undefined;
+  let compactRequests = 0;
+  let queuedRequests = 0;
+  let snapshot: Record<string, unknown> | undefined;
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...payload.json,
+          commands: Array.from({ length: 24 }, (_, index) => ({
+            name: `command-${String(index + 1).padStart(2, "0")}`,
+            description: `Workspace command ${index + 1}`,
+          })),
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+  await page.route("**/api/rpc/chats/compact", async (route) => {
+    if (!snapshot) throw new Error("Expected a chat before compaction");
+    compactRequests++;
+    compactInput = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await compactionPending;
+    snapshot = {
+      ...snapshot,
+      revision: Number(compactInput.expectedRevision) + 1,
+      contextUsage: {
+        tokens: 10,
+        contextWindow: 100,
+        percent: 10,
+        totalProcessedTokens: 10,
+        compactsAutomatically: true,
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: snapshot },
+    });
+  });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    queuedRequests++;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { accepted: false, reason: "Compaction is active" } },
+    });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+
+  const prompt = page.getByLabel("Prompt");
+  await expect(prompt).toBeVisible();
+  await prompt.fill("/com");
+  await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
+  await prompt.press("Shift+Enter");
+  await expect(prompt).toHaveValue("/com\n");
+  await prompt.fill("/com");
+  await prompt.press("Shift+Tab");
+  await expect(prompt).toHaveValue("/com");
+  await prompt.focus();
+  await prompt.fill("/");
+  for (let index = 0; index < 18; index++) await prompt.press("ArrowDown");
+  const selectedCommand = page
+    .getByRole("listbox", { name: "Commands" })
+    .getByRole("option", { selected: true });
+  await expect(selectedCommand).toBeVisible();
+  expect(
+    await selectedCommand.evaluate((option) => {
+      const list = option.closest('[role="listbox"]');
+      if (!list) return false;
+      const optionBounds = option.getBoundingClientRect();
+      const listBounds = list.getBoundingClientRect();
+      return optionBounds.top >= listBounds.top && optionBounds.bottom <= listBounds.bottom;
+    }),
+  ).toBe(true);
+  await prompt.fill("/compact Preserve decisions\nand constraints");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactInput?.instructions).toBe("Preserve decisions\nand constraints");
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 1,
+    chatId: String(snapshot?.chatId),
+    status: "compacting",
+    revision: Number(snapshot?.revision),
+  });
+  await expect(page.getByRole("button", { name: "Queue" })).toBeDisabled();
+  if (testInfo.project.name !== "mobile") {
+    await prompt.press("Enter");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+  }
+  expect(compactRequests).toBe(1);
+  expect(queuedRequests).toBe(0);
+
+  await prompt.fill("Draft typed while compaction is pending");
+  releaseCompaction();
+  await expect(page.getByLabel("Context window 10% used")).toBeVisible();
+  await expect(prompt).toHaveValue("Draft typed while compaction is pending");
+
+  await prompt.fill(
+    "/compact Preserve decisions\nand constraints\nacross multiple sections\nincluding architecture\ntesting strategy\nknown risks\nfollow-up work\nand final outcomes",
+  );
+  const expandedHeight = await prompt.evaluate((element) => element.getBoundingClientRect().height);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactRequests).toBe(2);
+  await expect(prompt).toHaveValue("");
+  await expect
+    .poll(() => prompt.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeLessThan(expandedHeight);
+
+  if (testInfo.project.name !== "mobile") {
+    await emitServerEvent(page, {
+      type: "run_status",
+      eventId: 2,
+      chatId: String(snapshot?.chatId),
+      status: "idle",
+      revision: Number(snapshot?.revision),
+      run: {
+        runId: "run_requires_acknowledgement",
+        actionId: "action_requires_acknowledgement",
+        status: "accepted",
+        requiresAcknowledgement: true,
+      },
+    });
+    await prompt.fill("/compact");
+    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    await prompt.press("Enter");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(compactRequests).toBe(2);
+  }
+});
+
+test("ignores compact responses after navigating to another task", async ({ page, request }) => {
+  await installFakeWebSocket(page);
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const first = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  const second = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  const now = new Date().toISOString();
+  const sessions = [
+    {
+      id: String(first.result.taskId),
+      name: "First task",
+      firstMessage: "",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 0,
+    },
+    {
+      id: String(second.result.taskId),
+      name: "Second task",
+      firstMessage: "",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 0,
+    },
+  ];
+  const secondUsage = {
+    tokens: 20,
+    contextWindow: 100,
+    percent: 20,
+    totalProcessedTokens: 20,
+    compactsAutomatically: true,
+  };
+  const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let compactRequested = false;
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    if (payload.json.id !== opened.result.id) {
+      await route.fulfill({ response });
+      return;
+    }
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...payload.json,
+          sessions,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/sessions", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (input.workspaceId !== opened.result.id) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { sessions } },
+    });
+  });
+  await page.route("**/api/rpc/chats/resume", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json:
+          input.taskId === second.result.taskId
+            ? { ...payload.json, contextUsage: secondUsage }
+            : payload.json,
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/compact", async (route) => {
+    compactRequested = true;
+    await compactionPending;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...first.result,
+          revision: Number(first.result.revision) + 1,
+          contextUsage: { ...secondUsage, tokens: 10, percent: 10, totalProcessedTokens: 10 },
+        },
+      },
+    });
+  });
+
+  await page.goto(`/tasks/${String(first.result.taskId)}`);
+  const prompt = page.getByLabel("Prompt");
+  await expect(prompt).toBeVisible();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await prompt.fill("/compact");
+  const compactResponse = page.waitForResponse("**/api/rpc/chats/compact");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => compactRequested).toBe(true);
+
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await prompt.fill("Message for the second task");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  await expect(page.getByLabel("Context window 20% used")).toBeVisible();
+  releaseCompaction();
+  await compactResponse;
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+
+  await expect(page.getByLabel("Context window 20% used")).toBeVisible();
+  await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
+});
+
+test("stages configuration without overwriting the next draft", async ({
+  page,
+  request,
+}, testInfo) => {
+  const workspaceName = basename(process.cwd());
+  await installFakeWebSocket(page);
+  const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
+  const { promise: configurationPending, resolve: releaseConfiguration } =
+    Promise.withResolvers<void>();
+  let snapshot: Record<string, unknown> | undefined;
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...workspace,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = payload.json;
+    await route.fulfill({ response, json: payload });
+  });
+  await page.route("**/api/rpc/chats/configure", async (route) => {
+    if (!snapshot) throw new Error("Expected a chat before configuration");
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    mutations.push({ procedure: "configure", input });
+    await configurationPending;
+    snapshot = {
+      ...snapshot,
+      ...(typeof input.model === "string" ? { model: input.model } : {}),
+      ...(typeof input.thinkingLevel === "string" ? { thinkingLevel: input.thinkingLevel } : {}),
+      revision: Number(input.expectedRevision) + 1,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: snapshot },
+    });
+  });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    if (!snapshot) throw new Error("Expected a chat before sending");
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    mutations.push({ procedure: "send", input });
+    const revision = Number(input.expectedRevision) + 1;
+    snapshot = { ...snapshot, revision };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          accepted: true,
+          actionId: input.actionId,
+          runId: "run_e2e_12345",
+          status: "accepted",
+          revision,
+          replayed: false,
+        },
+      },
+    });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
+  await expect(newTaskButton).toBeEnabled();
+  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+
+  const prompt = page.getByLabel("Prompt");
+  const thinking = page.getByLabel("Thinking level");
+  await expect(prompt).toBeVisible();
+
+  const chatId = String(snapshot?.chatId);
+  const contextUsage = {
+    tokens: 87_000,
+    contextWindow: 258_000,
+    percent: 33.72093023255814,
+    totalProcessedTokens: 2_500_000,
+    compactsAutomatically: true,
+  };
+  snapshot = { ...snapshot, contextUsage };
+  await emitServerEvent(page, {
+    type: "context_usage",
+    eventId: 1,
+    chatId,
+    usage: contextUsage,
+  });
+  const contextMeter = page.locator(".context-meter__trigger");
+  await expect(contextMeter).toBeVisible();
+  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
+  await contextMeter.hover();
+  const contextDetails = page.getByRole("tooltip");
+  await expect(contextDetails).toHaveCSS("opacity", "1");
+  await expect(contextDetails).toContainText("Context Window");
+  await expect(contextDetails).toContainText("34% · 87k/258k");
+  await expect(contextDetails).toContainText("Total processed2.5m");
+  await expect(contextDetails).toContainText("Pi automatically compacts its context when needed.");
+  await expect(contextDetails.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "34");
+
+  const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
+  await thinking.selectOption(nextThinking);
+  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
+  expect(mutations).toEqual([]);
+
+  await prompt.fill("Start the first turn");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  await prompt.fill("Draft the next turn while configuration is pending");
+  releaseConfiguration();
+  await expect
+    .poll(() => mutations.map(({ procedure }) => procedure))
+    .toEqual(["configure", "send"]);
+  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: nextThinking }));
+  expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
+  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
+  await expect(prompt).toHaveValue("Draft the next turn while configuration is pending");
+
+  mutations.length = 0;
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 2,
+    chatId,
+    status: "running",
+    revision: 40,
+    run: {
+      runId: "run_e2e_12345",
+      actionId: "action_e2e_12345",
+      status: "running",
+      requiresAcknowledgement: false,
+    },
+  });
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(thinking).toBeEnabled();
+  await expect(contextMeter).toHaveRole("img");
+  await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
+
+  const stagedThinking = nextThinking === "high" ? "medium" : "high";
+  await thinking.selectOption(stagedThinking);
+  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
+  expect(mutations).toEqual([]);
+
+  await page.getByLabel("Delivery mode").selectOption("steer");
+  await prompt.fill("/compact");
+  if (testInfo.project.name === "mobile") await page.getByRole("button", { name: "Queue" }).click();
+  else await prompt.press("Enter");
+  await expect.poll(() => mutations).toHaveLength(1);
+  expect(mutations[0]).toEqual(
+    expect.objectContaining({
+      procedure: "send",
+      input: expect.objectContaining({ delivery: "steer" }),
+    }),
+  );
+  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
+
+  mutations.length = 0;
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 3,
+    chatId,
+    status: "idle",
+    revision: 50,
+  });
+  await prompt.fill("Start the next turn");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect
+    .poll(() => mutations.map(({ procedure }) => procedure))
+    .toEqual(["configure", "send"]);
+  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: stagedThinking }));
+  expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
+});
+
+async function waitForFakeWebSocket(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              pidexTestSocket?: WebSocket;
+            }
+          ).pidexTestSocket?.readyState,
+      ),
+    )
+    .toBe(1);
+}
