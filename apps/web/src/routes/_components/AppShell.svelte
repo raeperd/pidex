@@ -1200,7 +1200,7 @@
         >
       </div>
       <button
-        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
+        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
         onclick={toggleSearch}
         aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
         aria-expanded={searchOpen}
@@ -1213,7 +1213,7 @@
 
     {#if searchOpen}
       <label
-        class="mx-0.5 mb-3 flex h-8.5 items-center gap-2 rounded-lg px-2 text-faint transition-colors hover:bg-sidebar-hover hover:text-muted focus-within:bg-sidebar-hover focus-within:text-muted"
+        class="mx-0.5 mb-3 flex h-8.5 items-center gap-2 rounded-lg px-2 text-faint transition-colors hover:bg-sidebar-hover hover:text-muted focus-within:bg-sidebar-hover focus-within:text-muted max-[900px]:h-10"
       >
         <Icon name="search" />
         <input
@@ -1236,7 +1236,7 @@
           ></span
         >
         <button
-          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 disabled:cursor-not-allowed disabled:opacity-40"
           onclick={openProjectPicker}
           disabled={projectOrderSaving}
           aria-label="Add project"
@@ -1291,7 +1291,7 @@
               {/if}
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing ${workspace?.id === project.id ? "text-foreground" : ""}`}
+                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${workspace?.id === project.id ? "text-foreground" : ""}`}
                   draggable={!projectOrderSaving}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
@@ -1314,15 +1314,15 @@
                     >{projectLabel(project)}</strong
                   >
                   {#if projectLoadingId === project.id}<span
-                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint"
+                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint max-[900px]:text-[10.5px]"
                       >•••</span
                     >{:else if loaded}<span
-                      class="flex-none font-mono text-[9.5px] leading-none text-faint"
+                      class="flex-none font-mono text-[9.5px] leading-none text-faint max-[900px]:text-[10.5px]"
                       >{loaded.sessions.length}</span
                     >{/if}
                 </button>
                 <button
-                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={() => newTaskInProject(project)}
                   disabled={chatLoading || projectOrderSaving || projectLoadingId === project.id}
                   aria-label={`New task in ${projectLabel(project)}`}
@@ -1337,16 +1337,22 @@
                   id={`project-${project.id}`}
                 >
                   {#if projectLoadingId === project.id && !loaded}
-                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">Loading tasks…</p>
+                    <p
+                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                    >
+                      Loading tasks…
+                    </p>
                   {:else if loaded && shownTasks.length === 0}
-                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">
+                    <p
+                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                    >
                       {search ? "No matching tasks." : "No tasks yet."}
                     </p>
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => navigateToTask(task.id)}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
@@ -1356,12 +1362,12 @@
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
                         >
                         {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
+                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500 max-[900px]:text-[10.5px]"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
                           >{:else}<time
-                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
+                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums max-[900px]:text-[10.5px]"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
                         <span
@@ -1371,7 +1377,7 @@
                     {/each}
                     {#if hiddenTasks > 0}
                       <button
-                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground"
+                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
                         onclick={() =>
                           (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
                         >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button
@@ -1409,7 +1415,7 @@
         </button>
       {/if}
       <button
-        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
+        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
         aria-label="Open tasks"
         aria-expanded={drawerOpen}
         aria-controls="tasks-drawer"
@@ -1434,7 +1440,7 @@
           </button>
         {/if}
         <button
-          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
+          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10"
           aria-label="Open tasks"
           aria-expanded={drawerOpen}
           aria-controls="tasks-drawer"
@@ -1461,7 +1467,7 @@
         {#if snapshot}
           <div class="flex gap-1">
             <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
               onclick={openRename}
               disabled={active}
               aria-label="Rename"
