@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "A focused desktop interface for Pi",
-  "author": "pidex contributors",
+  "author": "RaeCheol Park",
   "files": [
     "assets",
     "dist"
@@ -26,5 +26,5 @@
     "electron-builder": "26.15.6",
     "typescript": "catalog:"
   },
-  "productName": "Pidex"
+  "productName": "pidex"
 }

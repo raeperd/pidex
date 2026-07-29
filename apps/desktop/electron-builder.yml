@@ -1,5 +1,5 @@
 appId: com.raeperd.pidex
-productName: Pidex
+productName: pidex
 electronVersion: 41.5.0
 npmRebuild: false
 directories:
@@ -17,7 +17,7 @@ extraResources:
   - from: assets/icon.png
     to: icon.png
 mac:
-  artifactName: "Pidex-${version}-${arch}.${ext}"
+  artifactName: "pidex-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
   hardenedRuntime: false
   icon: icon.icns
