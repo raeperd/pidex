@@ -1318,6 +1318,11 @@
     localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
     void tick().then(taskViews.resizeComposer);
   }
+  function finishSidebarTransition(event: TransitionEvent) {
+    if (event.target !== event.currentTarget || event.propertyName !== "grid-template-columns")
+      return;
+    taskViews.resizeComposer();
+  }
   function constrainSidebarWidth(width: number) {
     return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
   }
@@ -1385,6 +1390,7 @@
   style:grid-template-columns={mobileViewport.current
     ? "minmax(0, 1fr)"
     : `${sidebarCollapsed ? 0 : sidebarWidth}px minmax(0, 1fr)`}
+  ontransitionend={finishSidebarTransition}
 >
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}

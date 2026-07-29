@@ -171,6 +171,51 @@ test("resizes, restores, and resets after mouse or keyboard collapse", async ({
   await expect(sidebar).toHaveCSS("width", "320px");
 });
 
+test("resizes the composer after an animated sidebar change", async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a fixed-width drawer");
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const created = await rpcRequest<{ taskId: string }>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  await page.setViewportSize({ width: 1000, height: 820 });
+  await page.goto(`/tasks/${created.result.taskId}`);
+
+  const sidebar = page.getByRole("complementary", { name: "Tasks" });
+  const resizeHandle = page.getByRole("slider", { name: "Resize sidebar" });
+  const prompt = page.getByLabel("Prompt");
+  await resizeHandle.press("Home");
+  await expect(sidebar).toHaveCSS("width", "120px");
+  await prompt.fill(
+    "Describe the implementation details and verification results for this resizable sidebar change, including pointer capture, keyboard controls, persisted widths, collapse thresholds, animation behavior, reduced motion support, focus management, mobile layout behavior, and the regression coverage used to keep every interaction working correctly.",
+  );
+  const wideHeight = await prompt.evaluate((element: HTMLTextAreaElement) => element.clientHeight);
+
+  await resizeHandle.press("End");
+  await expect(sidebar).toHaveCSS("width", "480px");
+  await expect
+    .poll(() =>
+      prompt.evaluate((element: HTMLTextAreaElement) =>
+        Math.abs(Number.parseFloat(element.style.height) - Math.min(element.scrollHeight, 210)),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+  expect(
+    await prompt.evaluate((element: HTMLTextAreaElement) => element.clientHeight),
+  ).toBeGreaterThan(wideHeight);
+});
+
 async function expectSidebarCollapsed(sidebar: Locator) {
   await expect(sidebar).toHaveAttribute("inert", "");
   await expect(sidebar).toHaveCSS("opacity", "0");
