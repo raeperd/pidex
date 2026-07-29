@@ -164,8 +164,7 @@
       ><span>{header.label}</span>
       {#if header.detail}<span class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}
           >{header.detail}</span
-        >{/if}{#if header.range}<span class="tool-call__range text-[var(--warning)]"
-          >{header.range}</span
+        >{/if}{#if header.range}<span class="tool-call__range text-[#DCDC1F]">{header.range}</span
         >{/if}{#if readOutputCollapsed}<span class="ml-[0.5ch] font-normal text-faint"
           >(click to expand)</span
         >{/if}</span
