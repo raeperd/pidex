@@ -43,6 +43,8 @@
     bind:draft={() => context.task.draft, context.taskActions.setDraft}
     active={context.task.active}
     clearQueue={context.taskActions.clearQueue}
+    commands={context.shell.workspace?.commands ?? []}
+    compact={context.taskActions.compact}
     connection={context.shell.connection}
     contextUsage={context.task.snapshot.contextUsage}
     followUpCount={context.task.snapshot.followUpQueue.length}
@@ -58,6 +60,7 @@
     stats={context.task.snapshot.stats}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
+    {taskId}
   />
 {:else}
   <section

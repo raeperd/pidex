@@ -88,7 +88,6 @@
   let projectDialogElement = $state<HTMLDialogElement>();
   let renameDialogElement = $state<HTMLDialogElement>();
   let renameValue = $state("");
-  let compactDialogElement = $state<HTMLDialogElement>();
   const mobileViewport = new MediaQuery("max-width: 900px");
   const api = new PidexApiClient();
   const snapshotCache = new TaskSnapshotCache();
@@ -243,6 +242,7 @@
       attachComposer: taskViews.attachComposer,
       attachTranscript: taskViews.attachTranscript,
       clearQueue,
+      compact,
       loadEarlier,
       loadToolOutput,
       persistDraft,
@@ -972,16 +972,18 @@
       error = cause instanceof Error ? cause.message : "Rename failed";
     }
   }
-  function openCompact() {
-    if (snapshot) void tick().then(() => compactDialogElement?.showModal());
-  }
-  async function compact() {
-    if (!snapshot) return;
+  async function compact(instructions?: string) {
+    if (!snapshot) return false;
+    const chatId = snapshot.chatId;
     try {
-      snapshot = await api.compact(snapshot.chatId, snapshot.revision);
-      compactDialogElement?.close();
+      const compacted = await api.compact(chatId, snapshot.revision, instructions);
+      if (snapshot?.chatId !== chatId) return false;
+      snapshot = compacted;
+      return true;
     } catch (cause) {
+      if (snapshot?.chatId !== chatId) return false;
       error = cause instanceof Error ? cause.message : "Compaction failed";
+      return false;
     }
   }
   async function answerDialog(dialog: ExtensionDialog, cancelled = false) {
@@ -1489,14 +1491,6 @@
               title="Rename task"
               ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
             >
-            <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0 max-[350px]:hidden"
-              onclick={openCompact}
-              disabled={active}
-              aria-label="Compact"
-              title="Compact task"
-              ><Icon name="compact" /><span class="max-[900px]:hidden">Compact</span></button
-            >
           </div>
         {/if}
       </header>
@@ -1741,49 +1735,6 @@
         class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
         type="submit"
         disabled={!renameValue.trim()}>Save name</button
-      >
-    </div>
-  </form>
-</dialog>
-
-<dialog
-  bind:this={compactDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
-  aria-labelledby="compact-dialog-title"
-  oncancel={(event) => {
-    event.preventDefault();
-    compactDialogElement?.close();
-  }}
->
-  <form
-    class="p-5"
-    method="dialog"
-    onsubmit={(event) => {
-      event.preventDefault();
-      void compact();
-    }}
-  >
-    <div class="mb-4.5 flex items-start gap-3">
-      <div
-        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-      >
-        <Icon name="compact" />
-      </div>
-      <div>
-        <h2 class="m-0 text-[15px] font-semibold" id="compact-dialog-title">Compact this task?</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Pi will summarize older context to free space in the active context window.
-        </p>
-      </div>
-    </div>
-    <div class="mt-5 flex justify-end gap-2">
-      <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
-        type="button"
-        onclick={() => compactDialogElement?.close()}>Cancel</button
-      ><button
-        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
-        type="submit">Compact task</button
       >
     </div>
   </form>
