@@ -442,7 +442,9 @@ test("preserves edits made while slash compaction is pending", async ({
     status: "compacting",
     revision: Number(snapshot?.revision),
   });
-  await expect(page.getByRole("button", { name: "Queue" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
   if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
     await page.evaluate(
@@ -989,20 +991,15 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(contextMeter).toHaveRole("button");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
-  await page.getByLabel("Delivery mode").selectOption("steer");
-  await prompt.fill("/compact");
-  if (testInfo.project.name === "mobile") await page.getByRole("button", { name: "Queue" }).click();
-  else await prompt.press("Enter");
-  await expect.poll(() => mutations).toHaveLength(1);
-  expect(mutations[0]).toEqual(
-    expect.objectContaining({
-      procedure: "send",
-      input: expect.objectContaining({ delivery: "steer" }),
-    }),
-  );
+  await expect(page.getByLabel("Delivery mode")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  await prompt.fill("Start the next turn");
+  if (testInfo.project.name !== "mobile") await prompt.press("Enter");
+  await expect(prompt).toHaveValue("Start the next turn");
+  expect(mutations).toHaveLength(0);
   await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
 
-  mutations.length = 0;
   await emitServerEvent(page, {
     type: "run_status",
     eventId: 3,
@@ -1011,12 +1008,13 @@ test("persists idle configuration immediately without overwriting the draft", as
     revision: 50,
   });
   await expect(thinking).toBeEnabled();
+  await expect(prompt).toHaveValue("Start the next turn");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   const updatedThinking = nextThinking === "high" ? "medium" : "high";
   await thinking.selectOption(updatedThinking);
   await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
   expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: updatedThinking }));
 
-  await prompt.fill("Start the next turn");
   await page.getByRole("button", { name: "Send" }).click();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))

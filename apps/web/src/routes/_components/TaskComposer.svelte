@@ -66,11 +66,7 @@
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { ConnectionState } from "./AppShellConnection";
-  import type {
-    TaskConfigurationPatch,
-    TaskDelivery,
-    TaskStartMode,
-  } from "./AppShellContext.svelte";
+  import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
 
@@ -88,7 +84,6 @@
     connection,
     contextUsage,
     creatingTask,
-    delivery = $bindable(),
     draft = $bindable(),
     followUpCount,
     models,
@@ -115,7 +110,6 @@
     connection: ConnectionState;
     contextUsage?: ContextUsage;
     creatingTask: boolean;
-    delivery: TaskDelivery;
     draft: string;
     followUpCount: number;
     models: Workspace["models"];
@@ -246,8 +240,8 @@
     }
     if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
       event.preventDefault();
-      if (compactPending || (!active && idleSubmissionDisabled)) return;
-      void (active ? send() : submitDraft());
+      if (active || compactPending || idleSubmissionDisabled) return;
+      void submitDraft();
     }
   }
 
@@ -390,7 +384,7 @@
       placeholder={connection !== "connected"
         ? "Draft locally while the host reconnects…"
         : active
-          ? "Add guidance while Pi works…"
+          ? "Draft your next message…"
           : "Ask Pi to work on this project…"}
       aria-autocomplete="list"
       aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
@@ -457,24 +451,11 @@
       <div class="flex min-w-0 flex-none items-center gap-1">
         {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
         {#if active}
-          <select
-            class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground max-[900px]:h-9 max-[900px]:text-[11px]"
-            bind:value={delivery}
-            aria-label="Delivery mode"
-            ><option value="steer">Steer</option><option value="follow-up">Follow-up</option
-            ></select
-          >
           <button
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
             onclick={stop}
             disabled={connection !== "connected"}
             aria-label="Stop"><Icon name="stop" /></button
-          >
-          <button
-            class="inline-grid h-8.5 place-items-center rounded-lg border-0 bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary-hover max-[900px]:h-9.5 disabled:opacity-40"
-            onclick={send}
-            disabled={!draft.trim() || connection !== "connected" || compactPending}
-            aria-label="Queue">Queue</button
           >
         {:else}
           <button

@@ -2,7 +2,6 @@ import { createContext } from "svelte";
 import type { Bootstrap, ChatSnapshot, ToolItem, Workspace } from "@pidex/api";
 import type { ConnectionState } from "./AppShellConnection";
 
-export type TaskDelivery = "follow-up" | "steer";
 export type TaskStartMode = "local" | "worktree";
 
 export interface TaskConfigurationPatch {
@@ -50,7 +49,6 @@ export interface AppShellContext {
     readonly compactPending: boolean;
     readonly configurationPending: boolean;
     readonly creatingTask: boolean;
-    readonly delivery: TaskDelivery;
     readonly draft: string;
     readonly loadingEarlier: boolean;
     readonly selectedModel: string;
@@ -73,7 +71,6 @@ export interface AppShellContext {
     persistDraft(): void;
     send(): Promise<void>;
     start(draft: string, configuration: TaskConfigurationPatch): Promise<void>;
-    setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
     setStartMode(mode: TaskStartMode): void;
     stop(): Promise<void>;

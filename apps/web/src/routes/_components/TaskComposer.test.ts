@@ -80,6 +80,15 @@ describe("slashCommandSuggestions", () => {
     expect(renderComposer("/", true)).not.toContain('role="listbox"');
   });
 
+  it("shows only the stop action while active, even when a draft is present", () => {
+    const body = renderComposer("Send this after the response", true);
+
+    expect(body).toContain('aria-label="Stop"');
+    expect(body).not.toContain('aria-label="Delivery mode"');
+    expect(body).not.toContain('aria-label="Queue"');
+    expect(body).not.toContain('aria-label="Send"');
+  });
+
   it("does not give the disabled start mode control hover styles", () => {
     expect(renderComposer("", true)).toContain(
       "enabled:hover:bg-secondary enabled:hover:text-foreground",
@@ -123,7 +132,6 @@ function renderComposer(draft: string, active: boolean) {
         compactsAutomatically: true,
       },
       creatingTask: false,
-      delivery: "steer",
       draft,
       followUpCount: 0,
       models: [

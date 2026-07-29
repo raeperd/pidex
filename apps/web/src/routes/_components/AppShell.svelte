@@ -24,7 +24,6 @@
     createTaskViewControllerRegistry,
     provideAppShellContext,
     type AppShellContext,
-    type TaskDelivery,
     type TaskStartMode,
     type TaskToolOutput,
     type TaskToolTiming,
@@ -74,7 +73,6 @@
   let routeSequence = 0;
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
-  let delivery = $state<TaskDelivery>("steer");
   let startMode = $state<TaskStartMode>("local");
   let configurationPendingTaskIds = $state.raw<string[]>([]);
   let compactPendingTaskIds = $state.raw<string[]>([]);
@@ -268,9 +266,6 @@
       get compactPending() {
         return compactPending;
       },
-      get delivery() {
-        return delivery;
-      },
       get draft() {
         return draft;
       },
@@ -313,7 +308,6 @@
       persistDraft,
       send,
       start: startTask,
-      setDelivery: (value) => (delivery = value),
       setDraft: (value) => (draft = value),
       setStartMode: (value) => {
         if (startModeEditable) startMode = value;
@@ -694,7 +688,7 @@
         if (snapshot?.chatId !== created.chatId) return;
         chatConnection.connect(created.chatId);
         if (!configured) return;
-        await submitPrompt(starterPrompt.text, starterPrompt.draft, "normal");
+        await submitPrompt(starterPrompt.text, starterPrompt.draft);
       }
     } catch (cause) {
       if (sequence !== routeSequence) {
@@ -998,12 +992,10 @@
     }
   }
   async function send() {
-    if (!snapshot || !draft.trim() || connection !== "connected") return;
+    if (active || !snapshot || !draft.trim() || connection !== "connected") return;
     const submittedDraft = draft;
     const text = submittedDraft.trim();
-    const mode = active ? delivery : "normal";
     if (
-      mode === "normal" &&
       startMode === "worktree" &&
       taskHasNoTranscript &&
       !workspaceIsWorktree(snapshot.workspaceId) &&
@@ -1011,17 +1003,15 @@
     )
       return;
     if (!snapshot) return;
-    await submitPrompt(text, submittedDraft, mode);
+    await submitPrompt(text, submittedDraft);
   }
-  async function submitPrompt(
-    text: string,
-    submittedDraft: string,
-    mode: "normal" | "steer" | "follow-up",
-  ) {
+  async function submitPrompt(text: string, submittedDraft: string) {
     if (!snapshot) return;
     const matching =
-      pendingPrompt?.text === text && pendingPrompt.delivery === mode ? pendingPrompt : undefined;
-    pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: mode };
+      pendingPrompt?.text === text && pendingPrompt.delivery === "normal"
+        ? pendingPrompt
+        : undefined;
+    pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: "normal" };
     localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
     const clearedSubmittedDraft = draft === submittedDraft;
     if (clearedSubmittedDraft) {
@@ -1033,9 +1023,9 @@
       const outcome = await api.sendMessage(
         snapshot.chatId,
         text,
-        mode,
+        "normal",
         snapshot.revision,
-        active ? snapshot.run?.runId : undefined,
+        undefined,
         pendingPrompt.actionId,
       );
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };

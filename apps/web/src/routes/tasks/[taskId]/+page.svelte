@@ -39,7 +39,6 @@
   />
   <TaskComposer
     bind:this={() => composerController, attachComposer}
-    bind:delivery={() => context.task.delivery, context.taskActions.setDelivery}
     bind:draft={() => context.task.draft, context.taskActions.setDraft}
     active={context.task.active}
     clearQueue={context.taskActions.clearQueue}

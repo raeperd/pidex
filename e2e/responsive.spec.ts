@@ -152,9 +152,7 @@ test("scales mobile task and composer targets without changing desktop density",
     "width",
     mobile ? "38px" : "34px",
   );
-  await expect(page.getByRole("button", { name: "Queue" })).toHaveCSS(
-    "height",
-    mobile ? "38px" : "34px",
-  );
-  await expect(page.getByLabel("Delivery mode")).toHaveCSS("font-size", mobile ? "11px" : "10.5px");
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
+  await expect(page.getByLabel("Delivery mode")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
 });
