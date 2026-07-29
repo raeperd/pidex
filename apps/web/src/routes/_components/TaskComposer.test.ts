@@ -111,7 +111,9 @@ function renderComposer(draft: string, active: boolean) {
       clearQueue: async () => {},
       commands: [],
       compact: async () => true,
+      compactPending: false,
       configure: async () => true,
+      configurationPending: false,
       connection: "connected",
       contextUsage: {
         tokens: 68_000,
@@ -144,7 +146,6 @@ function renderComposer(draft: string, active: boolean) {
       startModeEditable: true,
       steeringCount: 0,
       stop: async () => {},
-      taskId: "task_test",
     },
   }).body;
 }

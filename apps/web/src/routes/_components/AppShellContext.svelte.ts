@@ -47,6 +47,8 @@ export interface AppShellContext {
   };
   readonly task: {
     readonly active: boolean;
+    readonly compactPending: boolean;
+    readonly configurationPending: boolean;
     readonly creatingTask: boolean;
     readonly delivery: TaskDelivery;
     readonly draft: string;

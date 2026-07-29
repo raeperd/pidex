@@ -64,6 +64,7 @@
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
+  import type { Attachment } from "svelte/attachments";
   import type { ConnectionState } from "./AppShellConnection";
   import type {
     TaskConfigurationPatch,
@@ -81,7 +82,9 @@
     clearQueue,
     commands,
     compact,
+    compactPending,
     configure,
+    configurationPending,
     connection,
     contextUsage,
     creatingTask,
@@ -101,13 +104,14 @@
     startModeEditable,
     steeringCount,
     stop,
-    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
     commands: Workspace["commands"];
     compact: (instructions?: string) => Promise<boolean>;
+    compactPending: boolean;
     configure: (patch: TaskConfigurationPatch) => Promise<boolean>;
+    configurationPending: boolean;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
     creatingTask: boolean;
@@ -127,15 +131,11 @@
     startModeEditable: boolean;
     steeringCount: number;
     stop: () => Promise<void>;
-    taskId: string;
   } = $props();
 
-  let promptInput = $state<HTMLTextAreaElement>();
-  let configurationPending = $state(false);
+  let promptInput: HTMLTextAreaElement | undefined;
   let startMenuOpen = $state(false);
   let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
-  let compactPendingByTask = $state<Record<string, boolean>>({});
-  let compactPending = $derived(compactPendingByTask[taskId] ?? false);
   let idleSubmissionDisabled = $derived(
     !draft.trim() ||
       !models.length ||
@@ -164,6 +164,13 @@
     promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
   }
 
+  const attachPromptInput: Attachment<HTMLTextAreaElement> = (element) => {
+    promptInput = element;
+    return () => {
+      if (promptInput === element) promptInput = undefined;
+    };
+  };
+
   function draftInput() {
     persistDraft();
     resize();
@@ -179,12 +186,7 @@
 
   async function updateConfiguration(patch: TaskConfigurationPatch) {
     if (configurationPending || active || creatingTask || connection !== "connected") return;
-    configurationPending = true;
-    try {
-      await configure(patch);
-    } finally {
-      configurationPending = false;
-    }
+    await configure(patch);
   }
 
   function updateThinkingLevel(value: string) {
@@ -214,19 +216,12 @@
   async function submitDraft() {
     if (compactPending) return;
     const submittedDraft = draft;
-    const submittedTaskId = taskId;
-    const isCompaction = parseCompactCommand(submittedDraft) !== undefined;
-    if (isCompaction) compactPendingByTask[submittedTaskId] = true;
-    try {
-      const result = await submitComposerDraft(submittedDraft, { compact, send });
-      if (result !== "compact" || draft !== submittedDraft) return;
-      draft = "";
-      persistDraft();
-      await tick();
-      resize();
-    } finally {
-      if (isCompaction) delete compactPendingByTask[submittedTaskId];
-    }
+    const result = await submitComposerDraft(submittedDraft, { compact, send });
+    if (result !== "compact" || draft !== submittedDraft) return;
+    draft = "";
+    persistDraft();
+    await tick();
+    resize();
   }
 
   function keydown(event: KeyboardEvent) {
@@ -387,7 +382,7 @@
     </div>
     <textarea
       class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
-      bind:this={promptInput}
+      {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
       onkeydown={keydown}

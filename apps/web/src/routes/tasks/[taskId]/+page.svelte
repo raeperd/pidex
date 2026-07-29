@@ -45,7 +45,9 @@
     clearQueue={context.taskActions.clearQueue}
     commands={context.shell.workspace?.commands ?? []}
     compact={context.taskActions.compact}
+    compactPending={context.task.compactPending}
     configure={context.taskActions.configure}
+    configurationPending={context.task.configurationPending}
     connection={context.shell.connection}
     contextUsage={context.task.snapshot.contextUsage}
     creatingTask={context.task.creatingTask}
@@ -63,7 +65,6 @@
     startModeEditable={context.task.startModeEditable}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
-    {taskId}
   />
 {:else}
   <section

@@ -494,7 +494,10 @@ test("preserves edits made while slash compaction is pending", async ({
   }
 });
 
-test("ignores compact responses after navigating to another task", async ({ page, request }) => {
+test("isolates pending task operations while navigating between tasks", async ({
+  page,
+  request,
+}) => {
   await installFakeWebSocket(page);
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   const opened = await rpcRequest<{ id: string }>(
@@ -541,7 +544,10 @@ test("ignores compact responses after navigating to another task", async ({ page
     totalProcessedTokens: 20,
     compactsAutomatically: true,
   };
+  const { promise: configurationPending, resolve: releaseConfiguration } =
+    Promise.withResolvers<void>();
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
+  let configurationRequested = false;
   let compactRequested = false;
 
   await page.route("**/api/rpc/workspaces/open", async (route) => {
@@ -605,12 +611,42 @@ test("ignores compact responses after navigating to another task", async ({ page
       },
     });
   });
+  await page.route("**/api/rpc/chats/configure", async (route) => {
+    configurationRequested = true;
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    await configurationPending;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...first.result,
+          thinkingLevel: input.thinkingLevel,
+          revision: Number(input.expectedRevision) + 1,
+        },
+      },
+    });
+  });
 
   await page.goto(`/tasks/${String(first.result.taskId)}`);
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
+  const thinking = page.getByLabel("Thinking level");
+  const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
+  const configurationResponse = page.waitForResponse("**/api/rpc/chats/configure");
+  await thinking.selectOption(nextThinking);
+  await expect.poll(() => configurationRequested).toBe(true);
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(thinking).toBeEnabled();
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(thinking).toBeDisabled();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(thinking).toBeEnabled();
+  releaseConfiguration();
+  await configurationResponse;
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
   await prompt.fill("/compact");
@@ -621,6 +657,13 @@ test("ignores compact responses after navigating to another task", async ({ page
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await prompt.fill("Message for the second task");
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
+  await expect(prompt).toHaveValue("Message for the second task");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   releaseCompaction();

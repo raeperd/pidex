@@ -76,6 +76,8 @@
   let loadingEarlier = $state(false);
   let delivery = $state<TaskDelivery>("steer");
   let startMode = $state<TaskStartMode>("local");
+  let configurationPendingTaskIds = $state.raw<string[]>([]);
+  let compactPendingTaskIds = $state.raw<string[]>([]);
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
@@ -115,6 +117,12 @@
   });
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
+  );
+  let configurationPending = $derived(
+    Boolean(snapshot && configurationPendingTaskIds.includes(snapshot.taskId)),
+  );
+  let compactPending = $derived(
+    Boolean(snapshot && compactPendingTaskIds.includes(snapshot.taskId)),
   );
   let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
   let taskHasNoTranscript = $derived(
@@ -253,6 +261,12 @@
       },
       get creatingTask() {
         return chatLoading;
+      },
+      get configurationPending() {
+        return configurationPending;
+      },
+      get compactPending() {
+        return compactPending;
       },
       get delivery() {
         return delivery;
@@ -1054,14 +1068,22 @@
   }
   async function configure(patch: ChatConfiguration) {
     if (!snapshot || active) return false;
+    const taskId = snapshot.taskId;
+    if (configurationPendingTaskIds.includes(taskId)) return false;
     const chatId = snapshot.chatId;
+    const revision = snapshot.revision;
+    configurationPendingTaskIds = [...configurationPendingTaskIds, taskId];
     try {
-      const configured = await api.configure(chatId, patch, snapshot.revision);
+      const configured = await api.configure(chatId, patch, revision);
       if (snapshot?.chatId === chatId) snapshot = configured;
       return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Configuration failed";
       return false;
+    } finally {
+      configurationPendingTaskIds = configurationPendingTaskIds.filter(
+        (pendingTaskId) => pendingTaskId !== taskId,
+      );
     }
   }
   function openRename() {
@@ -1081,9 +1103,13 @@
   }
   async function compact(instructions?: string) {
     if (!snapshot) return false;
+    const taskId = snapshot.taskId;
+    if (compactPendingTaskIds.includes(taskId)) return false;
     const chatId = snapshot.chatId;
+    const revision = snapshot.revision;
+    compactPendingTaskIds = [...compactPendingTaskIds, taskId];
     try {
-      const compacted = await api.compact(chatId, snapshot.revision, instructions);
+      const compacted = await api.compact(chatId, revision, instructions);
       if (snapshot?.chatId !== chatId) return false;
       snapshot = compacted;
       return true;
@@ -1091,6 +1117,10 @@
       if (snapshot?.chatId !== chatId) return false;
       error = cause instanceof Error ? cause.message : "Compaction failed";
       return false;
+    } finally {
+      compactPendingTaskIds = compactPendingTaskIds.filter(
+        (pendingTaskId) => pendingTaskId !== taskId,
+      );
     }
   }
   async function answerDialog(dialog: ExtensionDialog, cancelled = false) {
