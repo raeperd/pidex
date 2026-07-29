@@ -40,6 +40,18 @@ test("renders assistant markdown as safe interactive components", async ({
     eventId: 1,
     chatId,
     item: {
+      type: "user",
+      id: "user_terminal_e2e",
+      text: "Inspect this repository",
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    },
+  });
+  await emitServerEvent(page, {
+    type: "message",
+    eventId: 2,
+    chatId,
+    item: {
       type: "assistant",
       id: "assistant_markdown_e2e",
       text: `# Rendered result
@@ -71,6 +83,30 @@ const answer = 42;
   await expect(page.getByRole("button", { name: "Start in Work locally" })).toBeDisabled();
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
+  const transcriptBody = page.getByRole("log").locator(":scope > div");
+  const userPrompt = page.getByRole("log").getByText("Inspect this repository", { exact: true });
+  const assistantBody = page.locator(".markdown").filter({ hasText: "Rendered result" });
+  await expect(transcriptBody).toHaveCSS("max-width", "768px");
+  await expect(transcriptBody).toHaveCSS("font-family", /JetBrains Mono/);
+  await expect(userPrompt).toHaveCSS("border-radius", "24px");
+  await expect(userPrompt).toHaveCSS("font-family", /DM Sans/);
+  await expect
+    .poll(() =>
+      userPrompt.evaluate((element) => {
+        const bubble = element.getBoundingClientRect();
+        const row = element.parentElement?.getBoundingClientRect();
+        return row
+          ? bubble.width < row.width && Math.abs(row.right - bubble.right - 8) <= 1
+          : false;
+      }),
+    )
+    .toBe(true);
+  await expect(assistantBody).toHaveCSS("font-family", /JetBrains Mono/);
+  await expect(assistantBody).toHaveCSS("font-size", "12.5px");
+  await expect(page.getByRole("heading", { name: "Rendered result" })).toHaveCSS(
+    "color",
+    "rgb(183, 121, 31)",
+  );
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
   await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "Completed task" })).toBeChecked();
@@ -100,7 +136,7 @@ const answer = 42;
 
   await emitServerEvent(page, {
     type: "message",
-    eventId: 2,
+    eventId: 3,
     chatId,
     item: {
       type: "assistant",
@@ -117,7 +153,10 @@ const answer = 42;
   await expect(page.locator('time[datetime="not-a-date"]')).toHaveCount(0);
 });
 
-test("renders tool calls as timed terminal blocks", async ({ page, request }) => {
+test("renders grouped tool activity with semantic rows and expandable output", async ({
+  page,
+  request,
+}) => {
   const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   let snapshot: Record<string, unknown> | undefined;
@@ -152,8 +191,13 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     chatId,
     item: { ...toolItem, state: "running" },
   });
-  const toolBlock = page.getByRole("button", { name: "$ ls -la" });
-  await expect(toolBlock).toBeVisible();
+  const runningTool = page.getByLabel("$ ls -la");
+  const toolContainer = runningTool.locator("..");
+  await expect(runningTool).toBeVisible();
+  await expect(toolContainer).toHaveCSS("border-radius", "8px");
+  await expect(toolContainer).toHaveCSS("font-size", "12px");
+  await expect(toolContainer).toHaveCSS("margin-left", "0px");
+  await expect(toolContainer).toHaveCSS("margin-right", "0px");
   await expect(page.getByText(/^Elapsed \d+\.\d+s$/)).toBeVisible();
 
   await emitServerEvent(page, {
@@ -174,17 +218,17 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     },
   });
 
-  const hint = page.getByText("earlier lines, click to expand");
-  await expect(hint).toContainText("2 earlier lines");
+  const toolBlock = page.getByRole("button", { name: "$ ls -la" });
   await expect(page.getByText(/^Took \d+\.\d+s$/)).toBeVisible();
-  await expect(page.locator(".tool-call__output")).not.toContainText("one");
+  await expect(toolBlock).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".tool-call__output")).toContainText("one");
   await expect(page.locator(".tool-call__output")).toContainText("seven");
   await expect(page.locator(".tool-call__output")).not.toContainText('"type": "text"');
 
-  await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
   await toolBlock.click();
-  await expect(page.locator(".tool-call__output")).toContainText("one");
-  await expect(hint).toHaveCount(0);
+  await expect(toolBlock).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".tool-call__output")).toContainText("seven");
+  await expect(page.locator(".tool-call__output")).not.toContainText("one");
 
   await emitServerEvent(page, {
     type: "tool",
@@ -211,9 +255,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
       preview: "done",
     },
   });
-  const restored = page.locator(".tool-call").filter({ hasText: "$ pnpm build" });
-  await expect(restored).toBeVisible();
-  await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+  const restored = page.getByLabel("$ pnpm build").locator("..");
 
   await emitServerEvent(page, {
     type: "tool",
@@ -223,7 +265,7 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
       ...toolItem,
       id: "tool_read_e2e",
       name: "read",
-      argumentSummary: JSON.stringify({ path: "README.md" }),
+      argumentSummary: JSON.stringify({ path: "README.md", offset: 1, limit: 800 }),
       state: "success",
       preview: JSON.stringify({ content: [{ type: "text", text: "project readme" }] }),
     },
@@ -243,16 +285,28 @@ test("renders tool calls as timed terminal blocks", async ({ page, request }) =>
     },
   });
 
-  const earlierTools = page.getByRole("button", { name: "Show 1 previous tool call" });
-  await expect(earlierTools).toBeVisible();
+  const history = page.getByText("4 previous tool calls");
+  await expect(history).toBeVisible();
+  await expect(page.getByText("Read 1 file, ran 3 commands, and searched once")).toBeVisible();
+  await expect(restored).toBeHidden();
+  await history.click();
   await expect(toolBlock).toBeVisible();
-  await expect(page.getByRole("button", { name: "$ sleep 10" })).toBeVisible();
-  await expect(restored).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Read README.md" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Searched TODO · src" })).toBeVisible();
-  await earlierTools.click();
-  await expect(page.getByRole("button", { name: "Hide 1 previous tool call" })).toBeVisible();
+  await expect(page.getByLabel("$ sleep 10")).toBeVisible();
   await expect(restored).toBeVisible();
+  await expect(restored.locator(".tool-call__timing")).toHaveCount(0);
+  const readBlock = page.getByRole("button", {
+    name: "Read README.md:1-800",
+  });
+  const readContainer = readBlock.locator("..");
+  await expect(readBlock).toBeVisible();
+  await expect(readContainer).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(readContainer.locator(".tool-call__range")).toHaveText(":1-800");
+  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(220, 220, 31)");
+  await expect(readBlock).toHaveAttribute("aria-expanded", "false");
+  await expect(readContainer.locator(".tool-call__output")).toHaveCount(0);
+  await readBlock.click();
+  await expect(readContainer.locator(".tool-call__output")).toHaveText("project readme");
+  await expect(page.getByRole("button", { name: "Search TODO · src" })).toBeVisible();
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {

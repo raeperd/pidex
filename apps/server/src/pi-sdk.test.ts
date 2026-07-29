@@ -180,7 +180,7 @@ describe("Pi SDK Effect service", () => {
         const nativePath = manager.getSessionFile();
         if (!nativePath) return yield* Effect.die("Persisted session has no file path");
 
-        const pi = makePiSdkService(new PiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
         const session = yield* pi.resumeSession(fixture.cwd, nativePath);
 
         assert.deepEqual(
