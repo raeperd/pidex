@@ -6,7 +6,7 @@
     type TaskTranscriptController,
   } from "../../_components/AppShellContext.svelte";
   import Icon from "../../_components/Icon.svelte";
-  import TaskComposer from "./_components/TaskComposer.svelte";
+  import TaskComposer from "../../_components/TaskComposer.svelte";
   import TaskTranscript from "./_components/TaskTranscript.svelte";
 
   const context = getAppShellContext();
