@@ -68,7 +68,18 @@
   }
 </script>
 
-{#if context.shell.workspace && !(context.shell.bootstrapError && !context.shell.bootstrap)}
+{#if !context.shell.routeReady && !(context.shell.bootstrapError && !context.shell.bootstrap)}
+  <section class="min-h-0 flex-1 overflow-hidden" aria-label="Loading project" role="status">
+    <span class="sr-only">Loading project…</span>
+    <div
+      class="mx-auto flex min-h-full w-full max-w-3xl animate-pulse flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+      aria-hidden="true"
+    >
+      <div class="mx-auto h-9 w-3/5 max-w-105 rounded-full bg-border/70"></div>
+      <div class="mx-auto h-35 w-full rounded-[20px] bg-secondary/75"></div>
+    </div>
+  </section>
+{:else if context.shell.workspace && !(context.shell.bootstrapError && !context.shell.bootstrap)}
   {#key context.shell.workspace.id}
     <section
       class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"

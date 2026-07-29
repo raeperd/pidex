@@ -109,7 +109,13 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toContain(`/${projectName}`);
 
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await page.reload();
+  await expect(page.getByRole("status", { name: "Loading project" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bring Pi with you." })).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: `What should we work on in ${projectName}?` }),
   ).toBeVisible();

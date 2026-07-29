@@ -40,6 +40,7 @@ export interface AppShellContext {
     readonly bootstrapError: string;
     readonly connection: ConnectionState;
     readonly retryingConnection: boolean;
+    readonly routeReady: boolean;
     readonly routeLoading: boolean;
     readonly workspace: Workspace | undefined;
   };

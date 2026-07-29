@@ -194,6 +194,9 @@
       get retryingConnection() {
         return retryingConnection;
       },
+      get routeReady() {
+        return routeReady;
+      },
       get routeLoading() {
         return routeLoading;
       },
