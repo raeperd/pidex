@@ -1574,7 +1574,8 @@ test("stages configuration without overwriting the next draft", async ({
   });
   const contextMeter = page.locator(".context-meter__trigger");
   await expect(contextMeter).toBeVisible();
-  await expect(contextMeter).toHaveRole("button");
+  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
   await contextMeter.hover();
   const contextDetails = page.getByRole("tooltip");
   await expect(contextDetails).toHaveCSS("opacity", "1");
@@ -1619,12 +1620,7 @@ test("stages configuration without overwriting the next draft", async ({
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(thinking).toBeEnabled();
-  await expect(contextMeter).toHaveAttribute("aria-disabled", "true");
-  await page.mouse.move(0, 0);
-  await contextMeter.focus();
-  await expect(contextMeter).toBeFocused();
-  await expect(contextDetails).toHaveCSS("opacity", "1");
-  await contextMeter.press("Enter");
+  await expect(contextMeter).toHaveRole("img");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
   const stagedThinking = nextThinking === "high" ? "medium" : "high";
