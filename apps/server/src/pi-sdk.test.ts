@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Effect, Fiber, Stream } from "effect";
 import { acquireAdapterSession, type AdapterEvent, type AdapterSession } from "./adapter.js";
-import { makePiSdkService, PiSdk } from "./pi-sdk.js";
+import { makePiSdk, makePiSdkService } from "./pi-sdk.js";
 
 describe("Effect Pi adapter", () => {
   it.effect("streams events in order and unsubscribes when the stream ends", () =>
@@ -86,7 +86,7 @@ describe("Pi SDK Effect service", () => {
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
         const pi = makePiSdkService(
-          new PiSdk({
+          makePiSdk({
             agentDir: fixture.agentDir,
             sessionDir: path.join(fixture.agentDir, "sessions"),
           }),
@@ -106,7 +106,7 @@ describe("Pi SDK Effect service", () => {
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
         const pi = makePiSdkService(
-          new PiSdk({
+          makePiSdk({
             agentDir: fixture.agentDir,
             sessionDir: path.join(fixture.agentDir, "sessions"),
           }),

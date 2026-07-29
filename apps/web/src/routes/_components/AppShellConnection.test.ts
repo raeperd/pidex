@@ -1,14 +1,16 @@
 import { PROTOCOL_VERSION } from "@pidex/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ChatConnection, type ConnectionState } from "./AppShellConnection";
+import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
 
 describe("ChatConnection", () => {
   beforeEach(() => {
-    FakeWebSocket.instances = [];
+    fakeWebSockets.length = 0;
     vi.stubGlobal("location", { protocol: "http:", host: "localhost:4783" });
     vi.stubGlobal("navigator", { onLine: true });
-    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("WebSocket", function (url: string) {
+      return makeFakeWebSocket(url);
+    });
   });
 
   afterEach(() => vi.unstubAllGlobals());
@@ -16,14 +18,14 @@ describe("ChatConnection", () => {
   it("ignores malformed server frames without disrupting the active connection", () => {
     const events = vi.fn();
     const states: ConnectionState[] = [];
-    const connection = new ChatConnection({
+    const connection = makeChatConnection({
       onEvent: events,
       onInvalidChat: vi.fn(),
       onStateChange: (state) => states.push(state),
     });
 
     connection.connect("chat_12345");
-    const socket = FakeWebSocket.instances[0]!;
+    const socket = fakeWebSockets[0]!;
     socket.dispatch("open", {});
 
     expect(() => socket.dispatch("message", { data: "{" })).not.toThrow();
@@ -33,16 +35,16 @@ describe("ChatConnection", () => {
 
   it("does not let a replaced socket report itself as connected", () => {
     const states: ConnectionState[] = [];
-    const connection = new ChatConnection({
+    const connection = makeChatConnection({
       onEvent: vi.fn(),
       onInvalidChat: vi.fn(),
       onStateChange: (state) => states.push(state),
     });
 
     connection.connect("chat_first");
-    const first = FakeWebSocket.instances[0]!;
+    const first = fakeWebSockets[0]!;
     connection.connect("chat_second");
-    const second = FakeWebSocket.instances[1]!;
+    const second = fakeWebSockets[1]!;
 
     first.dispatch("open", {});
     expect(first.closed).toBe(true);
@@ -60,32 +62,42 @@ describe("ChatConnection", () => {
   });
 });
 
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-
-  readonly listeners = new Map<string, Array<(event: never) => void>>();
-  readonly sent: string[] = [];
-  closed = false;
-
-  constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  addEventListener(type: string, listener: (event: never) => void) {
-    const listeners = this.listeners.get(type) ?? [];
-    listeners.push(listener);
-    this.listeners.set(type, listeners);
-  }
-
-  close() {
-    this.closed = true;
-  }
-
-  send(data: string) {
-    this.sent.push(data);
-  }
-
-  dispatch(type: string, event: unknown) {
-    for (const listener of this.listeners.get(type) ?? []) listener(event as never);
-  }
+interface FakeWebSocket {
+  readonly url: string;
+  readonly listeners: Map<string, Array<(event: never) => void>>;
+  readonly sent: string[];
+  closed: boolean;
+  addEventListener: (type: string, listener: (event: never) => void) => void;
+  close: () => void;
+  send: (data: string) => void;
+  dispatch: (type: string, event: unknown) => void;
 }
+
+function makeFakeWebSocket(url: string): FakeWebSocket {
+  const listeners = new Map<string, Array<(event: never) => void>>();
+  const sent: string[] = [];
+  const socket = {
+    url,
+    listeners,
+    sent,
+    closed: false,
+    addEventListener(type: string, listener: (event: never) => void) {
+      const registered = listeners.get(type) ?? [];
+      registered.push(listener);
+      listeners.set(type, registered);
+    },
+    close() {
+      socket.closed = true;
+    },
+    send(data: string) {
+      sent.push(data);
+    },
+    dispatch(type: string, event: unknown) {
+      for (const listener of listeners.get(type) ?? []) listener(event as never);
+    },
+  };
+  fakeWebSockets.push(socket);
+  return socket;
+}
+
+const fakeWebSockets: FakeWebSocket[] = [];
