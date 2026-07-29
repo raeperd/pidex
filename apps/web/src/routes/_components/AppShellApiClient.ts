@@ -18,87 +18,79 @@ import { ResponseValidationLinkPlugin } from "@orpc/contract/plugins";
 type Delivery = "normal" | "steer" | "follow-up";
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
 
-export class PidexApiClient {
-  private csrfToken = "";
-  private readonly client: PidexApiContractClient;
-  private readonly clientId: string;
+export function makePidexApiClient() {
+  let csrfToken = "";
 
-  constructor() {
-    const stored = localStorage.getItem("pidex:client-id");
-    this.clientId = stored ?? this.createActionId();
-    if (!stored) localStorage.setItem("pidex:client-id", this.clientId);
+  const stored = localStorage.getItem("pidex:client-id");
+  const clientId = stored ?? createActionId();
+  if (!stored) localStorage.setItem("pidex:client-id", clientId);
 
-    const link = new RPCLink({
-      url: "/api/rpc",
-      headers: () => ({ "X-Pidex-CSRF": this.csrfToken }),
-      plugins: [new ResponseValidationLinkPlugin(pidexApiContract)],
-    });
-    this.client = createORPCClient(link);
-  }
+  const link = new RPCLink({
+    url: "/api/rpc",
+    headers: () => ({ "X-Pidex-CSRF": csrfToken }),
+    plugins: [new ResponseValidationLinkPlugin(pidexApiContract)],
+  });
+  const client: PidexApiContractClient = createORPCClient(link);
 
-  createActionId(): string {
-    return crypto.randomUUID().replaceAll("-", "");
-  }
-
-  async bootstrap(): Promise<Bootstrap> {
-    const result = await this.client.system.bootstrap({});
-    this.csrfToken = result.csrfToken;
+  async function bootstrap(): Promise<Bootstrap> {
+    const result = await client.system.bootstrap({});
+    csrfToken = result.csrfToken;
     return result;
   }
 
-  openWorkspace(path: string, remember = true): Promise<Workspace> {
-    return this.client.workspaces.open({ path, remember });
+  function openWorkspace(path: string, remember = true): Promise<Workspace> {
+    return client.workspaces.open({ path, remember });
   }
 
-  createWorktree(workspaceId: string): Promise<Workspace> {
-    return this.client.workspaces.createWorktree({ workspaceId });
+  function createWorktree(workspaceId: string): Promise<Workspace> {
+    return client.workspaces.createWorktree({ workspaceId });
   }
 
-  async removeWorktree(workspaceId: string): Promise<void> {
-    await this.client.workspaces.removeWorktree({ workspaceId });
+  async function removeWorktree(workspaceId: string): Promise<void> {
+    await client.workspaces.removeWorktree({ workspaceId });
   }
 
-  async reorderWorkspaces(workspaceIds: string[]): Promise<RecentWorkspace[]> {
-    const result = await this.client.workspaces.reorder({ workspaceIds });
+  async function reorderWorkspaces(workspaceIds: string[]): Promise<RecentWorkspace[]> {
+    const result = await client.workspaces.reorder({ workspaceIds });
     return result.recentWorkspaces;
   }
 
-  setWorkspaceTrust(workspaceId: string, trusted: boolean): Promise<Workspace> {
-    return this.client.workspaces.trust({ workspaceId, trusted });
+  function setWorkspaceTrust(workspaceId: string, trusted: boolean): Promise<Workspace> {
+    return client.workspaces.trust({ workspaceId, trusted });
   }
 
-  async listSessions(workspaceId: string): Promise<SessionSummary[]> {
-    const result = await this.client.workspaces.sessions({ workspaceId });
+  async function listSessions(workspaceId: string): Promise<SessionSummary[]> {
+    const result = await client.workspaces.sessions({ workspaceId });
     return result.sessions;
   }
 
-  createChat(workspaceId: string): Promise<ChatSnapshot> {
-    return this.client.chats.create({ workspaceId });
+  function createChat(workspaceId: string): Promise<ChatSnapshot> {
+    return client.chats.create({ workspaceId });
   }
 
-  resumeTask(taskId: string): Promise<ChatSnapshot> {
-    return this.client.chats.resume({ taskId });
+  function resumeTask(taskId: string): Promise<ChatSnapshot> {
+    return client.chats.resume({ taskId });
   }
 
-  getChat(chatId: string): Promise<ChatSnapshot> {
-    return this.client.chats.get({ chatId });
+  function getChat(chatId: string): Promise<ChatSnapshot> {
+    return client.chats.get({ chatId });
   }
 
-  async disposeChat(chatId: string): Promise<void> {
-    await this.client.chats.dispose({ chatId });
+  async function disposeChat(chatId: string): Promise<void> {
+    await client.chats.dispose({ chatId });
   }
 
-  sendMessage(
+  function sendMessage(
     chatId: string,
     text: string,
     delivery: Delivery,
     expectedRevision: number,
     runId?: string,
-    actionId = this.createActionId(),
+    actionId = createActionId(),
   ): Promise<ActionOutcome> {
-    return this.client.chats.sendMessage({
+    return client.chats.sendMessage({
       chatId,
-      clientId: this.clientId,
+      clientId: clientId,
       actionId,
       expectedRevision,
       text,
@@ -107,94 +99,132 @@ export class PidexApiClient {
     });
   }
 
-  abort(
+  function abort(
     chatId: string,
     runId: string,
     expectedRevision: number,
-    actionId = this.createActionId(),
+    actionId = createActionId(),
   ): Promise<ActionOutcome> {
-    return this.client.chats.abort({
+    return client.chats.abort({
       chatId,
-      clientId: this.clientId,
+      clientId: clientId,
       actionId,
       expectedRevision,
       runId,
     });
   }
 
-  acknowledgeInterrupted(
+  function acknowledgeInterrupted(
     chatId: string,
     expectedRevision: number,
-    actionId = this.createActionId(),
+    actionId = createActionId(),
   ): Promise<ActionOutcome> {
-    return this.client.chats.acknowledgeInterrupted({
+    return client.chats.acknowledgeInterrupted({
       chatId,
-      clientId: this.clientId,
+      clientId: clientId,
       actionId,
       expectedRevision,
     });
   }
 
-  toolOutput(chatId: string, resourceId: string, offset: number): Promise<ToolOutputChunk> {
-    return this.client.chats.toolOutput({ chatId, resourceId, offset, limit: 16_384 });
+  function toolOutput(
+    chatId: string,
+    resourceId: string,
+    offset: number,
+  ): Promise<ToolOutputChunk> {
+    return client.chats.toolOutput({ chatId, resourceId, offset, limit: 16_384 });
   }
 
-  transcript(chatId: string, before: number): Promise<TranscriptPage> {
-    return this.client.chats.transcript({ chatId, before, limit: 50 });
+  function transcript(chatId: string, before: number): Promise<TranscriptPage> {
+    return client.chats.transcript({ chatId, before, limit: 50 });
   }
 
-  clearQueue(chatId: string, expectedRevision: number): Promise<ChatSnapshot> {
-    return this.client.chats.clearQueue({
+  function clearQueue(chatId: string, expectedRevision: number): Promise<ChatSnapshot> {
+    return client.chats.clearQueue({
       chatId,
-      ...this.actionFields(expectedRevision),
+      ...actionFields(expectedRevision),
     });
   }
 
-  configure(
+  function configure(
     chatId: string,
     patch: ChatConfiguration,
     expectedRevision: number,
   ): Promise<ChatSnapshot> {
-    return this.client.chats.configure({
+    return client.chats.configure({
       chatId,
-      ...this.actionFields(expectedRevision),
+      ...actionFields(expectedRevision),
       ...patch,
     });
   }
 
-  rename(chatId: string, name: string, expectedRevision: number): Promise<ChatSnapshot> {
-    return this.client.chats.rename({
+  function rename(chatId: string, name: string, expectedRevision: number): Promise<ChatSnapshot> {
+    return client.chats.rename({
       chatId,
-      ...this.actionFields(expectedRevision),
+      ...actionFields(expectedRevision),
       name,
     });
   }
 
-  compact(chatId: string, expectedRevision: number, instructions?: string): Promise<ChatSnapshot> {
-    return this.client.chats.compact({
+  function compact(
+    chatId: string,
+    expectedRevision: number,
+    instructions?: string,
+  ): Promise<ChatSnapshot> {
+    return client.chats.compact({
       chatId,
-      ...this.actionFields(expectedRevision),
+      ...actionFields(expectedRevision),
       ...(instructions ? { instructions } : {}),
     });
   }
 
-  async answerDialog(
+  async function answerDialog(
     chatId: string,
     requestId: string,
     value: string | boolean | null,
     expectedRevision: number,
   ): Promise<void> {
-    await this.client.chats.answerDialog({
+    await client.chats.answerDialog({
       chatId,
-      ...this.actionFields(expectedRevision),
+      ...actionFields(expectedRevision),
       requestId,
       value,
     });
   }
 
-  private actionFields(expectedRevision: number) {
-    return { clientId: this.clientId, actionId: this.createActionId(), expectedRevision };
+  function actionFields(expectedRevision: number) {
+    return { clientId: clientId, actionId: createActionId(), expectedRevision };
   }
+  return {
+    createActionId,
+    bootstrap,
+    openWorkspace,
+    createWorktree,
+    removeWorktree,
+    reorderWorkspaces,
+    setWorkspaceTrust,
+    listSessions,
+    createChat,
+    resumeTask,
+    getChat,
+    disposeChat,
+    sendMessage,
+    abort,
+    acknowledgeInterrupted,
+    toolOutput,
+    transcript,
+    clearQueue,
+    configure,
+    rename,
+    compact,
+    answerDialog,
+  };
+}
+
+export type PidexApiClient = ReturnType<typeof makePidexApiClient>;
+
+function createActionId(): string {
+  return crypto.randomUUID().replaceAll("-", "");
 }
 
 export function dialogValue(

@@ -105,27 +105,22 @@ const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic =
   message: message.slice(0, 1000),
 });
 
-class PiSession implements AdapterSession {
-  readonly nativeId: string;
-  readonly nativePath: string | undefined;
-  private listeners = new Set<(event: AdapterEvent) => void>();
-  private unsubscribe?: () => void;
-  private pendingDialogs = new Map<string, (value: string | boolean | null) => void>();
-  constructor(private readonly session: AgentSession) {
-    this.nativeId = session.sessionId;
-    this.nativePath = session.sessionFile;
-    this.unsubscribe = session.subscribe((event) => this.handle(event));
-  }
-  async bind() {
-    await this.session.bindExtensions({
-      uiContext: this.uiContext(),
+function makePiSession(session: AgentSession) {
+  const nativeId = session.sessionId;
+  const nativePath = session.sessionFile;
+  const listeners = new Set<(event: AdapterEvent) => void>();
+  const pendingDialogs = new Map<string, (value: string | boolean | null) => void>();
+  const unsubscribe = session.subscribe(handle);
+  async function bind() {
+    await session.bindExtensions({
+      uiContext: uiContext(),
       mode: "rpc",
       onError: (error) =>
-        this.emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
+        emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
     });
   }
-  get messages(): TextItem[] {
-    return this.session.sessionManager.buildContextEntries().flatMap((entry) => {
+  function readMessages(): TextItem[] {
+    return session.sessionManager.buildContextEntries().flatMap((entry) => {
       if (
         entry.type !== "message" ||
         (entry.message.role !== "user" && entry.message.role !== "assistant")
@@ -143,42 +138,40 @@ class PiSession implements AdapterSession {
       return [item];
     });
   }
-  get model() {
-    return this.session.model
-      ? `${this.session.model.provider}/${this.session.model.id}`
-      : undefined;
+  function readModel() {
+    return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
   }
-  get thinkingLevel() {
-    return this.session.thinkingLevel;
+  function readThinkingLevel() {
+    return session.thinkingLevel;
   }
-  get sessionName() {
-    return this.session.sessionName;
+  function readSessionName() {
+    return session.sessionName;
   }
-  get contextUsage(): ContextUsage | undefined {
-    const usage = this.session.getContextUsage();
+  function readContextUsage(): ContextUsage | undefined {
+    const usage = session.getContextUsage();
     if (!usage) return undefined;
     return {
       ...usage,
-      totalProcessedTokens: this.session.getSessionStats().tokens.total,
-      compactsAutomatically: this.session.settingsManager.getCompactionSettings().enabled,
+      totalProcessedTokens: session.getSessionStats().tokens.total,
+      compactsAutomatically: session.settingsManager.getCompactionSettings().enabled,
     };
   }
-  get isIdle() {
-    return this.session.isIdle;
+  function readIsIdle() {
+    return session.isIdle;
   }
-  subscribe(listener: (event: AdapterEvent) => void) {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  function subscribe(listener: (event: AdapterEvent) => void) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   }
-  private emit(event: AdapterEvent) {
-    for (const listener of this.listeners) listener(event);
+  function emit(event: AdapterEvent) {
+    for (const listener of listeners) listener(event);
   }
-  private handle(event: AgentSessionEvent) {
+  function handle(event: AgentSessionEvent) {
     if (
       event.type === "message_start" &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
-      this.emit({
+      emit({
         type: "message",
         item: {
           type: event.message.role,
@@ -194,14 +187,14 @@ class PiSession implements AdapterSession {
     } else if (event.type === "message_update") {
       const update = event.assistantMessageEvent;
       if (update.type === "text_delta")
-        this.emit({
+        emit({
           type: "delta",
           itemId: messageId(event.message),
           delta: update.delta,
           channel: "text",
         });
       if (update.type === "thinking_delta")
-        this.emit({
+        emit({
           type: "delta",
           itemId: messageId(event.message),
           delta: update.delta,
@@ -211,7 +204,7 @@ class PiSession implements AdapterSession {
       event.type === "message_end" &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
-      this.emit({
+      emit({
         type: "message",
         item: {
           type: event.message.role,
@@ -224,10 +217,10 @@ class PiSession implements AdapterSession {
           timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
         },
       });
-      if (event.message.role === "assistant") this.scheduleContextUsage();
+      if (event.message.role === "assistant") scheduleContextUsage();
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800);
-      this.emit({
+      emit({
         type: "tool",
         item: {
           type: "tool",
@@ -254,43 +247,43 @@ class PiSession implements AdapterSession {
         preview: preview.text,
         truncated: preview.truncated || output.sourceTruncated,
       };
-      this.emit({ type: "tool", item, output });
+      emit({ type: "tool", item, output });
     } else if (event.type === "queue_update")
-      this.emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
-    else if (event.type === "agent_settled") this.emit({ type: "settled" });
+      emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
+    else if (event.type === "agent_settled") emit({ type: "settled" });
     else if (event.type === "compaction_start")
-      this.emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
+      emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
     else if (event.type === "compaction_end") {
-      this.emit({
+      emit({
         type: "notice",
         level: event.errorMessage ? "error" : "info",
         text: event.errorMessage ?? "Compaction complete.",
       });
-      this.scheduleContextUsage();
+      scheduleContextUsage();
     } else if (event.type === "auto_retry_start")
-      this.emit({
+      emit({
         type: "notice",
         level: "warning",
         text: `Retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`,
       });
     else if (event.type === "auto_retry_end" && !event.success)
-      this.emit({ type: "notice", level: "error", text: event.finalError ?? "Retry failed." });
+      emit({ type: "notice", level: "error", text: event.finalError ?? "Retry failed." });
   }
-  private scheduleContextUsage() {
+  function scheduleContextUsage() {
     queueMicrotask(() => {
-      const usage = this.contextUsage;
-      if (usage) this.emit({ type: "context_usage", usage });
+      const usage = readContextUsage();
+      if (usage) emit({ type: "context_usage", usage });
     });
   }
-  private uiContext(): ExtensionUIContext {
+  function uiContext(): ExtensionUIContext {
     const ask = (dialog: Omit<ExtensionDialog, "id">) =>
       new Promise<string | boolean | undefined>((resolve) => {
         const id = randomUUID().replaceAll("-", "");
-        this.pendingDialogs.set(id, (value) => resolve(value === null ? undefined : value));
-        this.emit({ type: "dialog", dialog: { ...dialog, id } });
+        pendingDialogs.set(id, (value) => resolve(value === null ? undefined : value));
+        emit({ type: "dialog", dialog: { ...dialog, id } });
       });
     const unsupported = async () => {
-      this.emit({
+      emit({
         type: "notice",
         level: "warning",
         text: "An extension requested a TUI-only interaction that Pidex cannot safely display.",
@@ -311,9 +304,9 @@ class PiSession implements AdapterSession {
           | string
           | undefined,
       notify: (message: string, type: "info" | "warning" | "error" = "info") =>
-        this.emit({ type: "notice", level: type, text: message }),
+        emit({ type: "notice", level: type, text: message }),
       setStatus: (_key: string, text: string | undefined) => {
-        if (text) this.emit({ type: "notice", level: "info", text });
+        if (text) emit({ type: "notice", level: "info", text });
       },
       setWorkingMessage: () => {},
       setWorkingVisible: () => {},
@@ -337,43 +330,46 @@ class PiSession implements AdapterSession {
       theme: undefined as never,
     } as unknown as ExtensionUIContext;
   }
-  async prompt(text: string) {
-    await this.session.prompt(text);
+  async function prompt(text: string) {
+    await session.prompt(text);
   }
-  async steer(text: string) {
-    await this.session.steer(text);
+  async function steer(text: string) {
+    await session.steer(text);
   }
-  async followUp(text: string) {
-    await this.session.followUp(text);
+  async function followUp(text: string) {
+    await session.followUp(text);
   }
-  async abort() {
-    this.session.clearQueue();
-    await this.session.abort();
+  async function abort() {
+    session.clearQueue();
+    await session.abort();
   }
-  clearQueue() {
-    this.session.clearQueue();
+  function clearQueue() {
+    session.clearQueue();
   }
-  async configure(input: { model?: string; thinkingLevel?: AdapterSession["thinkingLevel"] }) {
-    if (!this.session.isIdle) throw new Error("Configuration can only change while idle");
+  async function configure(input: {
+    model?: string;
+    thinkingLevel?: AdapterSession["thinkingLevel"];
+  }) {
+    if (!session.isIdle) throw new Error("Configuration can only change while idle");
     if (input.model) {
       const slash = input.model.indexOf("/");
-      const model = this.session.modelRuntime.getModel(
+      const model = session.modelRuntime.getModel(
         input.model.slice(0, slash),
         input.model.slice(slash + 1),
       );
       if (!model) throw new Error("Model is no longer available");
-      await this.session.setModel(model);
+      await session.setModel(model);
     }
-    if (input.thinkingLevel) this.session.setThinkingLevel(input.thinkingLevel);
+    if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
   }
-  rename(name: string) {
-    this.session.setSessionName(name);
+  function rename(name: string) {
+    session.setSessionName(name);
   }
-  async compact(instructions?: string) {
-    await this.session.compact(instructions);
+  async function compact(instructions?: string) {
+    await session.compact(instructions);
   }
-  getStats() {
-    const stats = this.session.getSessionStats();
+  function getStats() {
+    const stats = session.getSessionStats();
     return {
       messages: stats.totalMessages,
       toolCalls: stats.toolCalls,
@@ -381,27 +377,60 @@ class PiSession implements AdapterSession {
       cost: stats.cost,
     };
   }
-  respondToDialog(requestId: string, value: string | boolean | null) {
-    const resolve = this.pendingDialogs.get(requestId);
+  function respondToDialog(requestId: string, value: string | boolean | null) {
+    const resolve = pendingDialogs.get(requestId);
     if (!resolve) throw new Error("Dialog is no longer pending");
-    this.pendingDialogs.delete(requestId);
+    pendingDialogs.delete(requestId);
     resolve(value);
-    this.emit({ type: "dialog" });
+    emit({ type: "dialog" });
   }
-  dispose() {
-    this.unsubscribe?.();
-    for (const resolve of this.pendingDialogs.values()) resolve(null);
-    this.pendingDialogs.clear();
-    this.session.dispose();
-    this.listeners.clear();
+  function dispose() {
+    unsubscribe?.();
+    for (const resolve of pendingDialogs.values()) resolve(null);
+    pendingDialogs.clear();
+    session.dispose();
+    listeners.clear();
   }
+  return {
+    nativeId,
+    nativePath,
+    get messages() {
+      return readMessages();
+    },
+    get model() {
+      return readModel();
+    },
+    get thinkingLevel() {
+      return readThinkingLevel();
+    },
+    get sessionName() {
+      return readSessionName();
+    },
+    get contextUsage() {
+      return readContextUsage();
+    },
+    get isIdle() {
+      return readIsIdle();
+    },
+    bind,
+    subscribe,
+    prompt,
+    steer,
+    followUp,
+    abort,
+    clearQueue,
+    configure,
+    rename,
+    compact,
+    getStats,
+    respondToDialog,
+    dispose,
+  };
 }
 
-export class PiSdk {
-  constructor(private readonly options: PiSdkOptions = {}) {}
-
-  private async services(cwd: string) {
-    const agentDir = this.options.agentDir ?? getAgentDir();
+export function makePiSdk(options: PiSdkOptions = {}) {
+  async function services(cwd: string) {
+    const agentDir = options.agentDir ?? getAgentDir();
     const settings = SettingsManager.create(cwd, agentDir);
     const trust = trustState(cwd, agentDir, settings);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
@@ -421,13 +450,13 @@ export class PiSdk {
         cwd,
         agentDir,
         settings,
-        this.options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR,
+        options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR,
       ),
     };
   }
 
-  async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    const { trust, loader, modelRuntime, sessionDir } = await this.services(cwd);
+  async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
+    const { trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
       ...loader
@@ -474,8 +503,8 @@ export class PiSdk {
     };
   }
 
-  private async open(cwd: string, manager: SessionManager) {
-    const { agentDir, settings, loader, modelRuntime } = await this.services(cwd);
+  async function open(cwd: string, manager: SessionManager) {
+    const { agentDir, settings, loader, modelRuntime } = await services(cwd);
     const result = await createAgentSession({
       cwd,
       agentDir,
@@ -484,7 +513,7 @@ export class PiSdk {
       modelRuntime,
       sessionManager: manager,
     });
-    const wrapped = new PiSession(result.session);
+    const wrapped = makePiSession(result.session);
     try {
       await wrapped.bind();
     } catch (error) {
@@ -494,30 +523,40 @@ export class PiSdk {
     return wrapped;
   }
 
-  async createSession(cwd: string) {
-    const { sessionDir } = await this.services(cwd);
-    return this.open(cwd, SessionManager.create(cwd, sessionDir));
+  async function createSession(cwd: string) {
+    const { sessionDir } = await services(cwd);
+    return open(cwd, SessionManager.create(cwd, sessionDir));
   }
 
-  async resumeSession(cwd: string, nativePath: string) {
-    const { sessionDir } = await this.services(cwd);
-    return this.open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
+  async function resumeSession(cwd: string, nativePath: string) {
+    const { sessionDir } = await services(cwd);
+    return open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
   }
 
-  async setWorkspaceTrust(cwd: string, trusted: boolean) {
-    new ProjectTrustStore(this.options.agentDir ?? getAgentDir()).set(cwd, trusted);
+  async function setWorkspaceTrust(cwd: string, trusted: boolean) {
+    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, trusted);
   }
 
-  async inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
-    const trust = new ProjectTrustStore(this.options.agentDir ?? getAgentDir());
+  async function inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
+    const trust = new ProjectTrustStore(options.agentDir ?? getAgentDir());
     const decision = trust.get(sourceCwd);
     if (decision !== null) trust.set(cwd, decision);
   }
 
-  async clearWorkspaceTrust(cwd: string) {
-    new ProjectTrustStore(this.options.agentDir ?? getAgentDir()).set(cwd, null);
+  async function clearWorkspaceTrust(cwd: string) {
+    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, null);
   }
+  return {
+    inspectWorkspace,
+    createSession,
+    resumeSession,
+    setWorkspaceTrust,
+    inheritWorkspaceTrust,
+    clearWorkspaceTrust,
+  };
 }
+
+export type PiSdk = ReturnType<typeof makePiSdk>;
 
 export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi {
   return {

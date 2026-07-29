@@ -1,8 +1,8 @@
-import { PiSdk } from "../apps/server/dist/pi-sdk.js";
+import { makePiSdk } from "../apps/server/dist/pi-sdk.js";
 
 const cwd = process.argv[2] ? new URL(`file://${process.argv[2]}`).pathname : process.cwd();
 const promptIndex = process.argv.indexOf("--prompt");
-const pi = new PiSdk();
+const pi = makePiSdk();
 const info = await pi.inspectWorkspace(cwd);
 console.log(
   `Pi SDK inspection succeeded: ${info.models.length} authenticated model(s), ${info.sessions.length} native session(s).`,

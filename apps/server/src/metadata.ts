@@ -87,15 +87,13 @@ export interface MetadataService {
   ) => Effect.Effect<void, MetadataError>;
 }
 
-export class Metadata extends Context.Service<Metadata, MetadataService>()(
-  "@pidex/server/Metadata",
-) {}
+export const Metadata = Context.Service<MetadataService>("@pidex/server/Metadata");
 
 export function makeMetadataLayer(stateDir?: string) {
   return Layer.effect(
     Metadata,
     Effect.acquireRelease(
-      attemptMetadata("initialize", () => new MetadataStore(stateDir)),
+      attemptMetadata("initialize", () => makeMetadataStore(stateDir)),
       (store) => Effect.sync(() => store.close()),
     ).pipe(Effect.map(makeMetadataService)),
   );
@@ -105,52 +103,46 @@ export function makeMetadataLayer(stateDir?: string) {
  * @deprecated Use the Effect-native `Metadata` service. This synchronous facade remains until
  * the application runtime and current callers can be migrated without crossing task ownership.
  */
-export class MetadataStore {
-  private readonly sqlite: DatabaseSync;
-  private readonly db: MetadataDatabase;
+export function makeMetadataStore(stateDir?: string) {
+  const dir = stateDir ?? process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
+  let db: MetadataDatabase;
+  try {
+    sqlite.exec(METADATA_SCHEMA_SQL);
+    ensureWorkspaceSortOrder();
+    ensureWorkspaceListed();
+    ensureWorkspaceSource();
+    pruneWorkspaceHistory();
+    sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
+    db = createMetadataDatabase(sqlite);
 
-  constructor(stateDir?: string) {
-    const dir = stateDir ?? process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    this.sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
-    try {
-      this.sqlite.exec(METADATA_SCHEMA_SQL);
-      this.ensureWorkspaceSortOrder();
-      this.ensureWorkspaceListed();
-      this.ensureWorkspaceSource();
-      this.pruneWorkspaceHistory();
-      this.sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
-      this.db = createMetadataDatabase(this.sqlite);
-
-      // A process death cannot prove whether Pi completed after the last durable update.
-      // Preserve that ambiguity and require an explicit acknowledgement before new work.
-      this.db.transaction(
-        (tx) => {
-          tx.update(actions)
-            .set({ status: "interrupted", updatedAt: sql`datetime('now')` })
-            .where(
-              and(eq(actions.kind, "prompt"), inArray(actions.status, ["accepted", "running"])),
-            )
-            .run();
-          tx.update(sessionState)
-            .set({
-              runStatus: "interrupted",
-              requiresAcknowledgement: true,
-              updatedAt: sql`datetime('now')`,
-            })
-            .where(inArray(sessionState.runStatus, ["accepted", "running", "stopping"]))
-            .run();
-        },
-        { behavior: "immediate" },
-      );
-    } catch (error) {
-      this.sqlite.close();
-      throw error;
-    }
+    // A process death cannot prove whether Pi completed after the last durable update.
+    // Preserve that ambiguity and require an explicit acknowledgement before new work.
+    db.transaction(
+      (tx) => {
+        tx.update(actions)
+          .set({ status: "interrupted", updatedAt: sql`datetime('now')` })
+          .where(and(eq(actions.kind, "prompt"), inArray(actions.status, ["accepted", "running"])))
+          .run();
+        tx.update(sessionState)
+          .set({
+            runStatus: "interrupted",
+            requiresAcknowledgement: true,
+            updatedAt: sql`datetime('now')`,
+          })
+          .where(inArray(sessionState.runStatus, ["accepted", "running", "stopping"]))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
+  } catch (error) {
+    sqlite.close();
+    throw error;
   }
 
-  rememberWorkspace(canonicalPath: string, sourceWorkspaceId?: string): string {
-    return this.db.transaction((tx) => {
+  function rememberWorkspace(canonicalPath: string, sourceWorkspaceId?: string): string {
+    return db.transaction((tx) => {
       const existingRow = tx
         .select()
         .from(workspaces)
@@ -221,13 +213,13 @@ export class MetadataStore {
     });
   }
 
-  workspaceId(canonicalPath: string): string | undefined {
-    const row = this.db.select().from(workspaces).where(eq(workspaces.path, canonicalPath)).get();
+  function findWorkspaceId(canonicalPath: string): string | undefined {
+    const row = db.select().from(workspaces).where(eq(workspaces.path, canonicalPath)).get();
     return row ? decodeWorkspaceRow(row).id : undefined;
   }
 
-  recent(): Array<{ id: string; path: string; sourceWorkspaceId?: string }> {
-    return this.db
+  function recent(): Array<{ id: string; path: string; sourceWorkspaceId?: string }> {
+    return db
       .select()
       .from(workspaces)
       .where(eq(workspaces.listed, true))
@@ -244,13 +236,13 @@ export class MetadataStore {
       });
   }
 
-  workspaceProjectId(workspaceId: string): string {
-    const row = this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  function workspaceProjectId(workspaceId: string): string {
+    const row = db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).get();
     return row ? (decodeWorkspaceRow(row).sourceWorkspaceId ?? workspaceId) : workspaceId;
   }
 
-  forgetWorkspace(workspaceId: string): void {
-    this.db.transaction((tx) => {
+  function forgetWorkspace(workspaceId: string): void {
+    db.transaction((tx) => {
       const sessionKeys = tx
         .select({ sessionKey: tasks.sessionKey })
         .from(tasks)
@@ -266,8 +258,8 @@ export class MetadataStore {
     });
   }
 
-  reorderWorkspaces(workspaceIds: string[]): void {
-    this.db.transaction((tx) => {
+  function reorderWorkspaces(workspaceIds: string[]): void {
+    db.transaction((tx) => {
       const persistedIds = tx
         .select()
         .from(workspaces)
@@ -287,35 +279,34 @@ export class MetadataStore {
     });
   }
 
-  rememberTask(workspaceId: string, workspacePath: string, sessionKey: string): string {
-    this.db
-      .insert(tasks)
+  function rememberTask(workspaceId: string, workspacePath: string, sessionKey: string): string {
+    db.insert(tasks)
       .values({ id: randomUUID(), workspaceId, workspacePath, sessionKey })
       .onConflictDoNothing({ target: tasks.sessionKey })
       .run();
-    const row = this.db.select().from(tasks).where(eq(tasks.sessionKey, sessionKey)).get();
+    const row = db.select().from(tasks).where(eq(tasks.sessionKey, sessionKey)).get();
     if (!row) throw new Error(`Task for ${sessionKey} was not persisted`);
     return decodeTaskRow(row).id;
   }
 
-  task(
+  function task(
     id: string,
   ): { id: string; workspaceId: string; workspacePath: string; sessionKey: string } | undefined {
-    const row = this.db.select().from(tasks).where(eq(tasks.id, id)).get();
+    const row = db.select().from(tasks).where(eq(tasks.id, id)).get();
     return row ? decodeTaskRow(row) : undefined;
   }
 
-  sessionState(sessionKey: string): { revision: number; run?: RunOutcome } {
-    return this.readSessionState(this.db, sessionKey);
+  function getSessionState(sessionKey: string): { revision: number; run?: RunOutcome } {
+    return readSessionState(db, sessionKey);
   }
 
-  acceptPrompt(input: ActionInput): ActionOutcome {
-    return this.db.transaction(
+  function acceptPrompt(input: ActionInput): ActionOutcome {
+    return db.transaction(
       (tx) => {
-        const replay = this.replay(tx, input, "prompt");
+        const replay = findReplay(tx, input, "prompt");
         if (replay) return replay;
-        const state = this.readSessionState(tx, input.sessionKey);
-        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const state = readSessionState(tx, input.sessionKey);
+        assertCurrentRevision(state.revision, input.expectedRevision);
         if (state.run?.requiresAcknowledgement)
           throw ActionProtocolError.make({
             code: "interrupted_run",
@@ -368,13 +359,13 @@ export class MetadataStore {
     );
   }
 
-  acceptStop(input: ActionInput & { runId: string }): ActionOutcome {
-    return this.db.transaction(
+  function acceptStop(input: ActionInput & { runId: string }): ActionOutcome {
+    return db.transaction(
       (tx) => {
-        const replay = this.replay(tx, input, "stop");
+        const replay = findReplay(tx, input, "stop");
         if (replay) return replay;
-        const state = this.readSessionState(tx, input.sessionKey);
-        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const state = readSessionState(tx, input.sessionKey);
+        assertCurrentRevision(state.revision, input.expectedRevision);
         if (!state.run || state.run.runId !== input.runId)
           throw ActionProtocolError.make({
             code: "run_mismatch",
@@ -419,15 +410,15 @@ export class MetadataStore {
     );
   }
 
-  acceptRunMutation(
+  function acceptRunMutation(
     input: ActionInput & { runId: string; kind: "steer" | "follow-up" },
   ): ActionOutcome {
-    return this.db.transaction(
+    return db.transaction(
       (tx) => {
-        const replay = this.replay(tx, input, input.kind);
+        const replay = findReplay(tx, input, input.kind);
         if (replay) return replay;
-        const state = this.readSessionState(tx, input.sessionKey);
-        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const state = readSessionState(tx, input.sessionKey);
+        assertCurrentRevision(state.revision, input.expectedRevision);
         if (
           !state.run ||
           state.run.runId !== input.runId ||
@@ -471,15 +462,15 @@ export class MetadataStore {
     );
   }
 
-  acceptSessionMutation(
+  function acceptSessionMutation(
     input: ActionInput & { kind: "clear-queue" | "compact" | "config" | "dialog" | "rename" },
   ): ActionOutcome {
-    return this.db.transaction(
+    return db.transaction(
       (tx) => {
-        const replay = this.replay(tx, input, input.kind);
+        const replay = findReplay(tx, input, input.kind);
         if (replay) return replay;
-        const state = this.readSessionState(tx, input.sessionKey);
-        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const state = readSessionState(tx, input.sessionKey);
+        assertCurrentRevision(state.revision, input.expectedRevision);
         const revision = state.revision + 1;
         const actionRunId = state.run?.runId ?? randomUUID().replaceAll("-", "");
         const now = new Date().toISOString();
@@ -514,13 +505,13 @@ export class MetadataStore {
     );
   }
 
-  acknowledgeInterrupted(input: ActionInput): ActionOutcome {
-    return this.db.transaction(
+  function acknowledgeInterrupted(input: ActionInput): ActionOutcome {
+    return db.transaction(
       (tx) => {
-        const replay = this.replay(tx, input, "acknowledge");
+        const replay = findReplay(tx, input, "acknowledge");
         if (replay) return replay;
-        const state = this.readSessionState(tx, input.sessionKey);
-        this.assertCurrentRevision(state.revision, input.expectedRevision);
+        const state = readSessionState(tx, input.sessionKey);
+        assertCurrentRevision(state.revision, input.expectedRevision);
         if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
           throw ActionProtocolError.make({
             code: "run_mismatch",
@@ -560,9 +551,9 @@ export class MetadataStore {
     );
   }
 
-  markPromptStatus(sessionKey: string, runId: string, status: ActionStatus) {
+  function markPromptStatus(sessionKey: string, runId: string, status: ActionStatus) {
     const now = new Date().toISOString();
-    this.db.transaction(
+    db.transaction(
       (tx) => {
         tx.update(actions)
           .set({ status, updatedAt: now })
@@ -587,24 +578,23 @@ export class MetadataStore {
     );
   }
 
-  markActionStatus(actionId: string, status: ActionStatus) {
-    this.db
-      .update(actions)
+  function markActionStatus(actionId: string, status: ActionStatus) {
+    db.update(actions)
       .set({ status, updatedAt: new Date().toISOString() })
       .where(eq(actions.actionId, actionId))
       .run();
   }
 
-  close() {
-    this.sqlite.close();
+  function close() {
+    sqlite.close();
   }
 
-  private readSessionState(
-    db: MetadataExecutor,
+  function readSessionState(
+    executor: MetadataExecutor,
     sessionKey: string,
   ): { revision: number; run?: RunOutcome } {
-    this.ensureSession(db, sessionKey);
-    const persistedRow = db
+    ensureSession(executor, sessionKey);
+    const persistedRow = executor
       .select()
       .from(sessionState)
       .where(eq(sessionState.sessionKey, sessionKey))
@@ -625,19 +615,20 @@ export class MetadataStore {
     };
   }
 
-  private ensureSession(db: MetadataExecutor, sessionKey: string) {
-    db.insert(sessionState)
+  function ensureSession(executor: MetadataExecutor, sessionKey: string) {
+    executor
+      .insert(sessionState)
       .values({ sessionKey, revision: 0, updatedAt: new Date().toISOString() })
       .onConflictDoNothing()
       .run();
   }
 
-  private ensureWorkspaceSortOrder() {
-    const column = this.sqlite
+  function ensureWorkspaceSortOrder() {
+    const column = sqlite
       .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
       .get();
     if (column) return;
-    this.sqlite.exec(`
+    sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
       UPDATE workspaces
@@ -653,34 +644,34 @@ export class MetadataStore {
     `);
   }
 
-  private ensureWorkspaceListed() {
-    const column = this.sqlite
+  function ensureWorkspaceListed() {
+    const column = sqlite
       .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'listed'")
       .get();
     if (column) return;
-    this.sqlite.exec(`
+    sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN listed INTEGER NOT NULL DEFAULT 1;
       COMMIT;
     `);
   }
 
-  private ensureWorkspaceSource() {
-    const column = this.sqlite
+  function ensureWorkspaceSource() {
+    const column = sqlite
       .prepare(
         "SELECT name FROM pragma_table_info('workspaces') WHERE name = 'source_workspace_id'",
       )
       .get();
     if (column) return;
-    this.sqlite.exec(`
+    sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN source_workspace_id TEXT;
       COMMIT;
     `);
   }
 
-  private pruneWorkspaceHistory() {
-    this.sqlite.exec(`
+  function pruneWorkspaceHistory() {
+    sqlite.exec(`
       UPDATE workspaces
       SET listed = 0
       WHERE listed = 1 AND id NOT IN (
@@ -693,12 +684,12 @@ export class MetadataStore {
     `);
   }
 
-  private replay(
-    db: MetadataExecutor,
+  function findReplay(
+    executor: MetadataExecutor,
     input: Pick<ActionInput, "actionId" | "clientId" | "sessionKey" | "requestDigest">,
     kind: ActionKind,
   ): ActionOutcome | undefined {
-    const persistedRow = db
+    const persistedRow = executor
       .select()
       .from(actions)
       .where(eq(actions.actionId, input.actionId))
@@ -726,13 +717,35 @@ export class MetadataStore {
     };
   }
 
-  private assertCurrentRevision(currentRevision: number, expectedRevision: number) {
-    if (currentRevision !== expectedRevision)
-      throw ActionProtocolError.make({
-        code: "stale_revision",
-        message: `Session changed (expected revision ${expectedRevision}, current revision ${currentRevision})`,
-      });
-  }
+  return {
+    workspaceId: findWorkspaceId,
+    sessionState: getSessionState,
+    rememberWorkspace,
+    recent,
+    workspaceProjectId,
+    forgetWorkspace,
+    reorderWorkspaces,
+    rememberTask,
+    task,
+    acceptPrompt,
+    acceptStop,
+    acceptRunMutation,
+    acceptSessionMutation,
+    acknowledgeInterrupted,
+    markPromptStatus,
+    markActionStatus,
+    close,
+  };
+}
+
+export type MetadataStore = ReturnType<typeof makeMetadataStore>;
+
+function assertCurrentRevision(currentRevision: number, expectedRevision: number) {
+  if (currentRevision !== expectedRevision)
+    throw ActionProtocolError.make({
+      code: "stale_revision",
+      message: `Session changed (expected revision ${expectedRevision}, current revision ${currentRevision})`,
+    });
 }
 
 function makeMetadataService(store: MetadataStore): MetadataService {

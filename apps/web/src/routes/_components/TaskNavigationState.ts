@@ -2,32 +2,29 @@ import type { ChatSnapshot } from "@pidex/api";
 
 const DEFAULT_RETENTION_MS = 5 * 60 * 1_000;
 
-export class TaskSnapshotCache {
-  private snapshots = new Map<string, { snapshot: ChatSnapshot; retainedAt: number }>();
+export function makeTaskSnapshotCache(retentionMs = DEFAULT_RETENTION_MS, now = Date.now) {
+  const snapshots = new Map<string, { snapshot: ChatSnapshot; retainedAt: number }>();
 
-  constructor(
-    private readonly retentionMs = DEFAULT_RETENTION_MS,
-    private readonly now = Date.now,
-  ) {}
-
-  get(taskId: string) {
-    const cached = this.snapshots.get(taskId);
+  function get(taskId: string) {
+    const cached = snapshots.get(taskId);
     if (!cached) return undefined;
-    if (this.now() - cached.retainedAt <= this.retentionMs) return cached.snapshot;
-    this.snapshots.delete(taskId);
+    if (now() - cached.retainedAt <= retentionMs) return cached.snapshot;
+    snapshots.delete(taskId);
     return undefined;
   }
 
-  set(snapshot: ChatSnapshot) {
-    const retainedAt = this.now();
-    for (const [taskId, cached] of this.snapshots)
-      if (retainedAt - cached.retainedAt > this.retentionMs) this.snapshots.delete(taskId);
-    this.snapshots.set(snapshot.taskId, { snapshot, retainedAt });
+  function set(snapshot: ChatSnapshot) {
+    const retainedAt = now();
+    for (const [taskId, cached] of snapshots)
+      if (retainedAt - cached.retainedAt > retentionMs) snapshots.delete(taskId);
+    snapshots.set(snapshot.taskId, { snapshot, retainedAt });
   }
 
-  clear() {
-    this.snapshots.clear();
+  function clear() {
+    snapshots.clear();
   }
+
+  return { get, set, clear };
 }
 
 export const taskPath = (taskId: string) => `/tasks/${encodeURIComponent(taskId)}`;
