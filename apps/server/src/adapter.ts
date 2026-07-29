@@ -4,6 +4,7 @@ import type {
   ModelInfo,
   SessionSummary,
   TextItem,
+  TranscriptItem,
   ToolItem,
 } from "@pidex/api";
 import { Effect, Queue, Scope, Stream } from "effect";
@@ -33,7 +34,7 @@ export interface AdapterWorkspaceInfo {
 export interface AdapterSession {
   readonly nativeId: string;
   readonly nativePath: string | undefined;
-  readonly messages: TextItem[];
+  readonly messages: TranscriptItem[];
   readonly model: string | undefined;
   readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly sessionName: string | undefined;

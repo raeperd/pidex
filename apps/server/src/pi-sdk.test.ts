@@ -101,6 +101,138 @@ describe("Pi SDK Effect service", () => {
     ),
   );
 
+  it.effect("restores tool calls and results from a persisted Pi session", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        const sessionDir = path.join(fixture.agentDir, "sessions");
+        const manager = SessionManager.create(fixture.cwd, sessionDir);
+        const userId = manager.appendMessage({
+          role: "user",
+          content: "Summarize this repository",
+          timestamp: 1,
+        });
+        const assistantId = manager.appendMessage({
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Planning repository inspection" },
+            {
+              type: "toolCall",
+              id: "tool-readme",
+              name: "bash",
+              arguments: { command: "ls -la" },
+            },
+            {
+              type: "toolCall",
+              id: "tool-missing",
+              name: "read",
+              arguments: { path: "missing.txt" },
+            },
+          ],
+          api: "openai-responses",
+          provider: "openai",
+          model: "gpt-5.5",
+          usage: {
+            input: 10,
+            output: 5,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 15,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        });
+        manager.appendMessage({
+          role: "toolResult",
+          toolCallId: "tool-readme",
+          toolName: "bash",
+          content: [{ type: "text", text: "README.md\npackage.json\n" }],
+          isError: false,
+          timestamp: 3,
+        });
+        manager.appendMessage({
+          role: "toolResult",
+          toolCallId: "tool-missing",
+          toolName: "read",
+          content: [{ type: "text", text: "File not found" }],
+          isError: true,
+          timestamp: 4,
+        });
+        const finalId = manager.appendMessage({
+          role: "assistant",
+          content: [{ type: "text", text: "This is a desktop coding client." }],
+          api: "openai-responses",
+          provider: "openai",
+          model: "gpt-5.5",
+          usage: {
+            input: 20,
+            output: 10,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 30,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: 5,
+        });
+        const nativePath = manager.getSessionFile();
+        if (!nativePath) return yield* Effect.die("Persisted session has no file path");
+
+        const pi = makePiSdkService(new PiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const session = yield* pi.resumeSession(fixture.cwd, nativePath);
+
+        assert.deepEqual(
+          session.state.messages.map((item) =>
+            item.type === "tool" ? item : { ...item, timestamp: "timestamp" },
+          ),
+          [
+            {
+              type: "user",
+              id: userId,
+              text: "Summarize this repository",
+              complete: true,
+              timestamp: "timestamp",
+            },
+            {
+              type: "assistant",
+              id: assistantId,
+              text: "",
+              thinking: "Planning repository inspection",
+              complete: true,
+              timestamp: "timestamp",
+            },
+            {
+              type: "tool",
+              id: "tool-readme",
+              name: "bash",
+              argumentSummary: '{\n  "command": "ls -la"\n}',
+              state: "success",
+              preview: "README.md\npackage.json\n",
+              truncated: false,
+            },
+            {
+              type: "tool",
+              id: "tool-missing",
+              name: "read",
+              argumentSummary: '{\n  "path": "missing.txt"\n}',
+              state: "error",
+              preview: "File not found",
+              truncated: false,
+            },
+            {
+              type: "assistant",
+              id: finalId,
+              text: "This is a desktop coding client.",
+              complete: true,
+              timestamp: "timestamp",
+            },
+          ],
+        );
+      }),
+    ),
+  );
+
   it.effect("inspects an isolated workspace and reports typed open failures", () =>
     Effect.scoped(
       Effect.gen(function* () {

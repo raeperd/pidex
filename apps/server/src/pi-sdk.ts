@@ -12,8 +12,9 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type ExtensionUIContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { ContextUsage, ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
+import type { ContextUsage, ExtensionDialog, TextItem, TranscriptItem, ToolItem } from "@pidex/api";
 import { Effect, Scope } from "effect";
 import {
   acquireAdapterSession,
@@ -74,6 +75,56 @@ const thinkingOf = (content: unknown): string =>
 const messageId = (message: { role: string; timestamp?: number }) =>
   `${message.role}-${message.timestamp ?? Date.now()}`;
 
+function transcriptItems(entries: SessionEntry[]): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  const toolIndexes = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "user" || message.role === "assistant") {
+      const item: TextItem = {
+        type: message.role,
+        id: entry.id,
+        text: textOf(message.content),
+        complete: true,
+        timestamp: entry.timestamp,
+      };
+      const thinking = thinkingOf(message.content);
+      if (thinking) item.thinking = thinking;
+      items.push(item);
+      if (message.role === "assistant")
+        for (const part of message.content) {
+          if (part.type !== "toolCall") continue;
+          const argumentSummary = bounded(part.arguments, 800);
+          toolIndexes.set(part.id, items.length);
+          items.push({
+            type: "tool",
+            id: part.id,
+            name: part.name,
+            argumentSummary: argumentSummary.text,
+            state: "running",
+            preview: "",
+            truncated: argumentSummary.truncated,
+          });
+        }
+      continue;
+    }
+    if (message.role !== "toolResult") continue;
+    const toolIndex = toolIndexes.get(message.toolCallId);
+    if (toolIndex === undefined) continue;
+    const tool = items[toolIndex];
+    if (!tool || tool.type !== "tool") continue;
+    const preview = bounded(textOf(message.content));
+    items[toolIndex] = {
+      ...tool,
+      state: message.isError ? "error" : "success",
+      preview: preview.text,
+      truncated: tool.truncated || preview.truncated,
+    };
+  }
+  return items;
+}
+
 function resolvedSessionDir(
   cwd: string,
   agentDir: string,
@@ -119,24 +170,8 @@ function makePiSession(session: AgentSession) {
         emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
     });
   }
-  function readMessages(): TextItem[] {
-    return session.sessionManager.buildContextEntries().flatMap((entry) => {
-      if (
-        entry.type !== "message" ||
-        (entry.message.role !== "user" && entry.message.role !== "assistant")
-      )
-        return [];
-      const item: TextItem = {
-        type: entry.message.role,
-        id: entry.id,
-        text: textOf(entry.message.content),
-        complete: true,
-        timestamp: entry.timestamp,
-      };
-      const thinking = thinkingOf(entry.message.content);
-      if (thinking) item.thinking = thinking;
-      return [item];
-    });
+  function readMessages(): TranscriptItem[] {
+    return transcriptItems(session.sessionManager.buildContextEntries());
   }
   function readModel() {
     return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
