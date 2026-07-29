@@ -1365,7 +1365,7 @@
 </svelte:head>
 
 <div
-  class={`grid h-dvh w-full overflow-hidden max-[900px]:grid-cols-1 ${sidebarCollapsed ? "grid-cols-1" : "grid-cols-[304px_minmax(0,1fr)]"}`}
+  class={`grid h-dvh w-full overflow-hidden max-[900px]:grid-cols-1 ${sidebarCollapsed ? "grid-cols-1" : "grid-cols-[320px_minmax(0,1fr)]"}`}
 >
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
@@ -1376,7 +1376,7 @@
 
   <aside
     id="tasks-drawer"
-    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(86vw,292px)] ${sidebarCollapsed ? "min-[901px]:hidden" : ""} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:hidden" : ""} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Tasks"
     inert={mobileViewport.current && !drawerOpen}
   >
@@ -1436,23 +1436,19 @@
 
     <section class="flex min-h-0 flex-1 flex-col px-0.5 pb-2">
       <div
-        class="flex min-h-7 items-center justify-between px-2 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint"
+        class="mt-2 flex min-h-9 items-center justify-between px-2 text-[13px] font-medium text-muted"
       >
-        <span class="inline-flex items-center gap-2"
-          >PROJECTS <small class="text-[9px] font-medium tracking-normal opacity-75"
-            >{rootProjects.length}</small
-          ></span
-        >
+        <span>Project</span>
         <button
-          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 disabled:cursor-not-allowed disabled:opacity-40"
+          class="grid size-8 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 disabled:cursor-not-allowed disabled:opacity-40"
           onclick={openProjectPicker}
           disabled={projectOrderSaving}
           aria-label="Add project"
-          title="Add project"><Icon name="folder-plus" size={15} /></button
+          title="Add project"><Icon name="folder-plus" size={17} /></button
         >
       </div>
       <nav
-        class="min-h-0 flex-1 overflow-y-auto pt-px pb-2 [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
+        class="min-h-0 flex-1 overflow-y-auto pt-1 pb-2 [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
         aria-label="Projects"
         aria-busy={chatLoading || projectLoading || projectOrderSaving}
       >
@@ -1484,7 +1480,7 @@
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
             <div
-              class="relative mb-0.5 rounded-lg"
+              class="relative mb-1 rounded-lg"
               role="group"
               aria-label={`${projectLabel(project)} project`}
               ondragover={(event) => dragProjectOver(event, project.id)}
@@ -1499,7 +1495,7 @@
               {/if}
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${projectActive(project) ? "text-foreground" : ""}`}
+                  class={`flex h-9 min-w-0 flex-1 cursor-grab items-center gap-1.5 rounded-lg border-0 bg-transparent px-1.5 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${projectActive(project) ? "text-foreground" : ""}`}
                   draggable={!projectOrderSaving}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
@@ -1514,23 +1510,24 @@
                   onclick={() => toggleProject(project)}
                 >
                   <span
-                    class={`grid size-5 flex-none place-items-center rounded text-muted ${projectActive(project) ? "bg-primary/15 text-primary" : ""}`}
-                    ><Icon name={expanded ? "folder-open" : "folder"} size={15} /></span
+                    class={`grid size-4 flex-none place-items-center text-faint transition-transform ${expanded ? "rotate-90" : ""}`}
+                    ><Icon name="chevron" size={14} /></span
+                  >
+                  <span
+                    class={`grid size-5 flex-none place-items-center ${projectActive(project) ? "text-primary" : "text-muted"}`}
+                    ><Icon name={expanded ? "folder-open" : "folder"} size={17} /></span
                   >
                   <strong
-                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium text-inherit"
+                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-medium text-foreground"
                     >{projectLabel(project)}</strong
                   >
                   {#if projectLoadingId === project.id}<span
                       class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint max-[900px]:text-[10.5px]"
                       >•••</span
-                    >{:else if loaded}<span
-                      class="flex-none font-mono text-[9.5px] leading-none text-faint max-[900px]:text-[10.5px]"
-                      >{matchingTasks.length}</span
                     >{/if}
                 </button>
                 <button
-                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="grid size-8 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={() => newTaskInProject(project)}
                   disabled={chatLoading || projectOrderSaving || projectLoadingId === project.id}
                   aria-label={`New task in ${projectLabel(project)}`}
@@ -1540,19 +1537,16 @@
                 </button>
               </div>
               {#if expanded || shownTasks.length > 0}
-                <div
-                  class="mb-1 ml-5.5 border-l border-border-strong/60 pl-2"
-                  id={`project-${project.id}`}
-                >
+                <div class="mb-2 ml-3" id={`project-${project.id}`}>
                   {#if projectLoadingId === project.id && !loaded}
                     <p
-                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-9 px-2 py-2 text-[12.5px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       Loading tasks…
                     </p>
                   {:else if loaded && shownTasks.length === 0}
                     <p
-                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-9 px-2 py-2 text-[12.5px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       {search ? "No matching tasks." : "No tasks yet."}
                     </p>
@@ -1560,7 +1554,7 @@
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2.5 text-left text-[13.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => navigateToTask(task.id)}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
@@ -1581,7 +1575,7 @@
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
                           >{:else}<time
-                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums max-[900px]:text-[10.5px]"
+                            class="flex-none font-mono text-[10.5px] leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
                         <span
@@ -1591,7 +1585,7 @@
                     {/each}
                     {#if hiddenTasks > 0}
                       <button
-                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
+                        class="min-h-8 w-full border-0 bg-transparent px-2.5 text-left text-[11.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
                         onclick={() =>
                           (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
                         >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button
@@ -1667,16 +1661,6 @@
             class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
             >{currentTitle}</strong
           >
-          {#if !usesIntegratedTitleBar || mobileViewport.current}
-            <div class="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-faint capitalize">
-              <span class="max-[560px]:hidden">{workspace?.name ?? "No project"}</span>
-              <span class="opacity-45 max-[560px]:hidden">/</span>
-              <span
-                class={`size-1.5 rounded-full ${connection === "connected" ? "bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-faint"}`}
-              ></span>
-              <span>{routeLoading ? "syncing" : snapshot ? connection : "local"}</span>
-            </div>
-          {/if}
         </div>
         {#if snapshot}
           <div class="flex gap-1">
