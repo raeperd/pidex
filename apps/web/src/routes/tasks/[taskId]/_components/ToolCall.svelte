@@ -2,6 +2,7 @@
   export interface ToolCallHeader {
     label: string;
     detail: string;
+    range?: string;
   }
 
   export interface ToolCallPreview {
@@ -16,7 +17,7 @@
     const args = parseArguments(argumentSummary);
     if (!args) return { label: name, detail: argumentSummary.trim() };
     if (name === "bash") return { label: "$", detail: text(args.command) || "…" };
-    if (name === "read") return { label: "read", detail: readDetail(args) };
+    if (name === "read") return { label: "read", ...readDetail(args) };
     if (name === "grep")
       return {
         label: "Searched",
@@ -83,13 +84,16 @@
       .join(" ");
   }
 
-  function readDetail(args: Record<string, unknown>): string {
+  function readDetail(args: Record<string, unknown>): Pick<ToolCallHeader, "detail" | "range"> {
     const path = text(args.path) || text(args.file_path) || "…";
     const offset = number(args.offset);
     const limit = number(args.limit);
-    if (offset === undefined && limit === undefined) return path;
+    if (offset === undefined && limit === undefined) return { detail: path };
     const start = offset ?? 1;
-    return `${path}:${start}${limit === undefined ? "" : `-${start + limit - 1}`}`;
+    return {
+      detail: path,
+      range: `:${start}${limit === undefined ? "" : `-${start + limit - 1}`}`,
+    };
   }
 
   function text(value: unknown): string {
@@ -152,7 +156,7 @@
   <button
     type="button"
     class="block w-full cursor-pointer border-0 border-none bg-transparent p-0 text-left text-inherit"
-    aria-label={`${header.label}${header.detail ? ` ${header.detail}` : ""}${readOutputCollapsed ? " (click to expand)" : ""}`}
+    aria-label={`${header.label}${header.detail ? ` ${header.detail}${header.range ?? ""}` : ""}${readOutputCollapsed ? " (click to expand)" : ""}`}
     aria-expanded={expanded}
     onclick={() => (expanded = !expanded)}
   >
@@ -160,6 +164,8 @@
       ><span>{header.label}</span>
       {#if header.detail}<span class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}
           >{header.detail}</span
+        >{/if}{#if header.range}<span class="tool-call__range text-[var(--warning)]"
+          >{header.range}</span
         >{/if}{#if readOutputCollapsed}<span class="ml-[0.5ch] font-normal text-faint"
           >(click to expand)</span
         >{/if}</span

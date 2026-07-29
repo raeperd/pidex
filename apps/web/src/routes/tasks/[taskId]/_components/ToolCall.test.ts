@@ -19,7 +19,8 @@ describe("toolCallHeader", () => {
       toolCallHeader("read", JSON.stringify({ path: "README.md", offset: 1, limit: 800 })),
     ).toEqual({
       label: "read",
-      detail: "README.md:1-800",
+      detail: "README.md",
+      range: ":1-800",
     });
     expect(toolCallHeader("grep", JSON.stringify({ pattern: "TODO", path: "src" }))).toEqual({
       label: "Searched",
