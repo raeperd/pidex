@@ -34,6 +34,7 @@ export class MetadataStore {
       this.sqlite.exec(METADATA_SCHEMA_SQL);
       this.ensureWorkspaceSortOrder();
       this.ensureWorkspaceListed();
+      this.ensureWorkspaceSource();
       this.pruneWorkspaceHistory();
       this.sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
       this.db = createMetadataDatabase(this.sqlite);
@@ -65,7 +66,7 @@ export class MetadataStore {
     }
   }
 
-  rememberWorkspace(canonicalPath: string): string {
+  rememberWorkspace(canonicalPath: string, sourceWorkspaceId?: string): string {
     return this.db.transaction((tx) => {
       const existing = tx
         .select({ id: workspaces.id, listed: workspaces.listed })
@@ -74,7 +75,10 @@ export class MetadataStore {
         .get();
       const openedAt = new Date().toISOString();
       if (existing?.listed) {
-        tx.update(workspaces).set({ openedAt }).where(eq(workspaces.id, existing.id)).run();
+        tx.update(workspaces)
+          .set({ openedAt, ...(sourceWorkspaceId ? { sourceWorkspaceId } : {}) })
+          .where(eq(workspaces.id, existing.id))
+          .run();
         return existing.id;
       }
       const retained = tx
@@ -104,7 +108,12 @@ export class MetadataStore {
       const sortOrder = (last?.sortOrder ?? -1) + 1;
       if (existing) {
         tx.update(workspaces)
-          .set({ listed: true, openedAt, sortOrder })
+          .set({
+            listed: true,
+            openedAt,
+            sortOrder,
+            ...(sourceWorkspaceId ? { sourceWorkspaceId } : {}),
+          })
           .where(eq(workspaces.id, existing.id))
           .run();
         return existing.id;
@@ -117,6 +126,7 @@ export class MetadataStore {
           openedAt,
           sortOrder,
           listed: true,
+          ...(sourceWorkspaceId ? { sourceWorkspaceId } : {}),
         })
         .returning({ id: workspaces.id })
         .get();
@@ -133,14 +143,49 @@ export class MetadataStore {
       .get()?.id;
   }
 
-  recent(): Array<{ id: string; path: string }> {
+  recent(): Array<{ id: string; path: string; sourceWorkspaceId?: string }> {
     return this.db
-      .select({ id: workspaces.id, path: workspaces.path })
+      .select({
+        id: workspaces.id,
+        path: workspaces.path,
+        sourceWorkspaceId: workspaces.sourceWorkspaceId,
+      })
       .from(workspaces)
       .where(eq(workspaces.listed, true))
       .orderBy(workspaces.sortOrder, workspaces.id)
       .limit(MAX_RECENT_WORKSPACES)
-      .all();
+      .all()
+      .map(({ id, path: workspacePath, sourceWorkspaceId }) => ({
+        id,
+        path: workspacePath,
+        ...(sourceWorkspaceId ? { sourceWorkspaceId } : {}),
+      }));
+  }
+
+  workspaceProjectId(workspaceId: string): string {
+    const row = this.db
+      .select({ sourceWorkspaceId: workspaces.sourceWorkspaceId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .get();
+    return row?.sourceWorkspaceId ?? workspaceId;
+  }
+
+  forgetWorkspace(workspaceId: string): void {
+    this.db.transaction((tx) => {
+      const sessionKeys = tx
+        .select({ sessionKey: tasks.sessionKey })
+        .from(tasks)
+        .where(eq(tasks.workspaceId, workspaceId))
+        .all()
+        .map(({ sessionKey }) => sessionKey);
+      if (sessionKeys.length > 0) {
+        tx.delete(actions).where(inArray(actions.sessionKey, sessionKeys)).run();
+        tx.delete(sessionState).where(inArray(sessionState.sessionKey, sessionKeys)).run();
+      }
+      tx.delete(tasks).where(eq(tasks.workspaceId, workspaceId)).run();
+      tx.delete(workspaces).where(eq(workspaces.id, workspaceId)).run();
+    });
   }
 
   reorderWorkspaces(workspaceIds: string[]): void {
@@ -558,6 +603,20 @@ export class MetadataStore {
     `);
   }
 
+  private ensureWorkspaceSource() {
+    const column = this.sqlite
+      .prepare(
+        "SELECT name FROM pragma_table_info('workspaces') WHERE name = 'source_workspace_id'",
+      )
+      .get();
+    if (column) return;
+    this.sqlite.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE workspaces ADD COLUMN source_workspace_id TEXT;
+      COMMIT;
+    `);
+  }
+
   private pruneWorkspaceHistory() {
     this.sqlite.exec(`
       UPDATE workspaces
@@ -653,6 +712,7 @@ const workspaces = sqliteTable(
     openedAt: text("opened_at").notNull(),
     sortOrder: integer("sort_order").notNull(),
     listed: integer("listed", { mode: "boolean" }).notNull().default(true),
+    sourceWorkspaceId: text("source_workspace_id"),
   },
   (table) => [index("workspaces_order_idx").on(table.listed, table.sortOrder, table.id)],
 );
@@ -701,7 +761,8 @@ const METADATA_SCHEMA_SQL = `
     path TEXT NOT NULL UNIQUE,
     opened_at TEXT NOT NULL,
     sort_order INTEGER NOT NULL,
-    listed INTEGER NOT NULL DEFAULT 1
+    listed INTEGER NOT NULL DEFAULT 1,
+    source_workspace_id TEXT
   );
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,

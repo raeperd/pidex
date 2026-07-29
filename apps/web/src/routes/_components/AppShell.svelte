@@ -21,6 +21,7 @@
     provideAppShellContext,
     type AppShellContext,
     type TaskDelivery,
+    type TaskStartMode,
     type TaskToolOutput,
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
@@ -72,6 +73,7 @@
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
   let delivery = $state<TaskDelivery>("steer");
+  let startMode = $state<TaskStartMode>("local");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
@@ -114,6 +116,9 @@
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
   let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let taskHasNoTranscript = $derived(
+    Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
+  );
   let hasTopBanner = $derived(
     Boolean(
       error ||
@@ -132,30 +137,74 @@
   let hasConfigurationDraft = $derived(
     configurationDraft.model !== undefined || configurationDraft.thinkingLevel !== undefined,
   );
+  let startModeEditable = $derived(
+    Boolean(
+      snapshot &&
+      taskHasNoTranscript &&
+      !active &&
+      !chatLoading &&
+      !workspaceIsWorktree(snapshot.workspaceId),
+    ),
+  );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  function sourceWorkspaceId(project: RecentWorkspace) {
+    if (project.sourceWorkspaceId) return project.sourceWorkspaceId;
+    if (project.worktree !== true) return undefined;
+    const sources = (bootstrap?.recentWorkspaces ?? []).filter(
+      (candidate) =>
+        candidate.worktree !== true && projectName(candidate.path) === projectName(project.path),
+    );
+    return sources.length === 1 ? sources[0]?.id : undefined;
+  }
   function projectLabel(project: RecentWorkspace) {
     const name = projectName(project.path);
     const duplicates = (bootstrap?.recentWorkspaces ?? []).filter(
-      (entry) => projectName(entry.path) === name,
+      (entry) => !sourceWorkspaceId(entry) && projectName(entry.path) === name,
     );
     if (duplicates.length < 2) return name;
-    return project.path.includes("/.codex/worktrees/") ? `${name} · worktree` : `${name} · local`;
+    const isWorktree = project.worktree || /[\\/]\.codex[\\/]worktrees[\\/]/.test(project.path);
+    return isWorktree ? `${name} · worktree` : `${name} · local`;
+  }
+  function workspaceIsWorktree(workspaceId: string) {
+    return bootstrap?.recentWorkspaces.some(
+      (project) => project.id === workspaceId && project.worktree === true,
+    );
   }
   const workspaceFor = (id: string) =>
     workspaceCache[id] ?? (workspace?.id === id ? workspace : undefined);
+  const worktreesFor = (workspaceId: string) =>
+    (bootstrap?.recentWorkspaces ?? []).filter(
+      (project) => sourceWorkspaceId(project) === workspaceId,
+    );
+  const projectActive = (project: RecentWorkspace) =>
+    workspace?.id === project.id ||
+    worktreesFor(project.id).some((worktree) => worktree.id === workspace?.id);
   const projectExpanded = (id: string) => expandedProjectIds.includes(id);
   function tasksFor(project: RecentWorkspace) {
-    const loaded = workspaceFor(project.id);
-    if (!loaded) return [];
+    const sessions = [project, ...worktreesFor(project.id)]
+      .flatMap((member) =>
+        (workspaceFor(member.id)?.sessions ?? []).map((session) => ({
+          ...session,
+          worktree: member.worktree === true,
+        })),
+      )
+      .toSorted((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
     const query = search.trim().toLowerCase();
-    if (!query || loaded.name.toLowerCase().includes(query)) return loaded.sessions;
-    return loaded.sessions.filter((session) =>
+    if (!query || projectName(project.path).toLowerCase().includes(query)) return sessions;
+    return sessions.filter((session) =>
       `${session.name ?? ""} ${session.firstMessage}`.toLowerCase().includes(query),
     );
   }
+  let rootProjects = $derived.by(() => {
+    const projects = bootstrap?.recentWorkspaces ?? [];
+    return projects.filter((project) => {
+      const sourceId = sourceWorkspaceId(project);
+      return !sourceId || !projects.some((candidate) => candidate.id === sourceId);
+    });
+  });
   let visibleProjects = $derived.by(() => {
     const query = search.trim().toLowerCase();
-    return (bootstrap?.recentWorkspaces ?? []).filter(
+    return rootProjects.filter(
       (project) =>
         !query ||
         projectName(project.path).toLowerCase().includes(query) ||
@@ -207,6 +256,9 @@
       get active() {
         return active;
       },
+      get creatingTask() {
+        return chatLoading;
+      },
       get delivery() {
         return delivery;
       },
@@ -227,6 +279,12 @@
       },
       get snapshot() {
         return snapshot;
+      },
+      get startMode() {
+        return startMode;
+      },
+      get startModeEditable() {
+        return startModeEditable;
       },
       get toolElapsedNow() {
         return toolElapsedNow;
@@ -250,6 +308,9 @@
       start: startTask,
       setDelivery: (value) => (delivery = value),
       setDraft: (value) => (draft = value),
+      setStartMode: (value) => {
+        if (startModeEditable) startMode = value;
+      },
       stageConfiguration,
       stop,
     },
@@ -310,10 +371,16 @@
     if (expand && !expandedProjectIds.includes(loaded.id))
       expandedProjectIds = [...expandedProjectIds, loaded.id];
     if (bootstrap) {
-      const entry = { id: loaded.id, path: loaded.path };
       const currentIndex = bootstrap.recentWorkspaces.findIndex(
         (project) => project.id === loaded.id || project.path === loaded.path,
       );
+      const current = bootstrap.recentWorkspaces[currentIndex];
+      const entry = {
+        id: loaded.id,
+        path: loaded.path,
+        ...(current?.worktree === undefined ? {} : { worktree: current.worktree }),
+        ...(current?.sourceWorkspaceId ? { sourceWorkspaceId: current.sourceWorkspaceId } : {}),
+      };
       let recentWorkspaces = bootstrap.recentWorkspaces;
       if (currentIndex < 0 && recentWorkspaces.length < MAX_RECENT_WORKSPACES)
         recentWorkspaces = [...recentWorkspaces, entry];
@@ -358,9 +425,9 @@
   }
   function moveProjectTo(sourceId: string, targetId: string, edge: "before" | "after") {
     if (!bootstrap || sourceId === targetId || projectOrderSaving) return;
-    const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === sourceId);
+    const sourceIndex = rootProjects.findIndex(({ id }) => id === sourceId);
     if (sourceIndex < 0) return;
-    const reordered = [...bootstrap.recentWorkspaces];
+    const reordered = [...rootProjects];
     const [moved] = reordered.splice(sourceIndex, 1);
     if (!moved) return;
     const targetIndex = reordered.findIndex(({ id }) => id === targetId);
@@ -378,10 +445,14 @@
   async function saveProjectOrder(recentWorkspaces: RecentWorkspace[]) {
     if (!bootstrap) return;
     const previous = bootstrap.recentWorkspaces;
+    const reorderedWithWorktrees = recentWorkspaces.flatMap((project) => [
+      project,
+      ...worktreesFor(project.id),
+    ]);
     projectOrderSaving = true;
-    bootstrap = { ...bootstrap, recentWorkspaces };
+    bootstrap = { ...bootstrap, recentWorkspaces: reorderedWithWorktrees };
     try {
-      const persisted = await api.reorderWorkspaces(recentWorkspaces.map(({ id }) => id));
+      const persisted = await api.reorderWorkspaces(reorderedWithWorktrees.map(({ id }) => id));
       bootstrap = { ...bootstrap, recentWorkspaces: persisted };
     } catch (cause) {
       try {
@@ -425,9 +496,23 @@
       }
       rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
+        const loadedProject = bootstrap?.recentWorkspaces.find(
+          (project) => project.id === loaded.id || project.path === loaded.path,
+        );
+        if (loadedProject) await loadSourceWorkspace(loadedProject);
+        for (const worktree of worktreesFor(loaded.id))
+          if (!workspaceFor(worktree.id))
+            await openProject(worktree.path, {
+              activate: false,
+              expand: false,
+              remember: false,
+            });
+      }
+      if (activate) {
         chatConnection.close();
         workspace = loaded;
         projectPath = loaded.path;
+        startMode = workspaceIsWorktree(loaded.id) ? "worktree" : "local";
         localStorage.setItem("pidex:last-project", loaded.path);
         snapshot = undefined;
         draft = "";
@@ -446,6 +531,17 @@
       if (activate) projectLoading = false;
       projectLoadingId = "";
     }
+  }
+  async function loadSourceWorkspace(project: RecentWorkspace) {
+    const sourceId = sourceWorkspaceId(project);
+    if (!sourceId || workspaceFor(sourceId)) return;
+    const source = bootstrap?.recentWorkspaces.find((candidate) => candidate.id === sourceId);
+    if (!source) return;
+    await openProject(source.path, {
+      activate: false,
+      expand: false,
+      remember: false,
+    });
   }
   function openProjectPicker() {
     if (projectOrderSaving) return;
@@ -527,12 +623,13 @@
       return;
     }
     expandedProjectIds = [...expandedProjectIds, project.id];
-    if (!workspaceFor(project.id))
-      await openProject(project.path, {
-        activate: false,
-        expand: false,
-        remember: false,
-      });
+    for (const member of [project, ...worktreesFor(project.id)])
+      if (!workspaceFor(member.id))
+        await openProject(member.path, {
+          activate: false,
+          expand: false,
+          remember: false,
+        });
   }
   async function refreshSessions(workspaceId = workspace?.id) {
     if (!workspaceId) return;
@@ -573,6 +670,7 @@
       chatConnection.close();
       workspace = rememberedTarget;
       projectPath = rememberedTarget.path;
+      startMode = workspaceIsWorktree(rememberedTarget.id) ? "worktree" : "local";
       rememberWorkspace(rememberedTarget);
       localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
@@ -615,6 +713,74 @@
       workspaceFor(project.id) ?? (await openProject(project.path, { activate: false }));
     if (target) await newTask(target);
   }
+  async function prepareWorktreeTask(initialDraft: string) {
+    if (!workspace || !snapshot || chatLoading || projectOrderSaving) return false;
+    const source = workspace;
+    const previousSnapshot = snapshot;
+    const sequence = ++routeSequence;
+    let worktree: Workspace | undefined;
+    let created: ChatSnapshot | undefined;
+    try {
+      error = "";
+      chatLoading = true;
+      worktree = await api.createWorktree(source.id);
+      created = await api.createChat(worktree.id);
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      persistDraft();
+      const refreshedBootstrap = await api.bootstrap();
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      bootstrap = refreshedBootstrap;
+      rememberWorkspace(worktree, false);
+      const previousConfiguration = configurationDrafts[previousSnapshot.taskId];
+      if (previousConfiguration)
+        configurationDrafts = {
+          ...configurationDrafts,
+          [created.taskId]: previousConfiguration,
+        };
+      chatConnection.close();
+      workspace = worktree;
+      projectPath = worktree.path;
+      localStorage.setItem("pidex:last-project", worktree.path);
+      snapshot = created;
+      startMode = "worktree";
+      await afterChat(initialDraft, true);
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      const path = taskPath(created.taskId);
+      appliedRoute = path;
+      await goto(path, { replaceState: true });
+      await disposeCreatedTask(previousSnapshot);
+      return true;
+    } catch (cause) {
+      if (worktree) await disposeCreatedWorktree(worktree, created);
+      if (sequence !== routeSequence) return false;
+      workspace = source;
+      projectPath = source.path;
+      localStorage.setItem("pidex:last-project", source.path);
+      snapshot = previousSnapshot;
+      error = cause instanceof Error ? cause.message : "Could not create worktree";
+      return false;
+    } finally {
+      if (sequence === routeSequence) chatLoading = false;
+    }
+  }
+  async function disposeCreatedWorktree(worktree: Workspace, created?: ChatSnapshot) {
+    if (created) await disposeCreatedTask(created);
+    try {
+      await api.removeWorktree(worktree.id);
+      bootstrap = await api.bootstrap();
+    } catch {
+      /* Cleanup is best-effort; the original task remains usable if removal fails. */
+    }
+  }
   function navigateToTask(taskId: string) {
     if (!chatLoading) void goto(taskPath(taskId));
   }
@@ -627,6 +793,7 @@
     if (!taskId) {
       snapshot = undefined;
       draft = "";
+      startMode = "local";
       routeLoading = false;
       chatLoading = false;
       return;
@@ -652,6 +819,7 @@
       if (!target) throw new Error("The project for this task is no longer available");
       workspace = target;
       projectPath = target.path;
+      startMode = workspaceIsWorktree(target.id) ? "worktree" : "local";
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
       snapshot = resumed;
@@ -667,12 +835,16 @@
     }
   }
   async function workspaceById(workspaceId: string) {
-    const cached = workspaceFor(workspaceId);
-    if (cached) return cached;
     const recent = bootstrap?.recentWorkspaces.find((project) => project.id === workspaceId);
+    const cached = workspaceFor(workspaceId);
+    if (cached) {
+      if (recent) await loadSourceWorkspace(recent);
+      return cached;
+    }
     if (!recent) return undefined;
     const loaded = await api.openWorkspace(recent.path, true);
     rememberWorkspace(loaded);
+    await loadSourceWorkspace(recent);
     return loaded;
   }
   function initializeDialogValue(dialog: ExtensionDialog) {
@@ -820,10 +992,19 @@
   }
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
-    const chatId = snapshot.chatId;
     const submittedDraft = draft;
     const text = submittedDraft.trim();
     const mode = active ? delivery : "normal";
+    if (
+      mode === "normal" &&
+      startMode === "worktree" &&
+      taskHasNoTranscript &&
+      !workspaceIsWorktree(snapshot.workspaceId) &&
+      !(await prepareWorktreeTask(submittedDraft))
+    )
+      return;
+    if (!snapshot) return;
+    const chatId = snapshot.chatId;
     if (mode === "normal" && !(await applyConfigurationDraft())) return;
     if (snapshot?.chatId !== chatId) return;
     await submitPrompt(text, submittedDraft, mode);
@@ -1223,7 +1404,7 @@
         >
       </div>
       <button
-        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
+        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
         onclick={toggleSearch}
         aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
         aria-expanded={searchOpen}
@@ -1236,7 +1417,7 @@
 
     {#if searchOpen}
       <label
-        class="mx-0.5 mb-3 flex h-8.5 items-center gap-2 rounded-lg px-2 text-faint transition-colors hover:bg-sidebar-hover hover:text-muted focus-within:bg-sidebar-hover focus-within:text-muted"
+        class="mx-0.5 mb-3 flex h-8.5 items-center gap-2 rounded-lg px-2 text-faint transition-colors hover:bg-sidebar-hover hover:text-muted focus-within:bg-sidebar-hover focus-within:text-muted max-[900px]:h-10"
       >
         <Icon name="search" />
         <input
@@ -1255,11 +1436,11 @@
       >
         <span class="inline-flex items-center gap-2"
           >PROJECTS <small class="text-[9px] font-medium tracking-normal opacity-75"
-            >{bootstrap?.recentWorkspaces.length ?? 0}</small
+            >{rootProjects.length}</small
           ></span
         >
         <button
-          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          class="grid size-6.5 place-items-center rounded-md border-0 bg-transparent text-faint transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 disabled:cursor-not-allowed disabled:opacity-40"
           onclick={openProjectPicker}
           disabled={projectOrderSaving}
           aria-label="Add project"
@@ -1314,7 +1495,7 @@
               {/if}
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing ${workspace?.id === project.id ? "text-foreground" : ""}`}
+                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${projectActive(project) ? "text-foreground" : ""}`}
                   draggable={!projectOrderSaving}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
@@ -1329,7 +1510,7 @@
                   onclick={() => toggleProject(project)}
                 >
                   <span
-                    class={`grid size-5 flex-none place-items-center rounded text-muted ${workspace?.id === project.id ? "bg-primary/15 text-primary" : ""}`}
+                    class={`grid size-5 flex-none place-items-center rounded text-muted ${projectActive(project) ? "bg-primary/15 text-primary" : ""}`}
                     ><Icon name={expanded ? "folder-open" : "folder"} size={15} /></span
                   >
                   <strong
@@ -1337,15 +1518,15 @@
                     >{projectLabel(project)}</strong
                   >
                   {#if projectLoadingId === project.id}<span
-                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint"
+                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint max-[900px]:text-[10.5px]"
                       >•••</span
                     >{:else if loaded}<span
-                      class="flex-none font-mono text-[9.5px] leading-none text-faint"
-                      >{loaded.sessions.length}</span
+                      class="flex-none font-mono text-[9.5px] leading-none text-faint max-[900px]:text-[10.5px]"
+                      >{matchingTasks.length}</span
                     >{/if}
                 </button>
                 <button
-                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="grid size-7 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted opacity-0 transition-[opacity,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 max-[900px]:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   onclick={() => newTaskInProject(project)}
                   disabled={chatLoading || projectOrderSaving || projectLoadingId === project.id}
                   aria-label={`New task in ${projectLabel(project)}`}
@@ -1360,16 +1541,22 @@
                   id={`project-${project.id}`}
                 >
                   {#if projectLoadingId === project.id && !loaded}
-                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">Loading tasks…</p>
+                    <p
+                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                    >
+                      Loading tasks…
+                    </p>
                   {:else if loaded && shownTasks.length === 0}
-                    <p class="m-0 h-8 px-2 py-2 text-[11px] text-faint">
+                    <p
+                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                    >
                       {search ? "No matching tasks." : "No tasks yet."}
                     </p>
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => navigateToTask(task.id)}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
@@ -1378,13 +1565,19 @@
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
                         >
+                        {#if task.worktree}<span
+                            class="grid size-4 flex-none rotate-90 place-items-center text-faint"
+                            data-worktree-indicator
+                            aria-label="Worktree"
+                            title="Worktree"><Icon name="worktree" size={14} /></span
+                          >{/if}
                         {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500"
+                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500 max-[900px]:text-[10.5px]"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
                           >{:else}<time
-                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums"
+                            class="flex-none font-mono text-[9.5px] leading-none text-faint tabular-nums max-[900px]:text-[10.5px]"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
                         <span
@@ -1394,7 +1587,7 @@
                     {/each}
                     {#if hiddenTasks > 0}
                       <button
-                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground"
+                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
                         onclick={() =>
                           (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
                         >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button
@@ -1432,7 +1625,7 @@
         </button>
       {/if}
       <button
-        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
+        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
         aria-label="Open tasks"
         aria-expanded={drawerOpen}
         aria-controls="tasks-drawer"
@@ -1457,7 +1650,7 @@
           </button>
         {/if}
         <button
-          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid"
+          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10"
           aria-label="Open tasks"
           aria-expanded={drawerOpen}
           aria-controls="tasks-drawer"
@@ -1484,7 +1677,7 @@
         {#if snapshot}
           <div class="flex gap-1">
             <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:w-8 max-[900px]:justify-center max-[900px]:p-0"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
               onclick={openRename}
               disabled={active}
               aria-label="Rename"

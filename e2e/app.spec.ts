@@ -86,6 +86,166 @@ test("collapses and restores the desktop sidebar with keyboard focus", async ({
   await expect(collapseSidebar).toBeFocused();
 });
 
+test("scales mobile task and composer targets without changing desktop density", async ({
+  page,
+  request,
+}, testInfo) => {
+  const mobile = testInfo.project.name === "mobile";
+  const workspacePath = process.cwd();
+  const workspaceName = basename(workspacePath);
+  const longTaskName =
+    "Investigate an intentionally long task title that must truncate without overflowing";
+  const longModelName = "An intentionally long model label for responsive overflow verification";
+  let createdSnapshot: { chatId?: string; revision?: number } | undefined;
+
+  const bootstrap = await rpcRequest<{ csrfToken: string; [key: string]: unknown }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const opened = await rpcRequest<{
+    id: string;
+    models: Array<{ id: string; [key: string]: unknown }>;
+    path: string;
+    [key: string]: unknown;
+  }>(
+    request,
+    "workspaces/open",
+    { path: workspacePath, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  const workspaceFixture = {
+    ...opened.result,
+    models: opened.result.models.map((model) => ({ ...model, name: longModelName })),
+    sessions: [
+      {
+        id: "task_mobile_readability",
+        name: longTaskName,
+        firstMessage: "Verify responsive sizing",
+        createdAt: "2026-07-27T00:00:00.000Z",
+        modifiedAt: "2026-07-27T00:00:00.000Z",
+        messageCount: 2,
+      },
+    ],
+  };
+
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  await installFakeWebSocket(page);
+  await page.addInitScript(({ path }) => localStorage.setItem("pidex:last-project", path), {
+    path: workspacePath,
+  });
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces: [{ id: opened.result.id, path: workspacePath }],
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: workspaceFixture },
+    }),
+  );
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    createdSnapshot = {
+      chatId: "chat_mobile_readability",
+      revision: 0,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...createdSnapshot,
+          workspaceId: opened.result.id,
+          taskId: "new_task_mobile_readability",
+          runStatus: "idle",
+          model: opened.result.models[0]?.id,
+          thinkingLevel: "high",
+          items: [],
+          transcriptStart: 0,
+          transcriptTotal: 0,
+          steeringQueue: [],
+          followUpQueue: [],
+          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  const projectToggle = page.getByRole("button", { name: `Collapse ${workspaceName}` });
+  const taskRow = projects.locator(`button[title="${longTaskName}"]`);
+  const addProject = page.locator('button[aria-label="Add project"]');
+  const search = page.getByRole("button", { name: "Search projects and tasks" });
+  const newTask = page.getByRole("button", { name: `New task in ${workspaceName}` });
+
+  await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "32px");
+  await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "32px");
+  await expect(taskRow.locator("time")).toHaveCSS("font-size", mobile ? "10.5px" : "9.5px");
+  await expect(addProject).toHaveCSS("width", mobile ? "36px" : "26px");
+  await expect(search).toHaveCSS("width", mobile ? "40px" : "34px");
+  await expect(newTask).toHaveCSS("width", mobile ? "36px" : "28px");
+  if (mobile)
+    await expect(page.getByRole("button", { name: "Open tasks" })).toHaveCSS("width", "40px");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(mobile ? 390 : 1440);
+
+  await newTask.click();
+  const prompt = page.getByLabel("Prompt");
+  await expect(prompt).toBeVisible();
+  await prompt.fill("Keep compact controls readable on narrow screens");
+
+  const model = page.getByLabel("Model");
+  const send = page.getByRole("button", { name: "Send" });
+  await expect(model).toHaveCSS("font-size", "11px");
+  await expect(page.getByTestId("composer-stats")).toHaveCSS(
+    "font-size",
+    mobile ? "10.5px" : "9.5px",
+  );
+  await expect(send).toHaveCSS("width", mobile ? "40px" : "34px");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(mobile ? 390 : 1440);
+
+  await expect.poll(() => createdSnapshot?.chatId).toEqual(expect.any(String));
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 1,
+    chatId: createdSnapshot?.chatId,
+    status: "running",
+    revision: (createdSnapshot?.revision ?? 0) + 1,
+    run: {
+      runId: "run_mobile_readability",
+      actionId: "action_mobile_readability",
+      status: "running",
+      requiresAcknowledgement: false,
+    },
+  });
+
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCSS(
+    "width",
+    mobile ? "38px" : "34px",
+  );
+  await expect(page.getByRole("button", { name: "Queue" })).toHaveCSS(
+    "height",
+    mobile ? "38px" : "34px",
+  );
+  await expect(page.getByLabel("Delivery mode")).toHaveCSS("font-size", mobile ? "11px" : "10.5px");
+});
+
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 
@@ -121,6 +281,103 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
   ).toBeVisible();
   await openTasks(page);
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
+});
+
+test("groups worktree tasks under their source project", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  const csrfToken = String(bootstrap.result.csrfToken);
+  const source = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: process.cwd(), remember: false },
+    csrfToken,
+  );
+  const sourceWorkspaceId = String(source.result.id);
+  const sourcePath = String(source.result.path);
+  const worktreeWorkspaceId = "grouped_worktree_e2e";
+  const worktreePath = `${process.cwd()}/.pidex-grouped-worktree`;
+  const sourceProject = { id: sourceWorkspaceId, path: sourcePath, worktree: false };
+  const worktreeProject = {
+    id: worktreeWorkspaceId,
+    path: worktreePath,
+    sourceWorkspaceId,
+    worktree: true,
+  };
+  let recentWorkspaces: Record<string, unknown>[] = [sourceProject, worktreeProject];
+  const openedPaths: string[] = [];
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces,
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    openedPaths.push(input.path);
+    const worktree = input.path === worktreePath;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...source.result,
+          id: worktree ? worktreeWorkspaceId : sourceWorkspaceId,
+          path: worktree ? worktreePath : sourcePath,
+          sessions: worktree
+            ? [
+                {
+                  id: "worktree_task_e2e",
+                  name: "Worktree task",
+                  firstMessage: "Worktree task",
+                  createdAt: "2026-07-28T00:00:00.000Z",
+                  modifiedAt: "2026-07-29T00:00:00.000Z",
+                  messageCount: 1,
+                },
+              ]
+            : Array.from({ length: 6 }, (_, index) => ({
+                id: `local_task_e2e_${index}`,
+                name: index === 0 ? "Local task" : `Older local task ${index}`,
+                firstMessage: index === 0 ? "Local task" : `Older local task ${index}`,
+                createdAt: "2026-07-27T00:00:00.000Z",
+                modifiedAt: `2026-07-28T${String(6 - index).padStart(2, "0")}:00:00.000Z`,
+                messageCount: 1,
+              })),
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group")).toHaveCount(1);
+  const localTask = projects.getByRole("button", { name: /Local task/ });
+  const worktreeTask = projects.getByRole("button", { name: /Worktree task/ });
+  await expect(localTask).toBeVisible();
+  await expect(worktreeTask).toBeVisible();
+  await expect(localTask.locator("[data-worktree-indicator]")).toHaveCount(0);
+  await expect(worktreeTask.locator("[data-worktree-indicator]")).toBeVisible();
+
+  openedPaths.length = 0;
+  await page.evaluate(({ path }) => localStorage.setItem("pidex:last-project", path), {
+    path: worktreePath,
+  });
+  await page.reload();
+  await expect.poll(() => openedPaths).toEqual(expect.arrayContaining([worktreePath, sourcePath]));
+
+  recentWorkspaces = [worktreeProject];
+  await page.reload();
+  await openTasks(page);
+  await expect(projects.getByRole("group")).toHaveCount(1);
+  await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
 });
 
 test("manually reorders projects and preserves their order after reload", async ({
@@ -983,6 +1240,210 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
+test("defers worktree creation until the first prompt is sent", async ({ page, request }) => {
+  const workspaceName = basename(process.cwd());
+  let sourceWorkspace: Record<string, unknown> | undefined;
+  let localSnapshot: Record<string, unknown> | undefined;
+  let chatCreations = 0;
+  let localChatCreations = 0;
+  let worktreeChatCreations = 0;
+  let worktreeCreations = 0;
+  let worktreeBootstrapPending = false;
+  let releaseWorktreeBootstrap: (() => void) | undefined;
+  const disposedChats: string[] = [];
+  const removedWorktrees: string[] = [];
+  const sentPrompts: Record<string, unknown>[] = [];
+  await installFakeWebSocket(page);
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    const response = await route.fetch();
+    if (worktreeChatCreations === 3 && !worktreeBootstrapPending) {
+      worktreeBootstrapPending = true;
+      await new Promise<void>((resolve) => {
+        releaseWorktreeBootstrap = resolve;
+      });
+    }
+    await route.fulfill({ response });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    sourceWorkspace = {
+      ...payload.json,
+      models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+    };
+    await route.fulfill({ response, json: { ...payload, json: sourceWorkspace } });
+  });
+  await page.route("**/api/rpc/workspaces/createWorktree", async (route) => {
+    worktreeCreations += 1;
+    if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...sourceWorkspace,
+          id: "worktree_workspace_e2e",
+          path: `${process.cwd()}/.pidex-test-worktree`,
+          sessions: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/removeWorktree", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
+    removedWorktrees.push(input.workspaceId);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ok: true } },
+    });
+  });
+  await page.route("**/api/rpc/chats/dispose", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { chatId: string } }).json;
+    disposedChats.push(input.chatId);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ok: true } },
+    });
+  });
+  await page.route("**/api/rpc/chats/create", async (route) => {
+    chatCreations += 1;
+    const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
+    if (input.workspaceId !== "worktree_workspace_e2e") {
+      localChatCreations += 1;
+      if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
+      const suffix = localChatCreations === 1 ? "" : `_${localChatCreations}`;
+      localSnapshot = {
+        chatId: `local_chat_e2e${suffix}`,
+        workspaceId: String(sourceWorkspace.id),
+        taskId: `local_task_e2e${suffix}`,
+        revision: 0,
+        runStatus: "idle",
+        model: "e2e/model",
+        thinkingLevel: "high",
+        items: [],
+        transcriptStart: 0,
+        transcriptTotal: 0,
+        steeringQueue: [],
+        followUpQueue: [],
+        stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0 },
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        json: { json: localSnapshot },
+      });
+      return;
+    }
+    worktreeChatCreations += 1;
+    if (worktreeChatCreations === 1) {
+      await route.abort("failed");
+      return;
+    }
+    if (!localSnapshot) throw new Error("Expected the local task to exist");
+    const suffix = worktreeChatCreations === 2 ? "" : `_${worktreeChatCreations}`;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...localSnapshot,
+          chatId: `worktree_chat_e2e${suffix}`,
+          taskId: `worktree_task_e2e${suffix}`,
+          workspaceId: "worktree_workspace_e2e",
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/sendMessage", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    sentPrompts.push(input);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          accepted: true,
+          actionId: input.actionId,
+          runId: "worktree_run_e2e",
+          status: "accepted",
+          revision: Number(input.expectedRevision) + 1,
+          replayed: false,
+        },
+      },
+    });
+  });
+
+  await rememberWorkspace(request, process.cwd());
+  await page.goto("/");
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
+
+  const composer = page.getByTestId("chat-composer");
+  const startSelector = composer.getByRole("button", { name: "Start in Work locally" });
+  await expect(startSelector).toBeVisible();
+  await startSelector.click();
+  const startMenu = page.getByRole("menu", { name: "Start in" });
+  await expect(startMenu).toBeVisible();
+  await startMenu.getByRole("menuitemradio", { name: "New worktree" }).click();
+  await expect(composer.getByRole("button", { name: "Start in New worktree" })).toBeVisible();
+  expect(worktreeCreations).toBe(0);
+  expect(chatCreations).toBe(1);
+
+  await page.getByLabel("Prompt").fill("Implement the selected task");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => worktreeCreations).toBe(1);
+  await expect.poll(() => chatCreations).toBe(2);
+  await expect.poll(() => removedWorktrees).toEqual(["worktree_workspace_e2e"]);
+  await expect.poll(() => sentPrompts).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => worktreeCreations).toBe(2);
+  await expect.poll(() => chatCreations).toBe(3);
+  await expect.poll(() => sentPrompts).toHaveLength(1);
+  expect(sentPrompts[0]).toEqual(
+    expect.objectContaining({
+      chatId: "worktree_chat_e2e",
+      text: "Implement the selected task",
+    }),
+  );
+  await expect(page).toHaveURL(/\/tasks\/worktree_task_e2e$/);
+  await expect.poll(() => disposedChats).toContain("local_chat_e2e");
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+
+  await openTasks(page);
+  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
+  await expect(page).toHaveURL(/\/tasks\/local_task_e2e_2$/);
+  const cancelledComposer = page.getByTestId("chat-composer");
+  await cancelledComposer.getByRole("button", { name: "Start in Work locally" }).click();
+  await page
+    .getByRole("menu", { name: "Start in" })
+    .getByRole("menuitemradio", { name: "New worktree" })
+    .click();
+  await page.getByLabel("Prompt").fill("Cancel this worktree prompt");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => worktreeBootstrapPending).toBe(true);
+
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+  releaseWorktreeBootstrap?.();
+
+  await expect
+    .poll(() => removedWorktrees)
+    .toEqual(["worktree_workspace_e2e", "worktree_workspace_e2e"]);
+  await expect.poll(() => sentPrompts).toHaveLength(1);
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${workspaceName}?` }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
+    .toBe(String(sourceWorkspace?.path));
+});
+
 test("renders assistant markdown as safe interactive components", async ({
   context,
   page,
@@ -1041,6 +1502,8 @@ const answer = 42;
       timestamp: "2026-07-27T00:00:00.000Z",
     },
   });
+
+  await expect(page.getByRole("button", { name: "Start in Work locally" })).toBeDisabled();
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
@@ -1606,6 +2069,168 @@ test("ignores compact responses after navigating to another task", async ({ page
   await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
 });
 
+test("opens and dismisses context usage details with pointer and keyboard", async ({
+  page,
+  request,
+}, testInfo) => {
+  if (testInfo.project.name === "mobile") await page.setViewportSize({ width: 390, height: 844 });
+  await installFakeWebSocket(page);
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const created = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  let snapshot = created.result;
+  const taskId = String(snapshot.taskId);
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...workspace,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/resume", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = {
+      ...payload.json,
+      model: "e2e/model",
+      thinkingLevel: "high",
+      contextUsage: {
+        tokens: 246_000,
+        contextWindow: 258_000,
+        percent: 95.34883720930233,
+        totalProcessedTokens: 2_500_000,
+        compactsAutomatically: true,
+      },
+    };
+    await route.fulfill({ response, json: { ...payload, json: snapshot } });
+  });
+
+  await page.goto(`/tasks/${taskId}`);
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 1,
+    chatId: String(snapshot?.chatId),
+    status: "running",
+    revision: 1,
+    run: {
+      runId: "run_context_usage_e2e",
+      actionId: "action_context_usage_e2e",
+      status: "running",
+      requiresAcknowledgement: false,
+    },
+  });
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+
+  const contextMeter = page.getByRole("button", { name: "Context window 95% used" });
+  const toggleContextMeter = () =>
+    testInfo.project.name === "mobile" ? contextMeter.tap() : contextMeter.click();
+  const detailsId = await contextMeter.getAttribute("aria-controls");
+  expect(detailsId).toBeTruthy();
+  const contextDetails = page.locator(`#${detailsId}`);
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(contextDetails).toHaveAttribute("aria-hidden", "true");
+  await expect(contextDetails).toHaveCSS("opacity", "0");
+  await expect(page.locator(".context-meter__progress")).toHaveClass(/--danger/);
+  await expect(page.locator(".context-meter__bar-fill")).toHaveClass(/--danger/);
+
+  await toggleContextMeter();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+  await expect(contextDetails).toHaveAttribute("aria-hidden", "false");
+  await expect(contextDetails).toHaveCSS("opacity", "1");
+  await contextDetails.click();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+
+  await toggleContextMeter();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(contextDetails).toHaveCSS("opacity", "0");
+
+  await toggleContextMeter();
+  const outsideX = (page.viewportSize()?.width ?? 400) - 20;
+  if (testInfo.project.name === "mobile") await page.touchscreen.tap(outsideX, 120);
+  else await page.mouse.click(outsideX, 120);
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+
+  await toggleContextMeter();
+  await page.keyboard.press("Control+K");
+  const searchInput = page.getByRole("textbox", { name: "Search projects and tasks" });
+  await expect(searchInput).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(searchInput).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(searchInput).toHaveCount(0);
+  if (testInfo.project.name === "mobile") await page.keyboard.press("Escape");
+
+  await page.getByLabel("Thinking level").focus();
+  await page.keyboard.press("Tab");
+  await expect(contextMeter).toBeFocused();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+
+  if (testInfo.project.name === "chromium") {
+    await page.mouse.move(0, 0);
+    await contextMeter.hover();
+    await page.mouse.move(0, 0);
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+
+    await contextMeter.hover();
+    await contextMeter.focus();
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+    await page.mouse.move(0, 0);
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  } else {
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  }
+
+  await toggleContextMeter();
+  const detailsBox = await contextDetails.boundingBox();
+  const viewport = page.viewportSize();
+  expect(detailsBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(detailsBox!.x).toBeGreaterThanOrEqual(8);
+  expect(detailsBox!.x + detailsBox!.width).toBeLessThanOrEqual(viewport!.width - 8);
+
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 2,
+    chatId: String(snapshot?.chatId),
+    status: "idle",
+    revision: 2,
+  });
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const box = await contextDetails.boundingBox();
+      const width = page.viewportSize()?.width;
+      return Boolean(box && width && box.x >= 8 && box.x + box.width <= width - 8);
+    })
+    .toBe(true);
+});
+
 test("stages configuration without overwriting the next draft", async ({
   page,
   request,
@@ -1706,9 +2331,10 @@ test("stages configuration without overwriting the next draft", async ({
   });
   const contextMeter = page.locator(".context-meter__trigger");
   await expect(contextMeter).toBeVisible();
-  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveRole("button");
   await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
-  await contextMeter.hover();
+  if (testInfo.project.name === "mobile") await contextMeter.focus();
+  else await contextMeter.hover();
   const contextDetails = page.getByRole("tooltip");
   await expect(contextDetails).toHaveCSS("opacity", "1");
   await expect(contextDetails).toContainText("Context Window");
@@ -1752,7 +2378,7 @@ test("stages configuration without overwriting the next draft", async ({
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(thinking).toBeEnabled();
-  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveRole("button");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
   const stagedThinking = nextThinking === "high" ? "medium" : "high";

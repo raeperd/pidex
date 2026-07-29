@@ -6,8 +6,13 @@ import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationRuntime } from "./app-runtime.js";
 import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
 import { requestDigest, type MetadataStore } from "./metadata.js";
-import { discoverProjectCandidates } from "./project-catalog.js";
-import { canonicalWorkspace, safeError } from "./security.js";
+import {
+  createProjectWorktree,
+  discoverProjectCandidates,
+  managedWorktreesRoot,
+  removeProjectWorktree,
+} from "./project-catalog.js";
+import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 
 interface HttpApiDependencies {
   csrf: string;
@@ -16,6 +21,7 @@ interface HttpApiDependencies {
 }
 
 export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies) {
+  const workspaceRoots = [...roots, managedWorktreesRoot()];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
     if (context.req.headers["x-pidex-csrf"] !== csrf)
@@ -36,9 +42,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
         runtime.runPromise(
           Effect.gen(function* () {
             const metadata = yield* Metadata;
-            const recentWorkspaces = yield* attemptOperation("metadata.recent", () =>
-              metadata.recent(),
-            );
+            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
             const projectCandidates = yield* discoverProjectCandidates(roots);
             return {
               protocolVersion: PROTOCOL_VERSION,
@@ -58,11 +62,127 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
           Effect.gen(function* () {
             const metadata = yield* Metadata;
             const manager = yield* Chats;
-            const canonical = yield* canonicalWorkspace(input.path, roots);
+            const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
+            if (!roots.some((root) => isDescendant(root, canonical))) {
+              const rememberedId = yield* attemptOperation("metadata.workspaceId", () =>
+                metadata.workspaceId(canonical),
+              );
+              const sourceWorkspaceId = rememberedId
+                ? yield* attemptOperation("metadata.workspaceProjectId", () =>
+                    metadata.workspaceProjectId(rememberedId),
+                  )
+                : undefined;
+              if (!rememberedId || sourceWorkspaceId === rememberedId)
+                return yield* Effect.fail(
+                  HttpError.make({
+                    status: 403,
+                    code: "workspace_forbidden",
+                    message: "Project is outside WORKSPACE_ROOTS",
+                  }),
+                );
+            }
             const id = yield* workspaceId(metadata, canonical, input.remember);
             return yield* attemptOperation("chats.openWorkspace", () =>
               manager.openWorkspace(id, canonical),
             );
+          }),
+        ),
+      ),
+      createWorktree: workspaces.createWorktree.handler(({ input }) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const metadata = yield* Metadata;
+            const manager = yield* Chats;
+            const pi = yield* PiAgent;
+            const source = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(input.workspaceId),
+            );
+            const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
+            const worktreePath = yield* createProjectWorktree(canonicalSource);
+            let id: string | undefined;
+            return yield* Effect.gen(function* () {
+              yield* attemptOperation("pi.inheritWorkspaceTrust", () =>
+                pi.inheritWorkspaceTrust(canonicalSource, worktreePath),
+              );
+              const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+                metadata.workspaceProjectId(source.id),
+              );
+              const createdWorkspaceId = yield* attemptOperation("metadata.rememberWorkspace", () =>
+                metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
+              );
+              id = createdWorkspaceId;
+              const opened = yield* attemptOperation("chats.openWorkspace", () =>
+                manager.openWorkspace(createdWorkspaceId, worktreePath),
+              );
+              yield* attemptOperation("chats.markWorkspaceDisposable", () =>
+                manager.markWorkspaceDisposable(createdWorkspaceId),
+              );
+              return opened;
+            }).pipe(
+              Effect.onError(() =>
+                Effect.gen(function* () {
+                  yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
+                    Effect.catch(() => Effect.void),
+                  );
+                  yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+                    pi.clearWorkspaceTrust(worktreePath),
+                  ).pipe(Effect.catch(() => Effect.void));
+                  const createdWorkspaceId = id;
+                  if (createdWorkspaceId)
+                    yield* attemptOperation("metadata.forgetWorkspace", () =>
+                      metadata.forgetWorkspace(createdWorkspaceId),
+                    ).pipe(Effect.catch(() => Effect.void));
+                }),
+              ),
+            );
+          }),
+        ),
+      ),
+      removeWorktree: workspaces.removeWorktree.handler(({ input }) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const metadata = yield* Metadata;
+            const manager = yield* Chats;
+            const pi = yield* PiAgent;
+            const worktree = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(input.workspaceId),
+            );
+            const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
+              metadata.workspaceProjectId(input.workspaceId),
+            );
+            if (sourceWorkspaceId === input.workspaceId)
+              return yield* Effect.fail(
+                HttpError.make({
+                  status: 400,
+                  code: "workspace_not_managed_worktree",
+                  message: "Workspace is not a managed Pidex worktree",
+                }),
+              );
+            const source = yield* attemptOperation("chats.workspace", () =>
+              manager.workspace(sourceWorkspaceId),
+            );
+            const canRemove = yield* attemptOperation("chats.workspaceCanBeRemoved", () =>
+              manager.workspaceCanBeRemoved(worktree.id),
+            );
+            if (!canRemove)
+              return yield* Effect.fail(
+                HttpError.make({
+                  status: 409,
+                  code: "worktree_has_tasks",
+                  message: "Only a newly created worktree without task history can be removed",
+                }),
+              );
+            yield* removeProjectWorktree(source.path, worktree.path);
+            yield* attemptOperation("pi.clearWorkspaceTrust", () =>
+              pi.clearWorkspaceTrust(worktree.path),
+            ).pipe(Effect.catch(() => Effect.void));
+            yield* attemptOperation("chats.forgetWorkspace", () =>
+              manager.forgetWorkspace(worktree.id),
+            );
+            yield* attemptOperation("metadata.forgetWorkspace", () =>
+              metadata.forgetWorkspace(worktree.id),
+            );
+            return { ok: true };
           }),
         ),
       ),
@@ -73,9 +193,7 @@ export function createRpcApiRouter({ csrf, roots, runtime }: HttpApiDependencies
             yield* attemptOperation("metadata.reorderWorkspaces", () =>
               metadata.reorderWorkspaces(input.workspaceIds),
             );
-            const recentWorkspaces = yield* attemptOperation("metadata.recent", () =>
-              metadata.recent(),
-            );
+            const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
             return { recentWorkspaces };
           }),
         ),
@@ -433,6 +551,17 @@ function workspaceId(metadata: MetadataStore, canonical: string, remember: boole
       metadata.rememberWorkspace(canonical),
     );
   });
+}
+
+function recentWorkspaceRecords(metadata: MetadataStore) {
+  return attemptOperation("metadata.recent", () => metadata.recent()).pipe(
+    Effect.map((records) =>
+      records.map((record) => ({
+        ...record,
+        worktree: isDescendant(managedWorktreesRoot(), record.path),
+      })),
+    ),
+  );
 }
 
 function requireIdle(isIdle: boolean, message: string) {

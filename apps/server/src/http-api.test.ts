@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
@@ -17,10 +19,14 @@ import WebSocket, { type RawData } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPidexServer } from "./main.js";
 
+const execFileAsync = promisify(execFile);
+
 const coveredEndpoints = [
   "system.health",
   "system.bootstrap",
   "workspaces.open",
+  "workspaces.createWorktree",
+  "workspaces.removeWorktree",
   "workspaces.reorder",
   "workspaces.sessions",
   "workspaces.trust",
@@ -46,7 +52,9 @@ describe.sequential("HTTP API endpoints", () => {
   let api: PidexApiContractClient;
   let tempRoot: string;
   let workspacePath: string;
+  let nonGitWorkspacePath: string;
   let workspaceId: string;
+  let nonGitWorkspaceId: string;
   let chatId: string;
   let httpUrl: string;
   let websocketUrl: string;
@@ -60,16 +68,34 @@ describe.sequential("HTTP API endpoints", () => {
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
-    workspacePath = path.join(tempRoot, "workspace");
+    const repositoryPath = path.join(tempRoot, "repository");
+    workspacePath = path.join(repositoryPath, "workspace");
+    nonGitWorkspacePath = path.join(tempRoot, "non-git-workspace");
     await mkdir(path.join(workspacePath, ".pi"), { recursive: true });
+    await mkdir(nonGitWorkspacePath);
     await writeFile(path.join(workspacePath, ".pi", "SYSTEM.md"), "Test system prompt.\n");
+    await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: repositoryPath });
+    await execFileAsync("git", ["add", "."], { cwd: repositoryPath });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Pidex Test",
+        "-c",
+        "user.email=pidex@example.invalid",
+        "commit",
+        "-m",
+        "Initial test project",
+      ],
+      { cwd: repositoryPath },
+    );
     workspacePath = await realpath(workspacePath);
 
     process.env.PIDEX_PROJECT_ROOTS = tempRoot;
     process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
     process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
-    process.env.WORKSPACE_ROOTS = tempRoot;
+    process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
 
     app = await createPidexServer();
     await listen(app);
@@ -145,9 +171,8 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("workspaces.reorder", async () => {
     const first = await api.workspaces.open({ path: workspacePath, remember: true });
-    const secondPath = path.join(tempRoot, "second-workspace");
-    await mkdir(secondPath);
-    const second = await api.workspaces.open({ path: secondPath, remember: true });
+    const second = await api.workspaces.open({ path: nonGitWorkspacePath, remember: true });
+    nonGitWorkspaceId = second.id;
 
     await api.workspaces.reorder({ workspaceIds: [second.id, first.id] });
     await api.workspaces.open({ path: first.path, remember: true });
@@ -158,6 +183,90 @@ describe.sequential("HTTP API endpoints", () => {
         { id: first.id, path: first.path },
       ],
     });
+  });
+
+  it("workspaces.createWorktree", async () => {
+    await api.workspaces.trust({ workspaceId, trusted: true });
+    const created = await api.workspaces.createWorktree({ workspaceId });
+    const { stdout: worktreeRootOutput } = await execFileAsync(
+      "git",
+      ["rev-parse", "--show-toplevel"],
+      { cwd: created.path, encoding: "utf8" },
+    );
+    const worktreeRoot = worktreeRootOutput.trim();
+    const { stdout: branchOutput } = await execFileAsync("git", ["branch", "--show-current"], {
+      cwd: created.path,
+      encoding: "utf8",
+    });
+    const branch = branchOutput.trim();
+
+    expect(created).toMatchObject({
+      name: "workspace",
+      path: expect.any(String),
+      trusted: true,
+      protectedResourcesSkipped: false,
+    });
+    expect(created.path).toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
+    expect(branch).toMatch(/^pidex\/[0-9a-f]{8}$/);
+    await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
+      recentWorkspaces: expect.arrayContaining([
+        {
+          id: created.id,
+          path: created.path,
+          sourceWorkspaceId: workspaceId,
+          worktree: true,
+        },
+      ]),
+    });
+    await api.chats.create({ workspaceId: created.id });
+
+    const dirtyFile = path.join(created.path, "unsaved-worktree-change.txt");
+    await writeFile(dirtyFile, "Do not delete this change.\n");
+    await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).rejects.toMatchObject({
+      code: "worktree_remove_failed",
+      status: 400,
+    });
+    await expect(access(dirtyFile)).resolves.toBeUndefined();
+    await rm(dirtyFile);
+
+    await expect(api.workspaces.removeWorktree({ workspaceId: created.id })).resolves.toEqual({
+      ok: true,
+    });
+    await expect(access(worktreeRoot)).rejects.toThrow();
+    await expect(
+      execFileAsync("git", ["show-ref", "--verify", `refs/heads/${branch}`], {
+        cwd: workspacePath,
+      }),
+    ).rejects.toThrow();
+    await expect(publicApi.system.bootstrap({})).resolves.not.toMatchObject({
+      recentWorkspaces: expect.arrayContaining([{ id: created.id }]),
+    });
+    const trust = JSON.parse(
+      await readFile(path.join(tempRoot, "agent", "trust.json"), "utf8"),
+    ) as Record<string, boolean>;
+    expect(trust[created.path]).toBeUndefined();
+  });
+
+  it("rejects removing a local workspace as a managed worktree", async () => {
+    await expect(api.workspaces.removeWorktree({ workspaceId })).rejects.toMatchObject({
+      code: "workspace_not_managed_worktree",
+      status: 400,
+    });
+  });
+
+  it("rejects worktree creation outside a Git repository", async () => {
+    await expect(
+      api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
+    ).rejects.toMatchObject({ code: "project_not_git", status: 400 });
+  });
+
+  it("rejects unrecorded directories under the managed worktree root", async () => {
+    const unrecordedPath = path.join(tempRoot, "state", "worktrees", "unrecorded");
+    await mkdir(unrecordedPath, { recursive: true });
+
+    await expect(
+      api.workspaces.open({ path: unrecordedPath, remember: true }),
+    ).rejects.toMatchObject({ code: "workspace_forbidden", status: 403 });
   });
 
   it("workspaces.sessions", async () => {
@@ -344,6 +453,30 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("chats.dispose", async () => {
     await expect(api.chats.dispose({ chatId })).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects removing a managed worktree after its task starts", async () => {
+    const worktree = await api.workspaces.createWorktree({ workspaceId });
+    const created = await api.chats.create({ workspaceId: worktree.id });
+    await api.chats.sendMessage({
+      ...actionFor(created),
+      text: "Persist this worktree task",
+      delivery: "normal",
+    });
+    await expect
+      .poll(async () => (await api.chats.get({ chatId: created.chatId })).transcriptTotal, {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(0);
+    await api.chats.dispose({ chatId: created.chatId });
+    await api.workspaces.open({ path: worktree.path, remember: true });
+
+    await expect(api.workspaces.removeWorktree({ workspaceId: worktree.id })).rejects.toMatchObject(
+      {
+        code: "worktree_has_tasks",
+        status: 409,
+      },
+    );
   });
 
   async function currentChat() {
