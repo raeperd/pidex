@@ -155,24 +155,6 @@
     commandSuggestions.find((command) => command.name === selectedCommandName) ??
       commandSuggestions[0],
   );
-  let footerUsage = $derived(formatFooterUsage(stats, contextUsage));
-
-  function formatFooterUsage(sessionStats: ChatSnapshot["stats"], usage: ContextUsage | undefined) {
-    const subscription = sessionStats.subscription ? " (sub)" : "";
-    const cost = `$${sessionStats.cost.toFixed(3)}${subscription}`;
-    if (!usage) return cost;
-    const percent = usage.percent === null ? "?" : `${usage.percent.toFixed(1)}%`;
-    const automatic = usage.compactsAutomatically ? " (auto)" : "";
-    return `${cost} ${percent}/${formatFooterTokens(usage.contextWindow)}${automatic}`;
-  }
-
-  function formatFooterTokens(count: number) {
-    if (count < 1_000) return count.toString();
-    if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-    if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-    if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-    return `${Math.round(count / 1_000_000)}M`;
-  }
 
   export function focus() {
     promptInput?.focus();
@@ -480,7 +462,13 @@
         </label>
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
-        {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
+        {#if contextUsage}
+          <ContextUsageMeter
+            usage={contextUsage}
+            cost={stats.cost}
+            subscription={stats.subscription}
+          />
+        {/if}
         {#if active}
           <select
             class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground max-[900px]:h-9 max-[900px]:text-[11px]"
@@ -511,11 +499,5 @@
         {/if}
       </div>
     </div>
-  </div>
-  <div
-    class="mx-auto w-full max-w-3xl px-2 pt-1.5 font-mono text-[9.5px] leading-tight text-faint max-[900px]:text-[10.5px] max-[560px]:pt-1"
-    data-testid="composer-stats"
-  >
-    <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{footerUsage}</span>
   </div>
 </footer>

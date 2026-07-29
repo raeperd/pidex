@@ -86,11 +86,12 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
-  it("renders only cost and context below the composer", () => {
+  it("keeps session cost inside context details without a stats strip", () => {
     const body = renderComposer("", false);
-    const footer = body.match(/data-testid="composer-stats"><span[^>]*>([^<]*)<\/span>/)?.[1];
 
-    expect(footer).toBe("$1.234 (sub) 25.0%/272k (auto)");
+    expect(body).not.toContain('data-testid="composer-stats"');
+    expect(body).toContain("Session cost");
+    expect(body).toContain("$1.234 (subscription)");
   });
 
   it("completes a selected command in the composer", () => {
