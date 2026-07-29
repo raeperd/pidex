@@ -64,6 +64,7 @@ export interface AppShellContext {
     attachComposer(controller: TaskComposerController | undefined): void;
     attachTranscript(controller: TaskTranscriptController | undefined): void;
     clearQueue(): Promise<void>;
+    compact(instructions?: string): Promise<boolean>;
     loadEarlier(): Promise<void>;
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
