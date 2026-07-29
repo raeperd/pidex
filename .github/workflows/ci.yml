@@ -125,4 +125,4 @@ jobs:
             sed -n '1,200p' "$app_log" >&2
             exit 1
           fi
-          grep -q '<div id="svelte">' "$response_file"
+          grep -q 'data-sveltekit-preload-data=' "$response_file"
