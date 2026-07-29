@@ -101,8 +101,6 @@ export function makeMetadataLayer(stateDir?: string) {
   );
 }
 
-export const MetadataLive = makeMetadataLayer();
-
 /**
  * @deprecated Use the Effect-native `Metadata` service. This synchronous facade remains until
  * the application runtime and current callers can be migrated without crossing task ownership.
