@@ -102,7 +102,9 @@
   aria-live="polite"
   aria-relevant="additions text"
 >
-  <div class="mx-auto w-full max-w-3xl px-5 pt-7.5 pb-3.5 max-[900px]:px-4 max-[350px]:px-3">
+  <div
+    class="mx-auto w-full max-w-none px-2 pt-2 pb-3.5 font-mono text-[12.5px] leading-[1.55] max-[350px]:px-1.5"
+  >
     {#if transcriptStart > 0}<button
         class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-[10.5px] text-muted hover:text-foreground disabled:opacity-40"
         onclick={prependEarlierMessages}
