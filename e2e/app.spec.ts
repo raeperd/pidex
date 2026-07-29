@@ -1377,6 +1377,7 @@ test("preserves edits made while slash compaction is pending", async ({
   const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
@@ -1820,6 +1821,7 @@ async function openTasks(page: Page) {
     await expect(button).toBeVisible();
     await button.click();
   }
+  await expect(page.getByRole("status", { name: "Loading project" })).toHaveCount(0);
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
 }
 
