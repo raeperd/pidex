@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { rpcRequest } from "./support";
 
 test("serves branded assets", async ({ request }) => {
@@ -44,7 +44,7 @@ test("integrates the application headers with macOS window chrome", async ({ pag
 
   await page.goto("/");
 
-  const sidebarTitleBar = page.locator("aside > div").first();
+  const sidebarTitleBar = page.locator("aside > .window-drag-region");
   const mainTitleBar = page.locator("main > header");
   await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
   await expect(sidebarTitleBar).toHaveCSS("height", "52px");
@@ -109,13 +109,79 @@ test("collapses and restores the desktop sidebar with keyboard focus", async ({
   await collapseSidebar.focus();
   await collapseSidebar.press("Enter");
 
-  await expect(sidebar).toBeHidden();
+  await expectSidebarCollapsed(sidebar);
   const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
   await expect(expandSidebar).toBeFocused();
   await expandSidebar.press("Enter");
-  await expect(sidebar).toBeVisible();
+  await expect(sidebar).toHaveCSS("opacity", "1");
   await expect(collapseSidebar).toBeFocused();
 });
+
+test("resizes, restores, and resets after mouse or keyboard collapse", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a fixed-width drawer");
+  await page.goto("/");
+
+  const sidebar = page.getByRole("complementary", { name: "Tasks" });
+  const resizeHandle = page.getByRole("slider", { name: "Resize sidebar" });
+  await expect(sidebar).toHaveCSS("width", "320px");
+  await expect(sidebar.locator("..")).toHaveCSS("transition-property", "grid-template-columns");
+  await expect(sidebar.locator("..")).toHaveCSS("transition-duration", "0.2s");
+  const handleBounds = await resizeHandle.boundingBox();
+  if (!handleBounds) throw new Error("The sidebar resize handle is not visible");
+
+  await page.mouse.move(
+    handleBounds.x + handleBounds.width / 2,
+    handleBounds.y + handleBounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    handleBounds.x + handleBounds.width / 2 + 80,
+    handleBounds.y + handleBounds.height / 2,
+  );
+  await page.mouse.up();
+
+  await expect(sidebar).toHaveCSS("width", "400px");
+  await page.reload();
+  await expect(sidebar).toHaveCSS("width", "400px");
+
+  const restoredHandleBounds = await resizeHandle.boundingBox();
+  if (!restoredHandleBounds) throw new Error("The restored resize handle is not visible");
+  await page.mouse.move(
+    restoredHandleBounds.x + restoredHandleBounds.width / 2,
+    restoredHandleBounds.y + restoredHandleBounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(80, restoredHandleBounds.y + restoredHandleBounds.height / 2);
+  await expectSidebarCollapsed(sidebar);
+  await page.mouse.up();
+
+  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+  await expect(expandSidebar).toBeFocused();
+  await expandSidebar.click();
+  await expect(sidebar).toHaveCSS("width", "320px");
+
+  await resizeHandle.press("Home");
+  await expect(sidebar).toHaveCSS("width", "120px");
+  await resizeHandle.press("ArrowLeft");
+  await expectSidebarCollapsed(sidebar);
+  await expect(expandSidebar).toBeFocused();
+  await expandSidebar.click();
+  await expect(sidebar).toHaveCSS("width", "320px");
+});
+
+async function expectSidebarCollapsed(sidebar: Locator) {
+  await expect(sidebar).toHaveAttribute("inert", "");
+  await expect(sidebar).toHaveCSS("opacity", "0");
+  await expect
+    .poll(() =>
+      sidebar
+        .locator("..")
+        .evaluate((shell) => Number.parseFloat(getComputedStyle(shell).gridTemplateColumns)),
+    )
+    .toBe(0);
+}
 
 function installIntegratedTitleBar(page: Page) {
   return page.addInitScript(() => {

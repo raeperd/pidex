@@ -32,6 +32,10 @@
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
   const TASK_PREVIEW_COUNT = 6;
+  const SIDEBAR_WIDTH_STORAGE_KEY = "pidex:sidebar-width";
+  const DEFAULT_SIDEBAR_WIDTH = 320;
+  const MIN_SIDEBAR_WIDTH = 120;
+  const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
@@ -58,6 +62,8 @@
   let bootstrapError = $state("");
   let drawerOpen = $state(false);
   let sidebarCollapsed = $state(false);
+  let sidebarWidth = $state(DEFAULT_SIDEBAR_WIDTH);
+  let sidebarResizing = $state(false);
   let projectLoading = $state(false);
   let projectLoadingId = $state("");
   let projectBatchLoading = $state(false);
@@ -103,6 +109,8 @@
   let pendingTextDeltas = new Map<string, { text: string; thinking: string }>();
   let pendingTextDeltaFrame: number | undefined;
   let pendingTextDeltaChatId = "";
+  let sidebarResizeStartX = 0;
+  let sidebarResizeStartWidth = DEFAULT_SIDEBAR_WIDTH;
 
   let routePath = $derived(page.url.pathname);
   let routeTaskId = $derived(page.params.taskId ?? "");
@@ -1251,6 +1259,68 @@
     await tick();
     collapseSidebarButton?.focus();
   }
+  function collapseSidebarAtDefaultWidth() {
+    sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    void collapseSidebar();
+  }
+  function startSidebarResize(event: PointerEvent) {
+    if (mobileViewport.current || sidebarCollapsed || event.button !== 0) return;
+    event.preventDefault();
+    sidebarResizing = true;
+    sidebarResizeStartX = event.clientX;
+    sidebarResizeStartWidth = sidebarWidth;
+    const handle = event.currentTarget;
+    if (handle instanceof HTMLElement) handle.setPointerCapture(event.pointerId);
+  }
+  function resizeSidebar(event: PointerEvent) {
+    if (!sidebarResizing) return;
+    const nextWidth = sidebarResizeStartWidth + event.clientX - sidebarResizeStartX;
+    if (nextWidth < MIN_SIDEBAR_WIDTH) {
+      sidebarResizing = false;
+      collapseSidebarAtDefaultWidth();
+      return;
+    }
+    sidebarWidth = constrainSidebarWidth(nextWidth);
+  }
+  function finishSidebarResize() {
+    if (!sidebarResizing) return;
+    sidebarResizing = false;
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    void tick().then(taskViews.resizeComposer);
+  }
+  function resizeSidebarWithKeyboard(event: KeyboardEvent) {
+    if (
+      event.key !== "ArrowLeft" &&
+      event.key !== "ArrowRight" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    )
+      return;
+    event.preventDefault();
+    if (event.key === "ArrowLeft" && sidebarWidth === MIN_SIDEBAR_WIDTH) {
+      collapseSidebarAtDefaultWidth();
+      return;
+    }
+    const step = event.shiftKey ? 32 : 16;
+    sidebarWidth = constrainSidebarWidth(
+      event.key === "Home"
+        ? MIN_SIDEBAR_WIDTH
+        : event.key === "End"
+          ? MAX_SIDEBAR_WIDTH
+          : sidebarWidth + (event.key === "ArrowLeft" ? -step : step),
+    );
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    void tick().then(taskViews.resizeComposer);
+  }
+  function resetSidebarWidth() {
+    sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    void tick().then(taskViews.resizeComposer);
+  }
+  function constrainSidebarWidth(width: number) {
+    return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
+  }
   function globalKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
       if (document.querySelector("dialog[open]")) return;
@@ -1279,6 +1349,9 @@
   }
   onMount(() => {
     projectPath = localStorage.getItem("pidex:last-project") ?? "";
+    const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(savedSidebarWidth) && savedSidebarWidth > 0)
+      sidebarWidth = constrainSidebarWidth(savedSidebarWidth);
     void loadBootstrap().then((loaded) => {
       if (loaded) routeReady = true;
     });
@@ -1308,7 +1381,10 @@
 </svelte:head>
 
 <div
-  class={`grid h-dvh w-full overflow-hidden max-[900px]:grid-cols-1 ${sidebarCollapsed ? "grid-cols-1" : "grid-cols-[320px_minmax(0,1fr)]"}`}
+  class={`grid h-dvh w-full overflow-hidden ${sidebarResizing || mobileViewport.current ? "" : "transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"} ${sidebarResizing ? "cursor-col-resize select-none" : ""}`}
+  style:grid-template-columns={mobileViewport.current
+    ? "minmax(0, 1fr)"
+    : `${sidebarCollapsed ? 0 : sidebarWidth}px minmax(0, 1fr)`}
 >
   <button
     class={`pointer-events-none fixed inset-0 z-19 hidden border-0 bg-black/52 opacity-0 transition-opacity duration-200 max-[900px]:block ${drawerOpen ? "max-[900px]:pointer-events-auto max-[900px]:opacity-100" : ""}`}
@@ -1319,10 +1395,32 @@
 
   <aside
     id="tasks-drawer"
-    class={`z-20 flex min-h-0 flex-col border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-transform duration-200 max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:hidden" : ""} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    class={`relative z-20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:-translate-x-4 min-[901px]:opacity-0" : "min-[901px]:translate-x-0 min-[901px]:opacity-100"} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Tasks"
-    inert={mobileViewport.current && !drawerOpen}
+    inert={(sidebarCollapsed && !mobileViewport.current) || (mobileViewport.current && !drawerOpen)}
   >
+    <div
+      class="group absolute inset-y-0 right-0 z-30 hidden w-2 cursor-col-resize touch-none items-center justify-end outline-none min-[901px]:flex"
+      role="slider"
+      aria-label="Resize sidebar"
+      aria-orientation="horizontal"
+      aria-valuemin={MIN_SIDEBAR_WIDTH}
+      aria-valuemax={MAX_SIDEBAR_WIDTH}
+      aria-valuenow={sidebarWidth}
+      tabindex="0"
+      onpointerdown={startSidebarResize}
+      onpointermove={resizeSidebar}
+      onpointerup={finishSidebarResize}
+      onpointercancel={finishSidebarResize}
+      onlostpointercapture={finishSidebarResize}
+      onkeydown={resizeSidebarWithKeyboard}
+      ondblclick={resetSidebarWidth}
+    >
+      <span
+        class={`h-full w-px transition-colors ${sidebarResizing ? "bg-primary" : "bg-transparent group-hover:bg-border-strong group-focus-visible:bg-primary"}`}
+        aria-hidden="true"
+      ></span>
+    </div>
     <div
       class={`flex items-center gap-2 pr-1 ${usesIntegratedTitleBar ? "window-drag-region h-13 min-h-13 pl-20" : "min-h-14 pt-2 pb-1.5 pl-2"}`}
     >
