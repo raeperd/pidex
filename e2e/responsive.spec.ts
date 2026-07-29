@@ -98,6 +98,11 @@ test("scales mobile task and composer targets while preserving responsive densit
   });
 
   await page.goto("/");
+  const starterModel = page.getByTestId("starter-composer").getByLabel("Model");
+  await expect(starterModel).toHaveCSS("font-size", "11px");
+  await expect(starterModel).toHaveCSS("white-space", "nowrap");
+  await expect(starterModel.locator("..")).toHaveCSS("overflow", "hidden");
+  if (mobile) await expect(starterModel).toHaveCSS("width", "144px");
   await openTasks(page);
 
   const projects = page.getByRole("navigation", { name: "Projects" });
@@ -141,6 +146,9 @@ test("scales mobile task and composer targets while preserving responsive densit
   const model = page.getByLabel("Model");
   const send = page.getByRole("button", { name: "Send" });
   await expect(model).toHaveCSS("font-size", "11px");
+  await expect(model).toHaveCSS("white-space", "nowrap");
+  await expect(model.locator("..")).toHaveCSS("overflow", "hidden");
+  if (mobile) await expect(model).toHaveCSS("width", "144px");
   await expect(page.getByTestId("composer-stats")).toHaveCount(0);
   await expect(send).toHaveCSS("width", mobile ? "40px" : "34px");
   await expect
