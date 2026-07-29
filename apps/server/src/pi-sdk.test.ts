@@ -116,6 +116,7 @@ describe("Pi SDK Effect service", () => {
           role: "assistant",
           content: [
             { type: "thinking", thinking: "Planning repository inspection" },
+            { type: "thinking", thinking: "Planning key file reading" },
             {
               type: "toolCall",
               id: "tool-readme",
@@ -198,7 +199,7 @@ describe("Pi SDK Effect service", () => {
               type: "assistant",
               id: assistantId,
               text: "",
-              thinking: "Planning repository inspection",
+              thinking: "Planning repository inspection\n\nPlanning key file reading",
               complete: true,
               timestamp: "timestamp",
             },

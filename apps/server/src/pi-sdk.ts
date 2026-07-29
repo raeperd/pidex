@@ -69,8 +69,9 @@ const thinkingOf = (content: unknown): string =>
           (part): part is { type: string; thinking?: string } =>
             typeof part === "object" && part !== null && "type" in part,
         )
-        .map((part) => (part.type === "thinking" ? (part.thinking ?? "") : ""))
-        .join("")
+        .map((part) => (part.type === "thinking" ? part.thinking?.trim() : undefined))
+        .filter((thinking): thinking is string => Boolean(thinking))
+        .join("\n\n")
     : "";
 const messageId = (message: { role: string; timestamp?: number }) =>
   `${message.role}-${message.timestamp ?? Date.now()}`;
