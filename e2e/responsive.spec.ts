@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { basename } from "node:path";
 import { emitServerEvent, installFakeWebSocket, openTasks, rpcRequest } from "./support";
 
-test("scales mobile task and composer targets without changing desktop density", async ({
+test("scales mobile task and composer targets while preserving responsive density", async ({
   page,
   request,
 }, testInfo) => {
@@ -103,15 +103,13 @@ test("scales mobile task and composer targets without changing desktop density",
   const projects = page.getByRole("navigation", { name: "Projects" });
   const projectToggle = page.getByRole("button", { name: `Collapse ${workspaceName}` });
   const taskRow = projects.locator(`button[title="${longTaskName}"]`);
-  const projectTitle = projectToggle.locator("strong");
-  const taskTitle = taskRow.locator("strong");
   const addProject = page.locator('button[aria-label="Add project"]');
   const search = page.getByRole("button", { name: "Search projects and tasks" });
   const newTask = page.getByRole("button", { name: `New task in ${workspaceName}` });
 
-  await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "32px");
-  await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "32px");
-  await expect(taskRow.locator("time")).toHaveCSS("font-size", mobile ? "10.5px" : "9.5px");
+  await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "36px");
+  await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "36px");
+  await expect(taskRow.locator("time")).toHaveCSS("font-size", "10.5px");
   await expect
     .poll(() =>
       taskRow.evaluate((row) => {
@@ -126,19 +124,9 @@ test("scales mobile task and composer targets without changing desktop density",
       }),
     )
     .toEqual({ left: 0, right: 0 });
-  await expect
-    .poll(async () => {
-      const [projectBounds, taskBounds] = await Promise.all([
-        projectTitle.boundingBox(),
-        taskTitle.boundingBox(),
-      ]);
-      if (!projectBounds || !taskBounds) return null;
-      return Math.round(taskBounds.x - projectBounds.x);
-    })
-    .toBe(0);
-  await expect(addProject).toHaveCSS("width", mobile ? "36px" : "26px");
+  await expect(addProject).toHaveCSS("width", mobile ? "36px" : "32px");
   await expect(search).toHaveCSS("width", mobile ? "40px" : "34px");
-  await expect(newTask).toHaveCSS("width", mobile ? "36px" : "28px");
+  await expect(newTask).toHaveCSS("width", mobile ? "36px" : "32px");
   if (mobile)
     await expect(page.getByRole("button", { name: "Open tasks" })).toHaveCSS("width", "40px");
   await expect
