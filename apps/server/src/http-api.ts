@@ -7,7 +7,7 @@ import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
 import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
-import { requestDigest, type MetadataStore } from "./metadata.js";
+import { requestDigest, type MetadataService } from "./metadata.js";
 import {
   createProjectWorktree,
   discoverProjectCandidates,
@@ -59,13 +59,9 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
         const manager = yield* Chats;
         const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
         if (!roots.some((root) => isDescendant(root, canonical))) {
-          const rememberedId = yield* attemptOperation("metadata.workspaceId", () =>
-            metadata.workspaceId(canonical),
-          );
+          const rememberedId = yield* metadata.workspaceId(canonical);
           const sourceWorkspaceId = rememberedId
-            ? yield* attemptOperation("metadata.workspaceProjectId", () =>
-                metadata.workspaceProjectId(rememberedId),
-              )
+            ? yield* metadata.workspaceProjectId(rememberedId)
             : undefined;
           if (!rememberedId || sourceWorkspaceId === rememberedId)
             return yield* Effect.fail(
@@ -77,37 +73,26 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
             );
         }
         const id = yield* workspaceId(metadata, canonical, input.remember);
-        return yield* attemptOperation("chats.openWorkspace", () =>
-          manager.openWorkspace(id, canonical),
-        );
+        return yield* manager.openWorkspace(id, canonical);
       }),
       createWorktree: workspaces.createWorktree.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
         const pi = yield* PiAgent;
-        const source = yield* attemptOperation("chats.workspace", () =>
-          manager.workspace(input.workspaceId),
-        );
+        const source = yield* manager.workspace(input.workspaceId);
         const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
         const worktreePath = yield* createProjectWorktree(canonicalSource);
         let id: string | undefined;
         return yield* Effect.gen(function* () {
-          yield* attemptOperation("pi.inheritWorkspaceTrust", () =>
-            pi.inheritWorkspaceTrust(canonicalSource, worktreePath),
-          );
-          const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
-            metadata.workspaceProjectId(source.id),
-          );
-          const createdWorkspaceId = yield* attemptOperation("metadata.rememberWorkspace", () =>
-            metadata.rememberWorkspace(worktreePath, sourceWorkspaceId),
+          yield* pi.inheritWorkspaceTrust(canonicalSource, worktreePath);
+          const sourceWorkspaceId = yield* metadata.workspaceProjectId(source.id);
+          const createdWorkspaceId = yield* metadata.rememberWorkspace(
+            worktreePath,
+            sourceWorkspaceId,
           );
           id = createdWorkspaceId;
-          const opened = yield* attemptOperation("chats.openWorkspace", () =>
-            manager.openWorkspace(createdWorkspaceId, worktreePath),
-          );
-          yield* attemptOperation("chats.markWorkspaceDisposable", () =>
-            manager.markWorkspaceDisposable(createdWorkspaceId),
-          );
+          const opened = yield* manager.openWorkspace(createdWorkspaceId, worktreePath);
+          yield* manager.markWorkspaceDisposable(createdWorkspaceId);
           return opened;
         }).pipe(
           Effect.onError(() =>
@@ -115,14 +100,12 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
               yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
                 Effect.catch(() => Effect.void),
               );
-              yield* attemptOperation("pi.clearWorkspaceTrust", () =>
-                pi.clearWorkspaceTrust(worktreePath),
-              ).pipe(Effect.catch(() => Effect.void));
+              yield* pi.clearWorkspaceTrust(worktreePath).pipe(Effect.catch(() => Effect.void));
               const createdWorkspaceId = id;
               if (createdWorkspaceId)
-                yield* attemptOperation("metadata.forgetWorkspace", () =>
-                  metadata.forgetWorkspace(createdWorkspaceId),
-                ).pipe(Effect.catch(() => Effect.void));
+                yield* metadata
+                  .forgetWorkspace(createdWorkspaceId)
+                  .pipe(Effect.catch(() => Effect.void));
             }),
           ),
         );
@@ -131,12 +114,8 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
         const pi = yield* PiAgent;
-        const worktree = yield* attemptOperation("chats.workspace", () =>
-          manager.workspace(input.workspaceId),
-        );
-        const sourceWorkspaceId = yield* attemptOperation("metadata.workspaceProjectId", () =>
-          metadata.workspaceProjectId(input.workspaceId),
-        );
+        const worktree = yield* manager.workspace(input.workspaceId);
+        const sourceWorkspaceId = yield* metadata.workspaceProjectId(input.workspaceId);
         if (sourceWorkspaceId === input.workspaceId)
           return yield* Effect.fail(
             HttpError.make({
@@ -145,12 +124,8 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
               message: "Workspace is not a managed Pidex worktree",
             }),
           );
-        const source = yield* attemptOperation("chats.workspace", () =>
-          manager.workspace(sourceWorkspaceId),
-        );
-        const canRemove = yield* attemptOperation("chats.workspaceCanBeRemoved", () =>
-          manager.workspaceCanBeRemoved(worktree.id),
-        );
+        const source = yield* manager.workspace(sourceWorkspaceId);
+        const canRemove = yield* manager.workspaceCanBeRemoved(worktree.id);
         if (!canRemove)
           return yield* Effect.fail(
             HttpError.make({
@@ -160,74 +135,56 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
             }),
           );
         yield* removeProjectWorktree(source.path, worktree.path);
-        yield* attemptOperation("pi.clearWorkspaceTrust", () =>
-          pi.clearWorkspaceTrust(worktree.path),
-        ).pipe(Effect.catch(() => Effect.void));
-        yield* attemptOperation("chats.forgetWorkspace", () =>
-          manager.forgetWorkspace(worktree.id),
-        );
-        yield* attemptOperation("metadata.forgetWorkspace", () =>
-          metadata.forgetWorkspace(worktree.id),
-        );
+        yield* pi.clearWorkspaceTrust(worktree.path).pipe(Effect.catch(() => Effect.void));
+        yield* manager.forgetWorkspace(worktree.id);
+        yield* metadata.forgetWorkspace(worktree.id);
         return { ok: true };
       }),
       reorder: workspaces.reorder.effect(function* (_, input) {
         const metadata = yield* Metadata;
-        yield* attemptOperation("metadata.reorderWorkspaces", () =>
-          metadata.reorderWorkspaces(input.workspaceIds),
-        );
+        yield* metadata.reorderWorkspaces(input.workspaceIds);
         const recentWorkspaces = yield* recentWorkspaceRecords(metadata);
         return { recentWorkspaces };
       }),
       sessions: workspaces.sessions.effect(function* (_, input) {
         const manager = yield* Chats;
-        const sessions = yield* attemptOperation("chats.refreshSessions", () =>
-          manager.refreshSessions(input.workspaceId),
-        );
+        const sessions = yield* manager.refreshSessions(input.workspaceId);
         return { sessions };
       }),
       trust: workspaces.trust.effect(function* (_, input) {
         const manager = yield* Chats;
         const pi = yield* PiAgent;
-        const record = yield* attemptOperation("chats.workspace", () =>
-          manager.workspace(input.workspaceId),
-        );
-        yield* attemptOperation("pi.setWorkspaceTrust", () =>
-          pi.setWorkspaceTrust(record.path, input.trusted),
-        );
-        return yield* attemptOperation("chats.openWorkspace", () =>
-          manager.openWorkspace(record.id, record.path),
-        );
+        const record = yield* manager.workspace(input.workspaceId);
+        yield* pi.setWorkspaceTrust(record.path, input.trusted);
+        return yield* manager.openWorkspace(record.id, record.path);
       }),
     }),
     chats: chats.router({
       create: chats.create.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.create", () =>
-          manager.create(input.workspaceId),
-        );
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const chat = yield* manager.create(input.workspaceId);
+        return yield* manager.snapshot(chat);
       }),
       resume: chats.resume.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.resume", () => manager.resume(input.taskId));
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const chat = yield* manager.resume(input.taskId);
+        return yield* manager.snapshot(chat);
       }),
       get: chats.get.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.snapshot(chat);
       }),
       dispose: chats.dispose.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        yield* attemptOperation("chats.dispose", () => manager.dispose(chat));
+        const chat = yield* manager.chat(input.chatId);
+        yield* manager.dispose(chat);
         return { ok: true };
       }),
       sendMessage: chats.sendMessage.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const chat = yield* manager.chat(input.chatId);
         const action = {
           actionId: input.actionId,
           clientId: input.clientId,
@@ -240,12 +197,8 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
           }),
         };
         if (input.delivery === "normal") {
-          const outcome = yield* attemptOperation("metadata.acceptPrompt", () =>
-            metadata.acceptPrompt(action),
-          );
-          yield* attemptOperation("chats.startPrompt", () =>
-            manager.startPrompt(chat, input.text, outcome),
-          );
+          const outcome = yield* metadata.acceptPrompt(action);
+          yield* manager.startPrompt(chat, input.text, outcome);
           return outcome;
         }
         const runId = input.runId;
@@ -258,57 +211,45 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
               message: "An active run ID is required for queued instructions",
             }),
           );
-        const outcome = yield* attemptOperation("metadata.acceptRunMutation", () =>
-          metadata.acceptRunMutation({ ...action, runId, kind: delivery }),
-        );
-        return yield* attemptOperation("chats.deliverDuringRun", () =>
-          manager.deliverDuringRun(chat, input.text, delivery, outcome),
-        );
+        const outcome = yield* metadata.acceptRunMutation({ ...action, runId, kind: delivery });
+        return yield* manager.deliverDuringRun(chat, input.text, delivery, outcome);
       }),
       abort: chats.abort.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        const outcome = yield* attemptOperation("metadata.acceptStop", () =>
-          metadata.acceptStop({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            runId: input.runId,
-            requestDigest: requestDigest({ runId: input.runId }),
-          }),
-        );
-        return yield* attemptOperation("chats.abort", () => manager.abort(chat, outcome));
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptStop({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          runId: input.runId,
+          requestDigest: requestDigest({ runId: input.runId }),
+        });
+        return yield* manager.abort(chat, outcome);
       }),
       acknowledgeInterrupted: chats.acknowledgeInterrupted.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        const outcome = yield* attemptOperation("metadata.acknowledgeInterrupted", () =>
-          metadata.acknowledgeInterrupted({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            requestDigest: requestDigest({ acknowledge: chat.run?.runId ?? null }),
-          }),
-        );
-        yield* attemptOperation("chats.acknowledgeInterrupted", () =>
-          manager.acknowledgeInterrupted(chat, outcome),
-        );
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acknowledgeInterrupted({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          requestDigest: requestDigest({ acknowledge: chat.run?.runId ?? null }),
+        });
+        manager.acknowledgeInterrupted(chat, outcome);
         return outcome;
       }),
       toolOutput: chats.toolOutput.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        return yield* attemptOperation("chats.toolOutput", () =>
-          manager.toolOutput(chat, input.resourceId, input.offset, input.limit),
-        );
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.toolOutput(chat, input.resourceId, input.offset, input.limit);
       }),
       transcript: chats.transcript.effect(function* (_, input) {
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const chat = yield* manager.chat(input.chatId);
         return yield* attemptOperation("chats.transcript", () =>
           manager.transcriptPage(chat, input.before, input.limit),
         );
@@ -316,30 +257,24 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
       clearQueue: chats.clearQueue.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-          metadata.acceptSessionMutation({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            kind: "clear-queue",
-            requestDigest: requestDigest({ clearQueue: true }),
-          }),
-        );
-        yield* attemptOperation("chats.clearQueue", () =>
-          manager.performMutation(chat, outcome, () => manager.clear(chat)),
-        );
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptSessionMutation({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          kind: "clear-queue",
+          requestDigest: requestDigest({ clearQueue: true }),
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.clear(chat));
+        return yield* manager.snapshot(chat);
       }),
       configure: chats.configure.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        yield* requireIdle(chat.session.isIdle, "Configuration can only change while idle");
-        const workspace = yield* attemptOperation("chats.workspace", () =>
-          manager.workspace(chat.workspaceId),
-        );
+        const chat = yield* manager.chat(input.chatId);
+        yield* requireIdle(chat.session.state.isIdle, "Configuration can only change while idle");
+        const workspace = yield* manager.workspace(chat.workspaceId);
         const modelAvailable = workspace.info.models.some((model) => model.id === input.model);
         if (input.model && !modelAvailable)
           return yield* Effect.fail(
@@ -353,79 +288,65 @@ export function createRpcApiRouter({ csrf, roots }: HttpApiDependencies) {
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         };
-        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-          metadata.acceptSessionMutation({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            kind: "config",
-            requestDigest: requestDigest(patch),
-          }),
-        );
-        yield* attemptOperation("chats.configure", () =>
-          manager.performMutation(chat, outcome, () => manager.configure(chat, patch)),
-        );
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const outcome = yield* metadata.acceptSessionMutation({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          kind: "config",
+          requestDigest: requestDigest(patch),
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.configure(chat, patch));
+        return yield* manager.snapshot(chat);
       }),
       rename: chats.rename.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-          metadata.acceptSessionMutation({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            kind: "rename",
-            requestDigest: requestDigest({ name: input.name }),
-          }),
-        );
-        yield* attemptOperation("chats.rename", () =>
-          manager.performMutation(chat, outcome, () => manager.rename(chat, input.name)),
-        );
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptSessionMutation({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          kind: "rename",
+          requestDigest: requestDigest({ name: input.name }),
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.rename(chat, input.name));
+        return yield* manager.snapshot(chat);
       }),
       compact: chats.compact.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
-        yield* requireIdle(chat.session.isIdle, "Compaction can only run while idle");
-        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-          metadata.acceptSessionMutation({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            kind: "compact",
-            requestDigest: requestDigest({ instructions: input.instructions ?? null }),
-          }),
+        const chat = yield* manager.chat(input.chatId);
+        yield* requireIdle(chat.session.state.isIdle, "Compaction can only run while idle");
+        const outcome = yield* metadata.acceptSessionMutation({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          kind: "compact",
+          requestDigest: requestDigest({ instructions: input.instructions ?? null }),
+        });
+        yield* manager.performMutation(chat, outcome, () =>
+          manager.compact(chat, input.instructions),
         );
-        yield* attemptOperation("chats.compact", () =>
-          manager.performMutation(chat, outcome, () => manager.compact(chat, input.instructions)),
-        );
-        return yield* attemptOperation("chats.snapshot", () => manager.snapshot(chat));
+        return yield* manager.snapshot(chat);
       }),
       answerDialog: chats.answerDialog.effect(function* (_, input) {
         const metadata = yield* Metadata;
         const manager = yield* Chats;
-        const chat = yield* attemptOperation("chats.get", () => manager.chat(input.chatId));
+        const chat = yield* manager.chat(input.chatId);
         yield* validateDialogResponse(chat.extensionDialog, input.requestId, input.value);
-        const outcome = yield* attemptOperation("metadata.acceptSessionMutation", () =>
-          metadata.acceptSessionMutation({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            expectedRevision: input.expectedRevision,
-            sessionKey: chat.sessionKey,
-            kind: "dialog",
-            requestDigest: requestDigest({ requestId: input.requestId, value: input.value }),
-          }),
-        );
-        yield* attemptOperation("chats.answerDialog", () =>
-          manager.performMutation(chat, outcome, () =>
-            chat.session.respondToDialog(input.requestId, input.value),
-          ),
+        const outcome = yield* metadata.acceptSessionMutation({
+          actionId: input.actionId,
+          clientId: input.clientId,
+          expectedRevision: input.expectedRevision,
+          sessionKey: chat.sessionKey,
+          kind: "dialog",
+          requestDigest: requestDigest({ requestId: input.requestId, value: input.value }),
+        });
+        yield* manager.performMutation(chat, outcome, () =>
+          chat.session.respondToDialog(input.requestId, input.value),
         );
         return { ok: true };
       }),
@@ -450,25 +371,21 @@ interface RpcApiContext extends WithEffectContext<ApplicationServices> {
   req: IncomingMessage;
 }
 
-function workspaceId(metadata: MetadataStore, canonical: string, remember: boolean | undefined) {
+function workspaceId(metadata: MetadataService, canonical: string, remember: boolean | undefined) {
   return Effect.gen(function* () {
     if (remember === false) {
-      const existing = yield* attemptOperation("metadata.workspaceId", () =>
-        metadata.workspaceId(canonical),
-      );
+      const existing = yield* metadata.workspaceId(canonical);
       if (existing) return existing;
       return yield* attemptOperation("workspace.ephemeralId", () =>
         randomBytes(16).toString("hex"),
       );
     }
-    return yield* attemptOperation("metadata.rememberWorkspace", () =>
-      metadata.rememberWorkspace(canonical),
-    );
+    return yield* metadata.rememberWorkspace(canonical);
   });
 }
 
-function recentWorkspaceRecords(metadata: MetadataStore) {
-  return attemptOperation("metadata.recent", () => metadata.recent()).pipe(
+function recentWorkspaceRecords(metadata: MetadataService) {
+  return metadata.recent().pipe(
     Effect.map((records) =>
       records.map((record) => ({
         ...record,

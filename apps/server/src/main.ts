@@ -137,11 +137,14 @@ export async function createPidexApplication() {
         if (message.type === "hello") {
           if (connected) return socket.close(1008, "Already connected");
           connected = true;
-          try {
-            manager.connect(manager.chat(message.chatId), socket, message.lastEventId);
-          } catch {
-            socket.close(1008, "Chat not found");
-          }
+          void runtime
+            .runPromise(
+              Effect.gen(function* () {
+                const chat = yield* manager.chat(message.chatId);
+                yield* manager.connect(chat, socket, message.lastEventId);
+              }),
+            )
+            .catch(() => socket.close(1008, "Chat not found"));
         } else if (message.type === "pong") alive = true;
       });
       const timer = setInterval(() => {
