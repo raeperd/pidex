@@ -1540,19 +1540,20 @@
                 </button>
               </div>
               {#if expanded || shownTasks.length > 0}
-                <div
-                  class="mb-1 ml-5.5 border-l border-border-strong/60 pl-2"
-                  id={`project-${project.id}`}
-                >
+                <div class="relative mb-1" id={`project-${project.id}`}>
+                  <span
+                    class="pointer-events-none absolute inset-y-0 left-5.5 z-1 border-l border-border-strong/60"
+                    aria-hidden="true"
+                  ></span>
                   {#if projectLoadingId === project.id && !loaded}
                     <p
-                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-8 py-2 pr-2 pl-9 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       Loading tasks…
                     </p>
                   {:else if loaded && shownTasks.length === 0}
                     <p
-                      class="m-0 h-8 px-2 py-2 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-8 py-2 pr-2 pl-9 text-[11px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       {search ? "No matching tasks." : "No tasks yet."}
                     </p>
@@ -1560,7 +1561,7 @@
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 px-2 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        class={`group/task mb-px flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2 pl-9 text-left text-[12.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => navigateToTask(task.id)}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
@@ -1591,7 +1592,7 @@
                     {/each}
                     {#if hiddenTasks > 0}
                       <button
-                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-5 text-left text-[10.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
+                        class="min-h-7 w-full border-0 bg-transparent pr-2 pl-12 text-left text-[10.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
                         onclick={() =>
                           (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
                         >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button

@@ -103,6 +103,8 @@ test("scales mobile task and composer targets without changing desktop density",
   const projects = page.getByRole("navigation", { name: "Projects" });
   const projectToggle = page.getByRole("button", { name: `Collapse ${workspaceName}` });
   const taskRow = projects.locator(`button[title="${longTaskName}"]`);
+  const projectTitle = projectToggle.locator("strong");
+  const taskTitle = taskRow.locator("strong");
   const addProject = page.locator('button[aria-label="Add project"]');
   const search = page.getByRole("button", { name: "Search projects and tasks" });
   const newTask = page.getByRole("button", { name: `New task in ${workspaceName}` });
@@ -110,6 +112,30 @@ test("scales mobile task and composer targets without changing desktop density",
   await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "32px");
   await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "32px");
   await expect(taskRow.locator("time")).toHaveCSS("font-size", mobile ? "10.5px" : "9.5px");
+  await expect
+    .poll(() =>
+      taskRow.evaluate((row) => {
+        const group = row.closest('[role="group"]');
+        if (!group) return null;
+        const groupBounds = group.getBoundingClientRect();
+        const rowBounds = row.getBoundingClientRect();
+        return {
+          left: Math.round(rowBounds.left - groupBounds.left),
+          right: Math.round(groupBounds.right - rowBounds.right),
+        };
+      }),
+    )
+    .toEqual({ left: 0, right: 0 });
+  await expect
+    .poll(async () => {
+      const [projectBounds, taskBounds] = await Promise.all([
+        projectTitle.boundingBox(),
+        taskTitle.boundingBox(),
+      ]);
+      if (!projectBounds || !taskBounds) return null;
+      return Math.round(taskBounds.x - projectBounds.x);
+    })
+    .toBe(0);
   await expect(addProject).toHaveCSS("width", mobile ? "36px" : "26px");
   await expect(search).toHaveCSS("width", mobile ? "40px" : "34px");
   await expect(newTask).toHaveCSS("width", mobile ? "36px" : "28px");
