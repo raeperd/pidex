@@ -67,7 +67,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Package unsigned macOS app
-        run: pnpm package:desktop
+        run: |
+          ulimit -n 10240
+          pnpm package:desktop
         env:
           CSC_FOR_PULL_REQUEST: "true"
       - name: Smoke packaged macOS app
