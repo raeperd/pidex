@@ -81,13 +81,13 @@
     clearQueue,
     commands,
     compact,
+    configure,
     connection,
     contextUsage,
     creatingTask,
     delivery = $bindable(),
     draft = $bindable(),
     followUpCount,
-    hasConfigurationDraft,
     models,
     persistDraft,
     projectName,
@@ -97,7 +97,6 @@
     selectedThinkingLevel,
     send,
     setStartMode,
-    stageConfiguration,
     startMode,
     startModeEditable,
     stats,
@@ -109,13 +108,13 @@
     clearQueue: () => Promise<void>;
     commands: Workspace["commands"];
     compact: (instructions?: string) => Promise<boolean>;
+    configure: (patch: TaskConfigurationPatch) => Promise<boolean>;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
     creatingTask: boolean;
     delivery: TaskDelivery;
     draft: string;
     followUpCount: number;
-    hasConfigurationDraft: boolean;
     models: Workspace["models"];
     persistDraft: () => void;
     projectName: string;
@@ -125,7 +124,6 @@
     selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     send: () => Promise<void>;
     setStartMode: (mode: TaskStartMode) => void;
-    stageConfiguration: (patch: TaskConfigurationPatch) => void;
     startMode: TaskStartMode;
     startModeEditable: boolean;
     stats: ChatSnapshot["stats"];
@@ -135,6 +133,7 @@
   } = $props();
 
   let promptInput = $state<HTMLTextAreaElement>();
+  let configurationPending = $state(false);
   let startMenuOpen = $state(false);
   let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
   let compactPendingByTask = $state<Record<string, boolean>>({});
@@ -178,6 +177,30 @@
     persistDraft();
     resize();
     promptInput?.focus();
+  }
+
+  async function updateConfiguration(patch: TaskConfigurationPatch) {
+    if (configurationPending || active || creatingTask || connection !== "connected") return;
+    configurationPending = true;
+    try {
+      await configure(patch);
+    } finally {
+      configurationPending = false;
+    }
+  }
+
+  function updateThinkingLevel(value: string) {
+    if (
+      value !== "off" &&
+      value !== "minimal" &&
+      value !== "low" &&
+      value !== "medium" &&
+      value !== "high" &&
+      value !== "xhigh" &&
+      value !== "max"
+    )
+      return;
+    void updateConfiguration({ thinkingLevel: value });
   }
 
   async function moveCommandSelection(direction: -1 | 1) {
@@ -401,8 +424,12 @@
             ]}
             aria-label="Model"
             value={selectedModel}
-            onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-            disabled={!models.length}
+            onchange={(event) => void updateConfiguration({ model: event.currentTarget.value })}
+            disabled={!models.length ||
+              active ||
+              creatingTask ||
+              configurationPending ||
+              connection !== "connected"}
           >
             {#each models as model (model.id)}<option value={model.id}>{model.name}</option>{/each}
           </select>
@@ -423,10 +450,8 @@
             ]}
             aria-label="Thinking level"
             value={selectedThinkingLevel}
-            onchange={(event) =>
-              stageConfiguration({
-                thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
-              })}
+            onchange={(event) => updateThinkingLevel(event.currentTarget.value)}
+            disabled={active || creatingTask || configurationPending || connection !== "connected"}
           >
             <option value="off">Off</option><option value="minimal">Minimal</option><option
               value="low">Low</option
@@ -435,10 +460,6 @@
             ><option value="max">Max</option>
           </select>
         </label>
-        {#if hasConfigurationDraft}<span
-            class="ml-1 flex-none rounded-full bg-primary/12 px-1.75 py-0.75 text-[10px] font-[650] tracking-[0.01em] whitespace-nowrap text-primary max-[560px]:text-[10.5px]"
-            >Next turn</span
-          >{/if}
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
         {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}

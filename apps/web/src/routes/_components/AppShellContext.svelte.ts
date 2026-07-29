@@ -50,7 +50,6 @@ export interface AppShellContext {
     readonly creatingTask: boolean;
     readonly delivery: TaskDelivery;
     readonly draft: string;
-    readonly hasConfigurationDraft: boolean;
     readonly loadingEarlier: boolean;
     readonly selectedModel: string;
     readonly selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
@@ -66,6 +65,7 @@ export interface AppShellContext {
     attachTranscript(controller: TaskTranscriptController | undefined): void;
     clearQueue(): Promise<void>;
     compact(instructions?: string): Promise<boolean>;
+    configure(patch: TaskConfigurationPatch): Promise<boolean>;
     loadEarlier(): Promise<void>;
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
@@ -74,7 +74,6 @@ export interface AppShellContext {
     setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
     setStartMode(mode: TaskStartMode): void;
-    stageConfiguration(patch: TaskConfigurationPatch): void;
     stop(): Promise<void>;
   };
   readonly projectActions: {

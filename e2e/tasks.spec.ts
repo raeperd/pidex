@@ -298,6 +298,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   const workspaceName = basename(process.cwd());
   let sourceWorkspace: Record<string, unknown> | undefined;
   let localSnapshot: Record<string, unknown> | undefined;
+  let worktreeSnapshot: Record<string, unknown> | undefined;
   let chatCreations = 0;
   let localChatCreations = 0;
   let worktreeChatCreations = 0;
@@ -397,17 +398,31 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
     }
     if (!localSnapshot) throw new Error("Expected the local task to exist");
     const suffix = worktreeChatCreations === 2 ? "" : `_${worktreeChatCreations}`;
+    worktreeSnapshot = {
+      ...localSnapshot,
+      chatId: `worktree_chat_e2e${suffix}`,
+      taskId: `worktree_task_e2e${suffix}`,
+      workspaceId: "worktree_workspace_e2e",
+    };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      json: {
-        json: {
-          ...localSnapshot,
-          chatId: `worktree_chat_e2e${suffix}`,
-          taskId: `worktree_task_e2e${suffix}`,
-          workspaceId: "worktree_workspace_e2e",
-        },
-      },
+      json: { json: worktreeSnapshot },
+    });
+  });
+  await page.route("**/api/rpc/chats/configure", async (route) => {
+    if (!worktreeSnapshot) throw new Error("Expected a worktree task before configuration");
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    worktreeSnapshot = {
+      ...worktreeSnapshot,
+      ...(typeof input.model === "string" ? { model: input.model } : {}),
+      ...(typeof input.thinkingLevel === "string" ? { thinkingLevel: input.thinkingLevel } : {}),
+      revision: Number(input.expectedRevision) + 1,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: worktreeSnapshot },
     });
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {

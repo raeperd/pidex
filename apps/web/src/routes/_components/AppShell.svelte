@@ -33,8 +33,6 @@
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
   const TASK_PREVIEW_COUNT = 6;
-  const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
-  const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
@@ -81,7 +79,6 @@
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
-  let configurationDrafts = $state.raw<Record<string, ChatConfiguration>>({});
   let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
@@ -133,14 +130,8 @@
       (workspace && workspace.models.length === 0),
     ),
   );
-  let configurationDraft = $derived(snapshot ? (configurationDrafts[snapshot.taskId] ?? {}) : {});
-  let selectedModel = $derived(configurationDraft.model ?? snapshot?.model ?? "");
-  let selectedThinkingLevel = $derived(
-    configurationDraft.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
-  );
-  let hasConfigurationDraft = $derived(
-    configurationDraft.model !== undefined || configurationDraft.thinkingLevel !== undefined,
-  );
+  let selectedModel = $derived(snapshot?.model ?? "");
+  let selectedThinkingLevel = $derived(snapshot?.thinkingLevel ?? "medium");
   let startModeEditable = $derived(
     Boolean(
       snapshot &&
@@ -269,9 +260,6 @@
       get draft() {
         return draft;
       },
-      get hasConfigurationDraft() {
-        return hasConfigurationDraft;
-      },
       get loadingEarlier() {
         return loadingEarlier;
       },
@@ -305,6 +293,7 @@
       attachTranscript: taskViews.attachTranscript,
       clearQueue,
       compact,
+      configure,
       loadEarlier,
       loadToolOutput,
       persistDraft,
@@ -315,7 +304,6 @@
       setStartMode: (value) => {
         if (startModeEditable) startMode = value;
       },
-      stageConfiguration,
       stop,
     },
     projectActions: {
@@ -688,8 +676,7 @@
       appliedRoute = path;
       await goto(path);
       if (starterPrompt && snapshot?.chatId === created.chatId) {
-        stageConfiguration(starterPrompt.configuration);
-        const configured = await applyConfigurationDraft();
+        const configured = await configure(starterPrompt.configuration);
         if (snapshot?.chatId !== created.chatId) return;
         chatConnection.connect(created.chatId);
         if (!configured) return;
@@ -741,18 +728,21 @@
       }
       bootstrap = refreshedBootstrap;
       rememberWorkspace(worktree, false);
-      const previousConfiguration = configurationDrafts[previousSnapshot.taskId];
-      if (previousConfiguration)
-        configurationDrafts = {
-          ...configurationDrafts,
-          [created.taskId]: previousConfiguration,
-        };
       chatConnection.close();
       workspace = worktree;
       projectPath = worktree.path;
       localStorage.setItem("pidex:last-project", worktree.path);
       snapshot = created;
       startMode = "worktree";
+      const configured = await configure({
+        ...(previousSnapshot.model ? { model: previousSnapshot.model } : {}),
+        thinkingLevel: previousSnapshot.thinkingLevel,
+      });
+      if (!configured) throw new Error(error || "Could not configure worktree");
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
       await afterChat(initialDraft, true);
       if (sequence !== routeSequence) {
         await disposeCreatedWorktree(worktree, created);
@@ -859,7 +849,6 @@
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.taskId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
-    restoreConfigurationDraft();
     if (snapshot && connect) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
@@ -1008,9 +997,6 @@
     )
       return;
     if (!snapshot) return;
-    const chatId = snapshot.chatId;
-    if (mode === "normal" && !(await applyConfigurationDraft())) return;
-    if (snapshot?.chatId !== chatId) return;
     await submitPrompt(text, submittedDraft, mode);
   }
   async function submitPrompt(
@@ -1067,7 +1053,7 @@
     }
   }
   async function configure(patch: ChatConfiguration) {
-    if (!snapshot) return false;
+    if (!snapshot || active) return false;
     const chatId = snapshot.chatId;
     try {
       const configured = await api.configure(chatId, patch, snapshot.revision);
@@ -1077,70 +1063,6 @@
       error = cause instanceof Error ? cause.message : "Configuration failed";
       return false;
     }
-  }
-  function stageConfiguration(patch: ChatConfiguration) {
-    if (!snapshot) return;
-    const next = { ...configurationDraft };
-    if (patch.model !== undefined) {
-      if (patch.model === snapshot.model) delete next.model;
-      else next.model = patch.model;
-    }
-    if (patch.thinkingLevel !== undefined) {
-      if (patch.thinkingLevel === snapshot.thinkingLevel) delete next.thinkingLevel;
-      else next.thinkingLevel = patch.thinkingLevel;
-    }
-    setConfigurationDraft(snapshot.taskId, next);
-  }
-  async function applyConfigurationDraft() {
-    if (!snapshot || !hasConfigurationDraft) return true;
-    const taskId = snapshot.taskId;
-    const applied = { ...configurationDraft };
-    if (!(await configure(applied))) return false;
-
-    const remaining = { ...configurationDrafts[taskId] };
-    if (remaining.model === applied.model) delete remaining.model;
-    if (remaining.thinkingLevel === applied.thinkingLevel) delete remaining.thinkingLevel;
-    setConfigurationDraft(taskId, remaining);
-    return true;
-  }
-  function restoreConfigurationDraft() {
-    if (!snapshot) return;
-    try {
-      const stored = localStorage.getItem(configurationDraftKey(snapshot.taskId));
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as Record<string, unknown>;
-      const restored: ChatConfiguration = {};
-      if (
-        typeof parsed.model === "string" &&
-        workspace?.models.some((model) => model.id === parsed.model) &&
-        parsed.model !== snapshot.model
-      )
-        restored.model = parsed.model;
-      if (
-        typeof parsed.thinkingLevel === "string" &&
-        THINKING_LEVELS.includes(parsed.thinkingLevel as ChatSnapshot["thinkingLevel"]) &&
-        parsed.thinkingLevel !== snapshot.thinkingLevel
-      )
-        restored.thinkingLevel = parsed.thinkingLevel as ChatSnapshot["thinkingLevel"];
-      setConfigurationDraft(snapshot.taskId, restored);
-    } catch {
-      setConfigurationDraft(snapshot.taskId, {});
-    }
-  }
-  function setConfigurationDraft(taskId: string, value: ChatConfiguration) {
-    const next = { ...configurationDrafts };
-    const hasValue = value.model !== undefined || value.thinkingLevel !== undefined;
-    if (hasValue) {
-      next[taskId] = value;
-      localStorage.setItem(configurationDraftKey(taskId), JSON.stringify(value));
-    } else {
-      delete next[taskId];
-      localStorage.removeItem(configurationDraftKey(taskId));
-    }
-    configurationDrafts = next;
-  }
-  function configurationDraftKey(taskId: string) {
-    return `${CONFIGURATION_DRAFT_PREFIX}${taskId}`;
   }
   function openRename() {
     if (!snapshot) return;

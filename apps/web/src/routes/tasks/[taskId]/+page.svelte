@@ -45,11 +45,11 @@
     clearQueue={context.taskActions.clearQueue}
     commands={context.shell.workspace?.commands ?? []}
     compact={context.taskActions.compact}
+    configure={context.taskActions.configure}
     connection={context.shell.connection}
     contextUsage={context.task.snapshot.contextUsage}
     creatingTask={context.task.creatingTask}
     followUpCount={context.task.snapshot.followUpQueue.length}
-    hasConfigurationDraft={context.task.hasConfigurationDraft}
     models={context.shell.workspace?.models ?? []}
     persistDraft={context.taskActions.persistDraft}
     projectName={context.shell.workspace?.name ?? "Project"}
@@ -59,7 +59,6 @@
     selectedThinkingLevel={context.task.selectedThinkingLevel}
     send={context.taskActions.send}
     setStartMode={context.taskActions.setStartMode}
-    stageConfiguration={context.taskActions.stageConfiguration}
     startMode={context.task.startMode}
     startModeEditable={context.task.startModeEditable}
     stats={context.task.snapshot.stats}

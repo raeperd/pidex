@@ -747,8 +747,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
   await expect(searchInput).toHaveCount(0);
   if (testInfo.project.name === "mobile") await page.keyboard.press("Escape");
 
-  await page.getByLabel("Thinking level").focus();
-  await page.keyboard.press("Tab");
+  await contextMeter.focus();
   await expect(contextMeter).toBeFocused();
   await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
 
@@ -796,7 +795,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
     .toBe(true);
 });
 
-test("stages configuration without overwriting the next draft", async ({
+test("persists idle configuration immediately without overwriting the draft", async ({
   page,
   request,
 }, testInfo) => {
@@ -910,22 +909,22 @@ test("stages configuration without overwriting the next draft", async ({
 
   const nextThinking = (await thinking.inputValue()) === "high" ? "low" : "high";
   await thinking.selectOption(nextThinking);
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
-  expect(mutations).toEqual([]);
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
+  await expect(thinking).toBeDisabled();
+  await prompt.fill("Draft while configuration is pending");
+  releaseConfiguration();
+  await expect(thinking).toBeEnabled();
+  await expect(thinking).toHaveValue(nextThinking);
+  await expect(prompt).toHaveValue("Draft while configuration is pending");
 
-  await prompt.fill("Start the first turn");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await page.getByRole("button", { name: "Send" }).click();
-  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
-  await prompt.fill("Draft the next turn while configuration is pending");
-  releaseConfiguration();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
   expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: nextThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
-  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
-  await expect(prompt).toHaveValue("Draft the next turn while configuration is pending");
 
   mutations.length = 0;
   await emitServerEvent(page, {
@@ -942,14 +941,9 @@ test("stages configuration without overwriting the next draft", async ({
     },
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
-  await expect(thinking).toBeEnabled();
+  await expect(thinking).toBeDisabled();
   await expect(contextMeter).toHaveRole("button");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
-
-  const stagedThinking = nextThinking === "high" ? "medium" : "high";
-  await thinking.selectOption(stagedThinking);
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
-  expect(mutations).toEqual([]);
 
   await page.getByLabel("Delivery mode").selectOption("steer");
   await prompt.fill("/compact");
@@ -962,7 +956,7 @@ test("stages configuration without overwriting the next draft", async ({
       input: expect.objectContaining({ delivery: "steer" }),
     }),
   );
-  await expect(page.getByText("Next turn", { exact: true })).toBeVisible();
+  await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
 
   mutations.length = 0;
   await emitServerEvent(page, {
@@ -972,11 +966,16 @@ test("stages configuration without overwriting the next draft", async ({
     status: "idle",
     revision: 50,
   });
+  await expect(thinking).toBeEnabled();
+  const updatedThinking = nextThinking === "high" ? "medium" : "high";
+  await thinking.selectOption(updatedThinking);
+  await expect.poll(() => mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
+  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: updatedThinking }));
+
   await prompt.fill("Start the next turn");
   await page.getByRole("button", { name: "Send" }).click();
   await expect
     .poll(() => mutations.map(({ procedure }) => procedure))
     .toEqual(["configure", "send"]);
-  expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: stagedThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
