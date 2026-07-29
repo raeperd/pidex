@@ -305,6 +305,36 @@ describe.sequential("HTTP API endpoints", () => {
     );
   });
 
+  it("rolls back a worktree when the project is absent from HEAD", async () => {
+    const uncommittedProjectPath = path.join(workspacePath, "uncommitted-project");
+    await mkdir(uncommittedProjectPath);
+    const uncommittedWorkspace = await api.workspaces.open({
+      path: uncommittedProjectPath,
+      remember: false,
+    });
+    const { stdout: branchesBefore } = await execFileAsync("git", ["branch", "--list", "pidex/*"], {
+      cwd: workspacePath,
+      encoding: "utf8",
+    });
+
+    await expectRpcError(
+      api.workspaces.createWorktree({ workspaceId: uncommittedWorkspace.id }),
+      "project_missing_from_worktree",
+      400,
+    );
+
+    const { stdout: branchesAfter } = await execFileAsync("git", ["branch", "--list", "pidex/*"], {
+      cwd: workspacePath,
+      encoding: "utf8",
+    });
+    const { stdout: worktrees } = await execFileAsync("git", ["worktree", "list", "--porcelain"], {
+      cwd: workspacePath,
+      encoding: "utf8",
+    });
+    expect(branchesAfter).toBe(branchesBefore);
+    expect(worktrees).not.toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
+  });
+
   it("rejects unrecorded directories under the managed worktree root", async () => {
     const unrecordedPath = path.join(tempRoot, "state", "worktrees", "unrecorded");
     await mkdir(unrecordedPath, { recursive: true });

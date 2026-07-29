@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
 import { mkdir, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,8 +31,9 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
     .update(path.resolve(repository.commonGitDirectory))
     .digest("hex")
     .slice(0, 12);
+  const managedRoot = yield* managedWorktreesRoot();
   const worktreeRoot = path.join(
-    managedWorktreesRoot(),
+    managedRoot,
     repositoryKey,
     token,
     path.basename(repository.worktreeRoot),
@@ -55,11 +55,7 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
     catch: (cause) => applicationError("worktree.project.resolve", cause),
   }).pipe(
     Effect.catch(() =>
-      Effect.tryPromise({
-        try: () => rollbackWorktree(repository.worktreeRoot, worktreeRoot, branch),
-        catch: (cause) => applicationError("worktree.rollback", cause),
-      }).pipe(
-        Effect.catch(() => Effect.void),
+      rollbackWorktree(repository.worktreeRoot, worktreeRoot, branch).pipe(
         Effect.andThen(
           Effect.fail(
             HttpError.make({
@@ -86,10 +82,11 @@ export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(functi
     "worktree_branch_read_failed",
     "Git could not identify the worktree branch",
   )).trim();
+  const managedRoot = yield* managedWorktreesRoot();
   if (
     path.resolve(sourceRepository.commonGitDirectory) !==
       path.resolve(worktreeRepository.commonGitDirectory) ||
-    !isDescendant(managedWorktreesRoot(), worktreeRepository.worktreeRoot) ||
+    !isDescendant(managedRoot, worktreeRepository.worktreeRoot) ||
     !/^pidex\/[0-9a-f]{8}$/.test(branch)
   )
     return yield* Effect.fail(
@@ -114,14 +111,11 @@ export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(functi
   );
 });
 
-export function managedWorktreesRoot(): string {
+export const managedWorktreesRoot = Effect.fn("projects.managedWorktreesRoot")(function* () {
   const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
-  try {
-    return path.join(realpathSync(stateDirectory), "worktrees");
-  } catch {
-    return path.resolve(stateDirectory, "worktrees");
-  }
-}
+  const resolvedStateDirectory = yield* optionalPromise(() => realpath(stateDirectory));
+  return path.join(resolvedStateDirectory ?? path.resolve(stateDirectory), "worktrees");
+});
 
 export const discoverProjectCandidates = Effect.fn("projects.discoverCandidates")(function* (
   allowedRoots: string[],
@@ -203,21 +197,21 @@ function runGit(cwd: string, args: string[], code: string, message: string) {
   });
 }
 
-async function rollbackWorktree(repositoryRoot: string, worktreeRoot: string, branch: string) {
-  try {
-    await execFileAsync("git", ["worktree", "remove", "--force", worktreeRoot], {
+function rollbackWorktree(repositoryRoot: string, worktreeRoot: string, branch: string) {
+  return Effect.tryPromise(() =>
+    execFileAsync("git", ["worktree", "remove", "--force", worktreeRoot], {
       cwd: repositoryRoot,
       timeout: 120_000,
-    });
-  } catch {
-    return;
-  }
-  try {
-    await execFileAsync("git", ["branch", "-D", branch], {
-      cwd: repositoryRoot,
-      timeout: 120_000,
-    });
-  } catch {
-    // The worktree was removed; a leftover branch is safe and visible to Git.
-  }
+    }),
+  ).pipe(
+    Effect.andThen(
+      Effect.tryPromise(() =>
+        execFileAsync("git", ["branch", "-D", branch], {
+          cwd: repositoryRoot,
+          timeout: 120_000,
+        }),
+      ).pipe(Effect.catch(() => Effect.void)),
+    ),
+    Effect.catch(() => Effect.void),
+  );
 }

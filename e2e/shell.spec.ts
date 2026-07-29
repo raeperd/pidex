@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { rpcRequest } from "./support";
 
 test("serves branded assets", async ({ request }) => {
   const png = await request.get("/pidex-icon.png");
@@ -12,15 +13,34 @@ test("serves branded assets", async ({ request }) => {
   expect([...(await icon.body()).subarray(0, 4)]).toEqual([0, 0, 1, 0]);
 });
 
+test("navigates home when the Pidex icon is clicked", async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The Pidex icon is part of the desktop title bar");
+  await installIntegratedTitleBar(page);
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const created = await rpcRequest<{ taskId: string }>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  await page.goto(`/tasks/${created.result.taskId}`);
+
+  await page
+    .getByRole("link", { name: "Pidex home" })
+    .locator('img[src="/pidex-icon.png"]')
+    .click();
+
+  await expect(page).toHaveURL("/");
+});
+
 test("integrates the application headers with macOS window chrome", async ({ page }, testInfo) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(window, "pidexDesktop", {
-      value: {
-        usesIntegratedTitleBar: true,
-        pickProject: () => Promise.resolve(null),
-      },
-    });
-  });
+  await installIntegratedTitleBar(page);
 
   await page.goto("/");
 
@@ -96,3 +116,14 @@ test("collapses and restores the desktop sidebar with keyboard focus", async ({
   await expect(sidebar).toBeVisible();
   await expect(collapseSidebar).toBeFocused();
 });
+
+function installIntegratedTitleBar(page: Page) {
+  return page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
+}

@@ -54,7 +54,8 @@ export async function createPidexApplication() {
     const roots = await runtime.runPromise(allowedRoots());
     const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
     const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
-    const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots }), {
+    const apiRouter = await runtime.runPromise(createRpcApiRouter({ csrf, roots }));
+    const apiHandler = new RPCHandler(apiRouter, {
       errorStatusMap: {
         ...COMMON_ERROR_STATUS_MAP,
         action_conflict: 409,

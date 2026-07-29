@@ -110,6 +110,20 @@ test("scales mobile task and composer targets while preserving responsive densit
   await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "36px");
   await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "36px");
   await expect(taskRow.locator("time")).toHaveCSS("font-size", "10.5px");
+  await expect
+    .poll(() =>
+      taskRow.evaluate((row) => {
+        const group = row.closest('[role="group"]');
+        if (!group) return null;
+        const groupBounds = group.getBoundingClientRect();
+        const rowBounds = row.getBoundingClientRect();
+        return {
+          left: Math.round(rowBounds.left - groupBounds.left),
+          right: Math.round(groupBounds.right - rowBounds.right),
+        };
+      }),
+    )
+    .toEqual({ left: 0, right: 0 });
   await expect(addProject).toHaveCSS("width", mobile ? "36px" : "32px");
   await expect(search).toHaveCSS("width", mobile ? "40px" : "34px");
   await expect(newTask).toHaveCSS("width", mobile ? "36px" : "32px");
