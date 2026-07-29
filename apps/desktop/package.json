@@ -3,7 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "description": "A focused desktop interface for Pi",
-  "author": "RaeCheol Park",
+  "author": {
+    "name": "raeperd",
+    "url": "https://github.com/raeperd"
+  },
   "files": [
     "assets",
     "dist"
