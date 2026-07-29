@@ -14,7 +14,7 @@ import {
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import type { ContextUsage, ExtensionDialog, TextItem, ToolItem } from "@pidex/api";
-import { Context, Effect, Layer, Schema, Scope } from "effect";
+import { Effect, Scope } from "effect";
 import {
   acquireAdapterSession,
   bounded,
@@ -26,11 +26,12 @@ import {
   type EffectAdapterSession,
 } from "./adapter.js";
 
-export class PiSdkError extends Schema.TaggedErrorClass<PiSdkError>()("PiSdkError", {
-  operation: Schema.String,
-  message: Schema.String,
-  cause: Schema.Defect(),
-}) {}
+interface PiSdkError {
+  readonly _tag: "PiSdkError";
+  readonly operation: string;
+  readonly message: string;
+  readonly cause: unknown;
+}
 
 export interface PiSdkServiceApi {
   inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
@@ -44,93 +45,9 @@ export interface PiSdkServiceApi {
   clearWorkspaceTrust(cwd: string): Effect.Effect<void, PiSdkError>;
 }
 
-export class PiSdkService extends Context.Service<PiSdkService, PiSdkServiceApi>()(
-  "@pidex/server/PiSdkService",
-) {
-  static readonly layer = Layer.succeed(
-    PiSdkService,
-    makePiSdkService(getAgentDir, sessionDirOverride),
-  );
-
-  static make(agentDir: string): PiSdkServiceApi {
-    return makePiSdkService(
-      () => agentDir,
-      () => path.join(agentDir, "sessions"),
-    );
-  }
-}
-
-export class PiSdk {
-  inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    return Effect.runPromise(inspectWorkspace(cwd, getAgentDir, sessionDirOverride));
-  }
-
-  createSession(cwd: string): Promise<AdapterSession> {
-    return Effect.runPromise(
-      openSession(cwd, "session.create", SessionManager.create, getAgentDir, sessionDirOverride),
-    );
-  }
-
-  resumeSession(cwd: string, nativePath: string): Promise<AdapterSession> {
-    return Effect.runPromise(
-      openSession(
-        cwd,
-        "session.resume",
-        (_cwd, sessionDir) => SessionManager.open(nativePath, sessionDir, cwd),
-        getAgentDir,
-        sessionDirOverride,
-      ),
-    );
-  }
-
-  setWorkspaceTrust(cwd: string, trusted: boolean): Promise<void> {
-    return Effect.runPromise(setWorkspaceTrust(cwd, trusted, getAgentDir));
-  }
-
-  inheritWorkspaceTrust(sourceCwd: string, cwd: string): Promise<void> {
-    return Effect.runPromise(inheritWorkspaceTrust(sourceCwd, cwd, getAgentDir));
-  }
-
-  clearWorkspaceTrust(cwd: string): Promise<void> {
-    return Effect.runPromise(clearWorkspaceTrust(cwd, getAgentDir));
-  }
-}
-
-function makePiSdkService(
-  resolveAgentDir: () => string,
-  resolveSessionDirOverride: () => string | undefined,
-): PiSdkServiceApi {
-  return {
-    inspectWorkspace: (cwd) => inspectWorkspace(cwd, resolveAgentDir, resolveSessionDirOverride),
-    createSession: (cwd) =>
-      acquireAdapterSession(
-        openSession(
-          cwd,
-          "session.create",
-          SessionManager.create,
-          resolveAgentDir,
-          resolveSessionDirOverride,
-        ),
-      ),
-    resumeSession: (cwd, nativePath) =>
-      acquireAdapterSession(
-        openSession(
-          cwd,
-          "session.resume",
-          (_cwd, sessionDir) => SessionManager.open(nativePath, sessionDir, cwd),
-          resolveAgentDir,
-          resolveSessionDirOverride,
-        ),
-      ),
-    setWorkspaceTrust: (cwd, trusted) => setWorkspaceTrust(cwd, trusted, resolveAgentDir),
-    inheritWorkspaceTrust: (sourceCwd, cwd) =>
-      inheritWorkspaceTrust(sourceCwd, cwd, resolveAgentDir),
-    clearWorkspaceTrust: (cwd) => clearWorkspaceTrust(cwd, resolveAgentDir),
-  };
-}
-
-function sessionDirOverride(): string | undefined {
-  return process.env.PI_CODING_AGENT_SESSION_DIR;
+export interface PiSdkOptions {
+  readonly agentDir?: string;
+  readonly sessionDir?: string;
 }
 
 const textOf = (content: unknown): string => {
@@ -366,18 +283,13 @@ class PiSession implements AdapterSession {
     });
   }
   private uiContext(): ExtensionUIContext {
-    const session = this.session;
     const ask = (dialog: Omit<ExtensionDialog, "id">) =>
       new Promise<string | boolean | undefined>((resolve) => {
         const id = randomUUID().replaceAll("-", "");
         this.pendingDialogs.set(id, (value) => resolve(value === null ? undefined : value));
         this.emit({ type: "dialog", dialog: { ...dialog, id } });
       });
-    const askForText = async (dialog: Omit<ExtensionDialog, "id">) => {
-      const value = await ask(dialog);
-      return typeof value === "string" ? value : undefined;
-    };
-    const unsupported = async <A>(): Promise<A> => {
+    const unsupported = async () => {
       this.emit({
         type: "notice",
         level: "warning",
@@ -386,13 +298,18 @@ class PiSession implements AdapterSession {
       throw new Error("TUI-only extension interaction unsupported");
     };
     return {
-      select: (title: string, options: string[]) => askForText({ kind: "select", title, options }),
+      select: async (title: string, options: string[]) =>
+        (await ask({ kind: "select", title, options })) as string | undefined,
       confirm: async (title: string, message: string) =>
         Boolean(await ask({ kind: "confirm", title, message })),
-      input: (title: string, placeholder?: string) =>
-        askForText({ kind: "input", title, ...(placeholder ? { placeholder } : {}) }),
-      editor: (title: string, prefill?: string) =>
-        askForText({ kind: "editor", title, ...(prefill ? { prefill } : {}) }),
+      input: async (title: string, placeholder?: string) =>
+        (await ask({ kind: "input", title, ...(placeholder ? { placeholder } : {}) })) as
+          | string
+          | undefined,
+      editor: async (title: string, prefill?: string) =>
+        (await ask({ kind: "editor", title, ...(prefill ? { prefill } : {}) })) as
+          | string
+          | undefined,
       notify: (message: string, type: "info" | "warning" | "error" = "info") =>
         this.emit({ type: "notice", level: type, text: message }),
       setStatus: (_key: string, text: string | undefined) => {
@@ -414,22 +331,11 @@ class PiSession implements AdapterSession {
       addAutocompleteProvider: () => {},
       setEditorComponent: () => {},
       getEditorComponent: () => undefined,
-      get theme() {
-        const value = session.resourceLoader.getThemes().themes[0];
-        if (!value) throw new Error("Theme UI unavailable");
-        return value;
-      },
-      getAllThemes: () =>
-        session.resourceLoader.getThemes().themes.map((theme) => ({
-          name: theme.name ?? "unnamed",
-          path: theme.sourcePath,
-        })),
-      getTheme: (name) =>
-        session.resourceLoader.getThemes().themes.find((theme) => theme.name === name),
+      getAllThemes: () => [],
+      getTheme: () => undefined,
       setTheme: () => ({ success: false, error: "Theme UI unavailable" }),
-      getToolsExpanded: () => false,
-      setToolsExpanded: () => {},
-    };
+      theme: undefined as never,
+    } as unknown as ExtensionUIContext;
   }
   async prompt(text: string) {
     await this.session.prompt(text);
@@ -491,33 +397,38 @@ class PiSession implements AdapterSession {
   }
 }
 
-interface PiServices {
-  readonly agentDir: string;
-  readonly settings: SettingsManager;
-  readonly trust: { trusted: boolean | null; skipped: boolean };
-  readonly loader: DefaultResourceLoader;
-  readonly modelRuntime: ModelRuntime;
-  readonly sessionDir: string | undefined;
-}
+export class PiSdk {
+  constructor(private readonly options: PiSdkOptions = {}) {}
 
-type SessionManagerFactory = (cwd: string, sessionDir: string | undefined) => SessionManager;
+  private async services(cwd: string) {
+    const agentDir = this.options.agentDir ?? getAgentDir();
+    const settings = SettingsManager.create(cwd, agentDir);
+    const trust = trustState(cwd, agentDir, settings);
+    const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
+    await loader.reload({ resolveProjectTrust: async () => trust.trusted === true });
+    const modelRuntime = await ModelRuntime.create({
+      authPath: path.join(agentDir, "auth.json"),
+      modelsPath: path.join(agentDir, "models.json"),
+    });
+    await modelRuntime.refresh({ allowNetwork: false });
+    return {
+      agentDir,
+      settings,
+      trust,
+      loader,
+      modelRuntime,
+      sessionDir: resolvedSessionDir(
+        cwd,
+        agentDir,
+        settings,
+        this.options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR,
+      ),
+    };
+  }
 
-function inspectWorkspace(
-  cwd: string,
-  resolveAgentDir: () => string,
-  resolveSessionDirOverride: () => string | undefined,
-): Effect.Effect<AdapterWorkspaceInfo, PiSdkError> {
-  return Effect.gen(function* () {
-    const { trust, loader, modelRuntime, sessionDir } = yield* loadServices(
-      cwd,
-      "workspace.inspect",
-      resolveAgentDir,
-      resolveSessionDirOverride,
-    );
-    const sessions = yield* attemptPiPromise("workspace.inspect", () =>
-      SessionManager.list(cwd, sessionDir),
-    );
-    const models = yield* attemptPiPromise("workspace.inspect", () => modelRuntime.getAvailable());
+  async inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
+    const { trust, loader, modelRuntime, sessionDir } = await this.services(cwd);
+    const sessions = await SessionManager.list(cwd, sessionDir);
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
       ...loader
         .getSkills()
@@ -535,7 +446,7 @@ function inspectWorkspace(
         ),
     ].slice(0, 50);
     return {
-      models: models.map((model) => ({
+      models: (await modelRuntime.getAvailable()).map((model) => ({
         id: `${model.provider}/${model.id}`,
         provider: model.provider,
         name: model.name,
@@ -561,106 +472,72 @@ function inspectWorkspace(
         ...(prompt.description ? { description: prompt.description } : {}),
       })),
     };
-  });
-}
+  }
 
-function openSession(
-  cwd: string,
-  operation: "session.create" | "session.resume",
-  makeManager: SessionManagerFactory,
-  resolveAgentDir: () => string,
-  resolveSessionDirOverride: () => string | undefined,
-): Effect.Effect<AdapterSession, PiSdkError> {
-  return Effect.gen(function* () {
-    const { agentDir, settings, loader, modelRuntime, sessionDir } = yield* loadServices(
+  private async open(cwd: string, manager: SessionManager) {
+    const { agentDir, settings, loader, modelRuntime } = await this.services(cwd);
+    const result = await createAgentSession({
       cwd,
-      operation,
-      resolveAgentDir,
-      resolveSessionDirOverride,
-    );
-    const manager = yield* attemptPiSync(operation, () => makeManager(cwd, sessionDir));
-    const result = yield* attemptPiPromise(operation, () =>
-      createAgentSession({
-        cwd,
-        agentDir,
-        settingsManager: settings,
-        resourceLoader: loader,
-        modelRuntime,
-        sessionManager: manager,
-      }),
-    );
+      agentDir,
+      settingsManager: settings,
+      resourceLoader: loader,
+      modelRuntime,
+      sessionManager: manager,
+    });
     const wrapped = new PiSession(result.session);
-    yield* attemptPiPromise(operation, () => wrapped.bind()).pipe(
-      Effect.onError(() => Effect.sync(() => wrapped.dispose())),
-    );
+    try {
+      await wrapped.bind();
+    } catch (error) {
+      wrapped.dispose();
+      throw error;
+    }
     return wrapped;
-  });
-}
+  }
 
-function loadServices(
-  cwd: string,
-  operation: string,
-  resolveAgentDir: () => string,
-  resolveSessionDirOverride: () => string | undefined,
-): Effect.Effect<PiServices, PiSdkError> {
-  return Effect.gen(function* () {
-    const agentDir = yield* attemptPiSync(operation, resolveAgentDir);
-    const settings = yield* attemptPiSync(operation, () => SettingsManager.create(cwd, agentDir));
-    const trust = yield* attemptPiSync(operation, () => trustState(cwd, agentDir, settings));
-    const loader = yield* attemptPiSync(
-      operation,
-      () => new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings }),
-    );
-    yield* attemptPiPromise(operation, () =>
-      loader.reload({ resolveProjectTrust: async () => trust.trusted === true }),
-    );
-    const modelRuntime = yield* attemptPiPromise(operation, () =>
-      ModelRuntime.create({
-        authPath: path.join(agentDir, "auth.json"),
-        modelsPath: path.join(agentDir, "models.json"),
-      }),
-    );
-    yield* attemptPiPromise(operation, () => modelRuntime.refresh({ allowNetwork: false }));
-    const override = yield* attemptPiSync(operation, resolveSessionDirOverride);
-    const sessionDir = yield* attemptPiSync(operation, () =>
-      resolvedSessionDir(cwd, agentDir, settings, override),
-    );
-    return { agentDir, settings, trust, loader, modelRuntime, sessionDir };
-  });
-}
+  async createSession(cwd: string) {
+    const { sessionDir } = await this.services(cwd);
+    return this.open(cwd, SessionManager.create(cwd, sessionDir));
+  }
 
-function setWorkspaceTrust(
-  cwd: string,
-  trusted: boolean,
-  resolveAgentDir: () => string,
-): Effect.Effect<void, PiSdkError> {
-  return attemptPiSync("workspace.trust.set", () => {
-    new ProjectTrustStore(resolveAgentDir()).set(cwd, trusted);
-  });
-}
+  async resumeSession(cwd: string, nativePath: string) {
+    const { sessionDir } = await this.services(cwd);
+    return this.open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
+  }
 
-function inheritWorkspaceTrust(
-  sourceCwd: string,
-  cwd: string,
-  resolveAgentDir: () => string,
-): Effect.Effect<void, PiSdkError> {
-  return attemptPiSync("workspace.trust.inherit", () => {
-    const trust = new ProjectTrustStore(resolveAgentDir());
+  async setWorkspaceTrust(cwd: string, trusted: boolean) {
+    new ProjectTrustStore(this.options.agentDir ?? getAgentDir()).set(cwd, trusted);
+  }
+
+  async inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
+    const trust = new ProjectTrustStore(this.options.agentDir ?? getAgentDir());
     const decision = trust.get(sourceCwd);
     if (decision !== null) trust.set(cwd, decision);
-  });
+  }
+
+  async clearWorkspaceTrust(cwd: string) {
+    new ProjectTrustStore(this.options.agentDir ?? getAgentDir()).set(cwd, null);
+  }
 }
 
-function clearWorkspaceTrust(
-  cwd: string,
-  resolveAgentDir: () => string,
-): Effect.Effect<void, PiSdkError> {
-  return attemptPiSync("workspace.trust.clear", () => {
-    new ProjectTrustStore(resolveAgentDir()).set(cwd, null);
-  });
+export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi {
+  return {
+    inspectWorkspace: (cwd) => fromPiPromise("workspace.inspect", () => sdk.inspectWorkspace(cwd)),
+    createSession: (cwd) =>
+      acquireAdapterSession(fromPiPromise("session.create", () => sdk.createSession(cwd))),
+    resumeSession: (cwd, nativePath) =>
+      acquireAdapterSession(
+        fromPiPromise("session.resume", () => sdk.resumeSession(cwd, nativePath)),
+      ),
+    setWorkspaceTrust: (cwd, trusted) =>
+      fromPiPromise("workspace.trust.set", () => sdk.setWorkspaceTrust(cwd, trusted)),
+    inheritWorkspaceTrust: (sourceCwd, cwd) =>
+      fromPiPromise("workspace.trust.inherit", () => sdk.inheritWorkspaceTrust(sourceCwd, cwd)),
+    clearWorkspaceTrust: (cwd) =>
+      fromPiPromise("workspace.trust.clear", () => sdk.clearWorkspaceTrust(cwd)),
+  };
 }
 
-function attemptPiPromise<A>(
+function fromPiPromise<A>(
   operation: string,
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, PiSdkError> {
@@ -670,17 +547,11 @@ function attemptPiPromise<A>(
   });
 }
 
-function attemptPiSync<A>(operation: string, evaluate: () => A): Effect.Effect<A, PiSdkError> {
-  return Effect.try({
-    try: evaluate,
-    catch: (cause) => piSdkError(operation, cause),
-  });
-}
-
 function piSdkError(operation: string, cause: unknown): PiSdkError {
-  return PiSdkError.make({
+  return {
+    _tag: "PiSdkError",
     operation,
     message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
     cause,
-  });
+  };
 }

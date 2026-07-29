@@ -4,18 +4,13 @@ import path from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Effect, Fiber, Stream } from "effect";
-import {
-  acquireAdapterSession,
-  AdapterSessionError,
-  type AdapterEvent,
-  type AdapterSession,
-} from "./adapter.js";
-import { PiSdkError, PiSdkService } from "./pi-sdk.js";
+import { acquireAdapterSession, type AdapterEvent, type AdapterSession } from "./adapter.js";
+import { makePiSdkService, PiSdk } from "./pi-sdk.js";
 
 describe("Effect Pi adapter", () => {
   it.effect("streams events in order and unsubscribes when the stream ends", () =>
     Effect.gen(function* () {
-      const fixture = new SessionFixture();
+      const fixture = makeSessionFixture();
 
       const events = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -46,15 +41,15 @@ describe("Effect Pi adapter", () => {
   it.effect("maps rejected Pi operations to a typed local error", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const fixture = new SessionFixture();
+        const fixture = makeSessionFixture();
         fixture.promptFailure = new Error("prompt failed");
         const session = yield* acquireAdapterSession(Effect.succeed(fixture));
 
-        assert.strictEqual(session.thinkingLevel, "minimal");
-        assert.strictEqual(session.messages[0]?.id, fixture.sessionManager.getLeafId());
+        assert.strictEqual(session.state.thinkingLevel, "minimal");
+        assert.strictEqual(session.state.messages[0]?.id, fixture.sessionManager.getLeafId());
         const error = yield* session.prompt("hello").pipe(Effect.flip);
 
-        assert.instanceOf(error, AdapterSessionError);
+        assert.propertyVal(error, "_tag", "AdapterSessionError");
         assert.strictEqual(error.operation, "session.prompt");
         assert.strictEqual(error.message, "prompt failed");
       }),
@@ -63,7 +58,7 @@ describe("Effect Pi adapter", () => {
 
   it.effect("aborts interrupted prompts and disposes the session when its scope closes", () =>
     Effect.gen(function* () {
-      const fixture = new SessionFixture();
+      const fixture = makeSessionFixture();
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -85,18 +80,23 @@ describe("Effect Pi adapter", () => {
   );
 });
 
-describe("PiSdkService", () => {
+describe("Pi SDK Effect service", () => {
   it.effect("opens a real Pi session inside an Effect scope", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
-        const pi = PiSdkService.make(fixture.agentDir);
+        const pi = makePiSdkService(
+          new PiSdk({
+            agentDir: fixture.agentDir,
+            sessionDir: path.join(fixture.agentDir, "sessions"),
+          }),
+        );
 
         const session = yield* pi.createSession(fixture.cwd);
 
-        assert.strictEqual(session.messages.length, 0);
-        assert.strictEqual(session.isIdle, true);
-        assert.include(session.nativePath ?? "", fixture.agentDir);
+        assert.strictEqual(session.state.messages.length, 0);
+        assert.strictEqual(session.state.isIdle, true);
+        assert.include(session.state.nativePath ?? "", fixture.agentDir);
       }),
     ),
   );
@@ -105,7 +105,12 @@ describe("PiSdkService", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
-        const pi = PiSdkService.make(fixture.agentDir);
+        const pi = makePiSdkService(
+          new PiSdk({
+            agentDir: fixture.agentDir,
+            sessionDir: path.join(fixture.agentDir, "sessions"),
+          }),
+        );
 
         const workspace = yield* pi.inspectWorkspace(fixture.cwd);
         assert.deepEqual(workspace.sessions, []);
@@ -115,7 +120,7 @@ describe("PiSdkService", () => {
         const error = yield* pi
           .resumeSession(fixture.cwd, fixture.corruptSession)
           .pipe(Effect.scoped, Effect.flip);
-        assert.instanceOf(error, PiSdkError);
+        assert.propertyVal(error, "_tag", "PiSdkError");
         assert.strictEqual(error.operation, "session.resume");
       }),
     ),
@@ -140,15 +145,28 @@ function waitForSubscription(fixture: SessionFixture): Effect.Effect<void> {
     : Effect.yieldNow.pipe(Effect.andThen(Effect.suspend(() => waitForSubscription(fixture))));
 }
 
-class SessionFixture implements AdapterSession {
-  readonly sessionManager = SessionManager.inMemory("/fixture");
-  readonly settingsManager = SettingsManager.inMemory({ defaultThinkingLevel: "minimal" });
-  readonly nativeId = this.sessionManager.getSessionId();
-  readonly nativePath = undefined;
-  readonly messages: AdapterSession["messages"] = [
+interface SessionFixture extends AdapterSession {
+  readonly sessionManager: SessionManager;
+  promptFailure: Error | undefined;
+  readonly abortCount: number;
+  readonly disposed: boolean;
+  readonly listenerCount: number;
+  emit(event: AdapterEvent): void;
+}
+
+function makeSessionFixture(): SessionFixture {
+  const sessionManager = SessionManager.inMemory("/fixture");
+  const settingsManager = SettingsManager.inMemory({ defaultThinkingLevel: "minimal" });
+  const listeners = new Set<(event: AdapterEvent) => void>();
+  let promptFailure: Error | undefined;
+  let pendingPrompt: (() => void) | undefined;
+  let abortCount = 0;
+  let disposed = false;
+
+  const messages: AdapterSession["messages"] = [
     {
       type: "user",
-      id: this.sessionManager.appendMessage({
+      id: sessionManager.appendMessage({
         role: "user",
         content: "fixture prompt",
         timestamp: 1,
@@ -158,59 +176,61 @@ class SessionFixture implements AdapterSession {
       timestamp: new Date(1).toISOString(),
     },
   ];
-  readonly model = undefined;
-  readonly thinkingLevel = this.settingsManager.getDefaultThinkingLevel() ?? "off";
-  readonly sessionName = undefined;
-  readonly contextUsage = undefined;
-  readonly isIdle = true;
-  promptFailure: Error | undefined;
-  abortCount = 0;
-  disposed = false;
-  private readonly listeners = new Set<(event: AdapterEvent) => void>();
-  private pendingPrompt: (() => void) | undefined;
 
-  get listenerCount() {
-    return this.listeners.size;
-  }
-
-  subscribe(listener: (event: AdapterEvent) => void) {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  emit(event: AdapterEvent) {
-    for (const listener of this.listeners) listener(event);
-  }
-
-  prompt() {
-    if (this.promptFailure) return Promise.reject(this.promptFailure);
-    return new Promise<void>((resolve) => {
-      this.pendingPrompt = resolve;
-    });
-  }
-
-  async steer() {}
-  async followUp() {}
-
-  async abort() {
-    this.abortCount += 1;
-    this.pendingPrompt?.();
-    this.pendingPrompt = undefined;
-  }
-
-  clearQueue() {}
-  async configure() {}
-  rename() {}
-  async compact() {}
-
-  getStats() {
-    return { messages: 0, toolCalls: 0, tokens: 0, cost: 0 };
-  }
-
-  respondToDialog() {}
-
-  dispose() {
-    this.disposed = true;
-    this.listeners.clear();
-  }
+  return {
+    sessionManager,
+    nativeId: sessionManager.getSessionId(),
+    nativePath: undefined,
+    messages,
+    model: undefined,
+    thinkingLevel: settingsManager.getDefaultThinkingLevel() ?? "off",
+    sessionName: undefined,
+    contextUsage: undefined,
+    isIdle: true,
+    get promptFailure() {
+      return promptFailure;
+    },
+    set promptFailure(error) {
+      promptFailure = error;
+    },
+    get abortCount() {
+      return abortCount;
+    },
+    get disposed() {
+      return disposed;
+    },
+    get listenerCount() {
+      return listeners.size;
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    emit: (event) => {
+      for (const listener of listeners) listener(event);
+    },
+    prompt: () => {
+      if (promptFailure) return Promise.reject(promptFailure);
+      return new Promise<void>((resolve) => {
+        pendingPrompt = resolve;
+      });
+    },
+    steer: async () => {},
+    followUp: async () => {},
+    abort: async () => {
+      abortCount += 1;
+      pendingPrompt?.();
+      pendingPrompt = undefined;
+    },
+    clearQueue: () => {},
+    configure: async () => {},
+    rename: () => {},
+    compact: async () => {},
+    getStats: () => ({ messages: 0, toolCalls: 0, tokens: 0, cost: 0 }),
+    respondToDialog: () => {},
+    dispose: () => {
+      disposed = true;
+      listeners.clear();
+    },
+  };
 }

@@ -6,7 +6,7 @@ import type {
   TextItem,
   ToolItem,
 } from "@pidex/api";
-import { Effect, Queue, Schema, Scope, Stream } from "effect";
+import { Effect, Queue, Scope, Stream } from "effect";
 
 export type AdapterEvent =
   | { type: "message"; item: TextItem }
@@ -56,24 +56,25 @@ export interface AdapterSession {
   dispose(): void;
 }
 
-export class AdapterSessionError extends Schema.TaggedErrorClass<AdapterSessionError>()(
-  "AdapterSessionError",
-  {
-    operation: Schema.String,
-    message: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {}
+interface AdapterSessionError {
+  readonly _tag: "AdapterSessionError";
+  readonly operation: string;
+  readonly message: string;
+  readonly cause: unknown;
+}
 
 export interface EffectAdapterSession {
-  readonly nativeId: string;
-  readonly nativePath: string | undefined;
-  readonly messages: TextItem[];
-  readonly model: string | undefined;
-  readonly thinkingLevel: AdapterSession["thinkingLevel"];
-  readonly sessionName: string | undefined;
-  readonly contextUsage: ContextUsage | undefined;
-  readonly isIdle: boolean;
+  readonly state: Pick<
+    AdapterSession,
+    | "nativeId"
+    | "nativePath"
+    | "messages"
+    | "model"
+    | "thinkingLevel"
+    | "sessionName"
+    | "contextUsage"
+    | "isIdle"
+  >;
   readonly events: Stream.Stream<AdapterEvent>;
   prompt(text: string): Effect.Effect<void, AdapterSessionError>;
   steer(text: string): Effect.Effect<void, AdapterSessionError>;
@@ -86,7 +87,10 @@ export interface EffectAdapterSession {
   }): Effect.Effect<void, AdapterSessionError>;
   rename(name: string): Effect.Effect<void, AdapterSessionError>;
   compact(instructions?: string): Effect.Effect<void, AdapterSessionError>;
-  getStats(): { messages: number; toolCalls: number; tokens: number; cost: number };
+  getStats(): Effect.Effect<
+    { messages: number; toolCalls: number; tokens: number; cost: number },
+    AdapterSessionError
+  >;
   respondToDialog(
     requestId: string,
     value: string | boolean | null,
@@ -103,30 +107,7 @@ export function acquireAdapterSession<E, R>(
 
 function toEffectAdapterSession(session: AdapterSession): EffectAdapterSession {
   return {
-    get nativeId() {
-      return session.nativeId;
-    },
-    get nativePath() {
-      return session.nativePath;
-    },
-    get messages() {
-      return session.messages;
-    },
-    get model() {
-      return session.model;
-    },
-    get thinkingLevel() {
-      return session.thinkingLevel;
-    },
-    get sessionName() {
-      return session.sessionName;
-    },
-    get contextUsage() {
-      return session.contextUsage;
-    },
-    get isIdle() {
-      return session.isIdle;
-    },
+    state: session,
     events: sessionEvents(session),
     prompt: (text) =>
       attemptPromise("session.prompt", () => session.prompt(text)).pipe(
@@ -146,7 +127,7 @@ function toEffectAdapterSession(session: AdapterSession): EffectAdapterSession {
       }),
     compact: (instructions) =>
       attemptPromise("session.compact", () => session.compact(instructions)),
-    getStats: () => session.getStats(),
+    getStats: () => attemptSync("session.getStats", () => session.getStats()),
     respondToDialog: (requestId, value) =>
       attemptSync("session.respondToDialog", () => {
         session.respondToDialog(requestId, value);
@@ -203,11 +184,12 @@ function attemptSync<A>(
 }
 
 function adapterSessionError(operation: string, cause: unknown): AdapterSessionError {
-  return AdapterSessionError.make({
+  return {
+    _tag: "AdapterSessionError",
     operation,
     message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
     cause,
-  });
+  };
 }
 
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
