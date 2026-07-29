@@ -86,13 +86,11 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
-  it("renders the Pi session footer", () => {
+  it("renders only cost and context below the composer", () => {
     const body = renderComposer("", false);
+    const footer = body.match(/data-testid="composer-stats"><span[^>]*>([^<]*)<\/span>/)?.[1];
 
-    expect(body).toContain("~/Projects/pidex (main)");
-    expect(body).toContain("↑1.0k ↓250 R2.0k W100 CH66.7% $1.234 (sub)");
-    expect(body).not.toContain("25.0%/272k (auto)");
-    expect(body).toContain("gpt-5.6-sol • high");
+    expect(footer).toBe("$1.234 (sub) 25.0%/272k (auto)");
   });
 
   it("completes a selected command in the composer", () => {
@@ -135,8 +133,6 @@ function renderComposer(draft: string, active: boolean) {
         },
       ],
       persistDraft: () => {},
-      projectPath: "~/Projects/pidex",
-      gitBranch: "main",
       projectName: "pidex",
       requiresAcknowledgement: false,
       runStatus: active ? "running" : "idle",
@@ -150,11 +146,6 @@ function renderComposer(draft: string, active: boolean) {
         messages: 2,
         toolCalls: 1,
         tokens: 3_350,
-        inputTokens: 1_000,
-        outputTokens: 250,
-        cacheReadTokens: 2_000,
-        cacheWriteTokens: 100,
-        cacheHitRate: 66.666,
         cost: 1.234,
         subscription: true,
       },

@@ -52,8 +52,6 @@
     followUpCount={context.task.snapshot.followUpQueue.length}
     models={context.shell.workspace?.models ?? []}
     persistDraft={context.taskActions.persistDraft}
-    projectPath={context.shell.workspace?.displayPath ?? context.shell.workspace?.path ?? ""}
-    gitBranch={context.shell.workspace?.gitBranch}
     projectName={context.shell.workspace?.name ?? "Project"}
     requiresAcknowledgement={Boolean(context.task.snapshot.run?.requiresAcknowledgement)}
     runStatus={context.task.snapshot.runStatus}
