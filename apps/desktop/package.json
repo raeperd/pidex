@@ -15,7 +15,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "package": "node scripts/package.mjs && electron-builder --projectDir .package/app --config ../../electron-builder.yml --mac --dir",
+    "package": "node scripts/package.mjs && electron-builder --projectDir .package/app --config ../../electron-builder.yml --mac --dir --publish never",
     "start": "electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -21,6 +21,6 @@ mac:
   category: public.app-category.developer-tools
   hardenedRuntime: false
   icon: icon.icns
-  identity: "-"
+  identity: null
   target:
     - dir
