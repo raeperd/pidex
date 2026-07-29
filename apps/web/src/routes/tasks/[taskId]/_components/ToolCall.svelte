@@ -145,7 +145,7 @@
 
 <div
   class={[
-    "tool-call my-1.5 rounded-none px-2 py-2 font-mono text-[12px] leading-[1.5]",
+    "tool-call my-4 rounded-none px-2 py-2 font-mono text-[12px] leading-[1.5]",
     status === "success"
       ? "bg-[var(--tool-success)]"
       : status === "error"
