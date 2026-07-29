@@ -66,12 +66,16 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Package unsigned macOS app
+      - name: Package and ad-hoc sign macOS app
         run: |
-          ulimit -n 65536
           pnpm package:desktop
-        env:
-          CSC_FOR_PULL_REQUEST: "true"
+
+          app_path="$(find apps/desktop/release -maxdepth 2 -type d -name pidex.app -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "Packaged pidex.app was not found." >&2
+            exit 1
+          fi
+          codesign --force --deep --sign - "$app_path"
       - name: Smoke packaged macOS app
         shell: bash
         run: |
