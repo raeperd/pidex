@@ -1393,7 +1393,7 @@
       >
         <Icon name="sidebar-collapse" />
       </button>
-      <div class="flex min-w-0 flex-1 items-center gap-2">
+      <a class="flex min-w-0 flex-1 items-center gap-2" href="/" aria-label="Pidex home">
         {#if usesIntegratedTitleBar}
           <img
             class="size-4 flex-none rounded-[4px]"
@@ -1406,7 +1406,7 @@
         <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
           >LOCAL</span
         >
-      </div>
+      </a>
       <button
         class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
         onclick={toggleSearch}
