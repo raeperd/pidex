@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import ContextUsageMeter from "./ContextUsageMeter.svelte";
 
 describe("ContextUsageMeter", () => {
-  it("renders context usage as a read-only indicator", () => {
+  it("renders context usage as an interactive details trigger", () => {
     const { body } = render(ContextUsageMeter, {
       props: {
         usage: {
@@ -16,9 +16,11 @@ describe("ContextUsageMeter", () => {
       },
     });
 
-    expect(body).not.toContain("<button");
-    expect(body).toContain('role="img"');
+    expect(body).toContain('<button class="context-meter__trigger');
+    expect(body).toContain('type="button"');
     expect(body).toContain('aria-label="Context window 5.1% used"');
-    expect(body).not.toContain("Compact task");
+    expect(body).toContain('aria-expanded="false"');
+    expect(body).toContain('role="tooltip"');
+    expect(body).toContain('aria-hidden="true"');
   });
 });
