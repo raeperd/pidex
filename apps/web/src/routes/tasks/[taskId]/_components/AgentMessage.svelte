@@ -49,7 +49,7 @@
   });
 </script>
 
-<article class="group/assistant mb-2 min-w-0 px-2 py-1">
+<article class="group/assistant my-6 min-w-0 px-2 py-1">
   {#if thinking}
     <div
       class="thinking-markdown mb-2 font-mono text-[12px] leading-[1.55] italic text-faint [overflow-wrap:anywhere]"

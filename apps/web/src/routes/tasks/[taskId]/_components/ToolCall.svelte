@@ -1,5 +1,8 @@
 <script lang="ts" module>
+  export type ToolCallKind = "shell" | "read" | "search" | "edit" | "generic";
+
   export interface ToolCallHeader {
+    kind: ToolCallKind;
     label: string;
     detail: string;
     range?: string;
@@ -12,23 +15,37 @@
 
   export const TOOL_PREVIEW_LINES = 5;
 
-  /** Mirrors Pi's TUI headers: `$ <command>` for bash, `<tool> <path>` for path tools. */
   export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
+    const kind = toolCallKind(name);
     const args = parseArguments(argumentSummary);
-    if (!args) return { label: name, detail: argumentSummary.trim() };
-    if (name === "bash") return { label: "$", detail: text(args.command) || "…" };
-    if (name === "read") return { label: "read", ...readDetail(args) };
-    if (name === "grep")
+    if (!args)
       return {
-        label: "Searched",
+        kind,
+        label: toolCallLabel(name, kind),
+        detail: argumentSummary.trim(),
+      };
+    if (kind === "shell")
+      return { kind, label: "$", detail: text(args.command) || compactArguments(args) || "…" };
+    if (kind === "read") return { kind, label: "Read", ...readDetail(args) };
+    if (kind === "search")
+      return {
+        kind,
+        label: "Search",
         detail: [text(args.pattern), text(args.path) || text(args.file_path)]
           .filter(Boolean)
           .join(" · "),
       };
+    if (kind === "edit")
+      return {
+        kind,
+        label: name === "write" ? "Write" : "Edit",
+        detail:
+          text(args.path) || text(args.file_path) || text(args.patch) || compactArguments(args),
+      };
     const detail = [text(args.pattern), text(args.path) || text(args.file_path)]
       .filter(Boolean)
       .join(" ");
-    return { label: name, detail: detail || compactArguments(args) };
+    return { kind, label: humanizeToolName(name), detail: detail || compactArguments(args) };
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
@@ -65,6 +82,27 @@
 
   export function formatToolDuration(milliseconds: number): string {
     return `${(milliseconds / 1000).toFixed(1)}s`;
+  }
+
+  export function toolCallKind(name: string): ToolCallKind {
+    if (["bash", "shell", "exec", "exec_command"].includes(name)) return "shell";
+    if (name === "read") return "read";
+    if (["grep", "find", "search"].includes(name)) return "search";
+    if (["edit", "write", "apply_patch"].includes(name)) return "edit";
+    return "generic";
+  }
+
+  function toolCallLabel(name: string, kind: ToolCallKind): string {
+    if (kind === "shell") return "$";
+    if (kind === "read") return "Read";
+    if (kind === "search") return "Search";
+    if (kind === "edit") return name === "write" ? "Write" : "Edit";
+    return humanizeToolName(name);
+  }
+
+  function humanizeToolName(name: string): string {
+    const words = name.replaceAll(/[_-]+/g, " ").trim();
+    return words ? `${words[0]?.toUpperCase()}${words.slice(1)}` : "Tool";
   }
 
   function parseArguments(argumentSummary: string): Record<string, unknown> | undefined {
@@ -107,6 +145,7 @@
 
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import Icon from "../../../_components/Icon.svelte";
 
   let {
     name,
@@ -116,6 +155,7 @@
     startedAt,
     endedAt,
     now,
+    detailsAvailable,
     children,
   }: {
     name: string;
@@ -125,62 +165,142 @@
     startedAt?: number;
     endedAt?: number;
     now: number;
+    detailsAvailable?: boolean;
     children?: Snippet;
   } = $props();
 
-  let expanded = $state(false);
+  let expanded = $derived(status === "error");
   let header = $derived(toolCallHeader(name, argumentSummary));
   let normalizedOutput = $derived(toolCallOutputText(output));
   let preview = $derived(toolCallPreview(normalizedOutput));
-  let lines = $derived(expanded ? normalizedOutput.replace(/\s+$/, "").split("\n") : preview.lines);
-  let readOutputCollapsed = $derived(
-    name === "read" && status !== "error" && Boolean(normalizedOutput) && !expanded,
-  );
+  let hasDetails = $derived(detailsAvailable ?? Boolean(normalizedOutput));
   let timing = $derived(
     startedAt === undefined
       ? undefined
       : `${status === "running" ? "Elapsed" : "Took"} ${formatToolDuration((endedAt ?? now) - startedAt)}`,
   );
+  let icon: "terminal" | "file" | "search" | "compose" | "tool" = $derived(
+    header.kind === "shell"
+      ? "terminal"
+      : header.kind === "read"
+        ? "file"
+        : header.kind === "search"
+          ? "search"
+          : header.kind === "edit"
+            ? "compose"
+            : "tool",
+  );
+  let accessibleLabel = $derived(
+    `${header.label}${header.detail ? ` ${header.detail}${header.range ?? ""}` : ""}`,
+  );
 </script>
 
 <div
   class={[
-    "tool-call my-4 rounded-none px-2 py-2 font-mono text-[12px] leading-[1.5]",
-    status === "success"
-      ? "bg-[var(--tool-success)]"
-      : status === "error"
-        ? "bg-[var(--tool-error)]"
-        : "bg-[var(--tool-pending)]",
+    "tool-call min-w-0 text-[12px] leading-[1.5]",
+    header.kind === "shell"
+      ? "tool-call--shell rounded-lg bg-secondary/70 px-2 py-2 font-mono"
+      : "tool-call--activity font-sans",
   ]}
+  data-tool-kind={header.kind}
+  data-tool-status={status}
 >
-  <button
-    type="button"
-    class="block w-full cursor-pointer border-0 border-none bg-transparent p-0 text-left text-inherit"
-    aria-label={`${header.label}${header.detail ? ` ${header.detail}${header.range ?? ""}` : ""}${readOutputCollapsed ? " (click to expand)" : ""}`}
-    aria-expanded={expanded}
-    onclick={() => (expanded = !expanded)}
-  >
-    <span class="block font-semibold whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]"
-      ><span>{header.label}</span>
-      {#if header.detail}<span class={header.label === "$" ? "" : "text-[var(--tool-argument)]"}
-          >{header.detail}</span
-        >{/if}{#if header.range}<span class="tool-call__range text-[#DCDC1F]">{header.range}</span
-        >{/if}{#if readOutputCollapsed}<span class="ml-[0.5ch] font-normal text-faint"
-          >(click to expand)</span
-        >{/if}</span
+  {#snippet headerContent()}
+    <span
+      class={[
+        "grid size-5.5 flex-none place-items-center text-faint",
+        status === "running" && "text-primary",
+        status === "error" && "text-danger",
+      ]}
     >
-    {#if !readOutputCollapsed && !expanded && preview.skipped > 0}
-      <span class="mt-[0.5em] block text-faint"
-        >… ({preview.skipped} earlier lines, click to expand)</span
-      >
-    {/if}
-  </button>
-  {#if normalizedOutput && !readOutputCollapsed}
+      <Icon name={icon} size={14} />
+    </span>
+    <span class="flex min-w-0 flex-1 items-baseline gap-1.5">
+      <span class="flex-none font-semibold text-foreground">{header.label}</span>
+      {#if header.detail}<span
+          class={[
+            "min-w-0 truncate font-mono font-normal",
+            header.kind === "shell" ? "text-foreground" : "text-muted",
+          ]}
+          title={header.detail}>{header.detail}</span
+        >{/if}
+      {#if header.range}<span
+          class="tool-call__range flex-none font-mono font-semibold text-[#DCDC1F]"
+          >{header.range}</span
+        >{/if}
+    </span>
+    <span class="ml-auto flex flex-none items-center gap-1.5 text-[10.5px] text-faint">
+      {#if timing}<span class="tool-call__timing">{timing}</span>{/if}
+      {#if status === "running"}
+        <span class="animate-spin text-primary" aria-label="Running"
+          ><Icon name="loader" size={13} /></span
+        >
+      {:else if status === "error"}
+        <span class="inline-flex items-center gap-1 text-danger"
+          ><Icon name="x" size={13} /><span>Failed</span></span
+        >
+      {:else}
+        <span class="text-faint" aria-label="Complete"><Icon name="check" size={13} /></span>
+      {/if}
+      {#if hasDetails}<span
+          class={["transition-transform duration-150", expanded && "rotate-90"]}
+          aria-hidden="true"><Icon name="chevron" size={13} /></span
+        >{/if}
+    </span>
+  {/snippet}
+
+  {#if hasDetails}
+    <button
+      type="button"
+      class={[
+        "flex min-h-8 w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent text-left text-inherit outline-none",
+        header.kind === "shell"
+          ? "rounded-md p-0 focus-visible:ring-2 focus-visible:ring-primary"
+          : "rounded-lg px-2 py-1.5 transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary",
+      ]}
+      aria-label={accessibleLabel}
+      aria-expanded={expanded}
+      onclick={() => (expanded = !expanded)}
+    >
+      {@render headerContent()}
+    </button>
+  {:else}
+    <div
+      class={[
+        "flex min-h-8 w-full items-center gap-1.5",
+        header.kind === "shell" ? "p-0" : "rounded-lg px-2 py-1.5",
+      ]}
+      aria-label={accessibleLabel}
+    >
+      {@render headerContent()}
+    </div>
+  {/if}
+
+  {#if header.kind === "shell" && normalizedOutput && !expanded}
+    {#if preview.skipped > 0}<p class="mt-1 mb-0 text-faint">
+        … {preview.skipped} earlier {preview.skipped === 1 ? "line" : "lines"}
+      </p>{/if}
     <pre
-      class="tool-call__output mt-[0.5em] mb-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{lines.join(
+      class="tool-call__output mt-1 mb-0 max-h-32 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{preview.lines.join(
         "\n",
       )}</pre>
   {/if}
-  {#if timing}<p class="tool-call__timing mt-[0.5em] mb-0 text-faint">{timing}</p>{/if}
-  {@render children?.()}
+
+  {#if expanded && hasDetails}
+    <div
+      class={[
+        "tool-call__details mt-1.5 min-w-0",
+        header.kind === "shell"
+          ? "border-t border-border pt-2"
+          : "ml-7 rounded-r-lg border-l border-border-strong bg-secondary/45 px-3 py-2 font-mono",
+      ]}
+    >
+      {#if normalizedOutput}<pre
+          class="tool-call__output m-0 max-h-88 overflow-auto whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{normalizedOutput.replace(
+            /\s+$/,
+            "",
+          )}</pre>{/if}
+      {@render children?.()}
+    </div>
+  {/if}
 </div>

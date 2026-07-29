@@ -7,11 +7,13 @@
     ChevronRight,
     ChevronsDownUp,
     Copy,
+    FileText,
     Folder,
     FolderGit2,
     FolderOpen,
     FolderPlus,
     GripVertical,
+    LoaderCircle,
     Menu,
     PanelLeftClose,
     PanelLeftOpen,
@@ -21,6 +23,7 @@
     Split,
     Square,
     SquarePen,
+    Terminal,
     Wrench,
     X,
     type LucideIcon,
@@ -34,11 +37,13 @@
     | "compact"
     | "compose"
     | "copy"
+    | "file"
     | "folder"
     | "folder-git"
     | "folder-open"
     | "folder-plus"
     | "grip"
+    | "loader"
     | "menu"
     | "rename"
     | "search"
@@ -47,6 +52,7 @@
     | "sidebar-collapse"
     | "sidebar-expand"
     | "stop"
+    | "terminal"
     | "tool"
     | "worktree"
     | "x";
@@ -59,11 +65,13 @@
     compact: ChevronsDownUp,
     compose: SquarePen,
     copy: Copy,
+    file: FileText,
     folder: Folder,
     "folder-git": FolderGit2,
     "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
     grip: GripVertical,
+    loader: LoaderCircle,
     menu: Menu,
     rename: PencilLine,
     search: Search,
@@ -72,6 +80,7 @@
     "sidebar-collapse": PanelLeftClose,
     "sidebar-expand": PanelLeftOpen,
     stop: Square,
+    terminal: Terminal,
     tool: Wrench,
     worktree: Split,
     x: X,

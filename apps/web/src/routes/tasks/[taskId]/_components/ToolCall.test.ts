@@ -9,6 +9,7 @@ import {
 describe("toolCallHeader", () => {
   it("renders bash calls as a shell prompt", () => {
     expect(toolCallHeader("bash", JSON.stringify({ command: "ls -la", timeout: 30 }))).toEqual({
+      kind: "shell",
       label: "$",
       detail: "ls -la",
     });
@@ -18,23 +19,40 @@ describe("toolCallHeader", () => {
     expect(
       toolCallHeader("read", JSON.stringify({ path: "README.md", offset: 1, limit: 800 })),
     ).toEqual({
-      label: "read",
+      kind: "read",
+      label: "Read",
       detail: "README.md",
       range: ":1-800",
     });
     expect(toolCallHeader("grep", JSON.stringify({ pattern: "TODO", path: "src" }))).toEqual({
-      label: "Searched",
+      kind: "search",
+      label: "Search",
       detail: "TODO · src",
+    });
+  });
+
+  it("gives edit and unknown tools distinct activity presentations", () => {
+    expect(toolCallHeader("edit", JSON.stringify({ path: "src/app.ts" }))).toEqual({
+      kind: "edit",
+      label: "Edit",
+      detail: "src/app.ts",
+    });
+    expect(toolCallHeader("custom_tool", JSON.stringify({ target: "workspace" }))).toEqual({
+      kind: "generic",
+      label: "Custom tool",
+      detail: "target=workspace",
     });
   });
 
   it("falls back to compact arguments and to truncated summaries", () => {
     expect(toolCallHeader("custom", JSON.stringify({ limit: 5, mode: "fast" }))).toEqual({
-      label: "custom",
+      kind: "generic",
+      label: "Custom",
       detail: "limit=5 mode=fast",
     });
     expect(toolCallHeader("bash", '{"command": "ls -')).toEqual({
-      label: "bash",
+      kind: "shell",
+      label: "$",
       detail: '{"command": "ls -',
     });
   });
