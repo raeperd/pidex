@@ -992,7 +992,8 @@
     }
   }
   async function send() {
-    if (active || !snapshot || !draft.trim() || connection !== "connected") return;
+    if (active || configurationPending || !snapshot || !draft.trim() || connection !== "connected")
+      return;
     const submittedDraft = draft;
     const text = submittedDraft.trim();
     if (

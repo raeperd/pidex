@@ -136,6 +136,7 @@
       connection !== "connected" ||
       requiresAcknowledgement ||
       creatingTask ||
+      configurationPending ||
       compactPending,
   );
   const componentId = $props.id();

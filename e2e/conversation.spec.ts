@@ -959,6 +959,9 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
   await expect(thinking).toBeDisabled();
   await prompt.fill("Draft while configuration is pending");
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  if (testInfo.project.name !== "mobile") await prompt.press("Enter");
+  expect(mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
   releaseConfiguration();
   await expect(thinking).toBeEnabled();
   await expect(thinking).toHaveValue(nextThinking);
