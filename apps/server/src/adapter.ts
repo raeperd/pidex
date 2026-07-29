@@ -19,6 +19,12 @@ export type AdapterEvent =
   | { type: "settled" }
   | { type: "dialog"; dialog?: ExtensionDialog };
 
+interface AdapterToolOutput {
+  readonly id: string;
+  readonly text: string;
+  readonly sourceTruncated: boolean;
+}
+
 export interface AdapterSessionInfo extends SessionSummary {
   nativeId: string;
   nativePath?: string;
@@ -35,6 +41,7 @@ export interface AdapterSession {
   readonly nativeId: string;
   readonly nativePath: string | undefined;
   readonly messages: TranscriptItem[];
+  readonly toolOutputs: ReadonlyMap<string, AdapterToolOutput>;
   readonly model: string | undefined;
   readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly sessionName: string | undefined;
@@ -70,6 +77,7 @@ export interface EffectAdapterSession {
     | "nativeId"
     | "nativePath"
     | "messages"
+    | "toolOutputs"
     | "model"
     | "thinkingLevel"
     | "sessionName"

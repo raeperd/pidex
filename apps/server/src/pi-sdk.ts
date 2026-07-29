@@ -76,8 +76,9 @@ const thinkingOf = (content: unknown): string =>
 const messageId = (message: { role: string; timestamp?: number }) =>
   `${message.role}-${message.timestamp ?? Date.now()}`;
 
-function transcriptItems(entries: SessionEntry[]): TranscriptItem[] {
+function transcriptItems(entries: SessionEntry[]) {
   const items: TranscriptItem[] = [];
+  const toolOutputs = new Map<string, { id: string; text: string; sourceTruncated: boolean }>();
   const toolIndexes = new Map<string, number>();
   for (const entry of entries) {
     if (entry.type !== "message") continue;
@@ -115,15 +116,29 @@ function transcriptItems(entries: SessionEntry[]): TranscriptItem[] {
     if (toolIndex === undefined) continue;
     const tool = items[toolIndex];
     if (!tool || tool.type !== "tool") continue;
-    const preview = bounded(textOf(message.content));
-    items[toolIndex] = {
+    const output = boundedResource(textOf(message.content));
+    const preview = bounded(output.text);
+    let resolved: ToolItem = {
       ...tool,
       state: message.isError ? "error" : "success",
       preview: preview.text,
-      truncated: tool.truncated || preview.truncated,
+      truncated: tool.truncated || preview.truncated || output.sourceTruncated,
     };
+    if (preview.truncated || output.sourceTruncated) {
+      const resourceId = randomUUID().replaceAll("-", "");
+      toolOutputs.set(resourceId, { id: resourceId, ...output });
+      resolved = { ...resolved, resourceId, outputSize: output.text.length };
+    }
+    items[toolIndex] = resolved;
   }
-  return items;
+  for (const [index, item] of items.entries())
+    if (item.type === "tool" && item.state === "running")
+      items[index] = {
+        ...item,
+        state: "error",
+        preview: "Tool execution was interrupted before a result was recorded.",
+      };
+  return { items, toolOutputs };
 }
 
 function resolvedSessionDir(
@@ -160,6 +175,7 @@ const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic =
 function makePiSession(session: AgentSession) {
   const nativeId = session.sessionId;
   const nativePath = session.sessionFile;
+  const restoredTranscript = transcriptItems(session.sessionManager.buildContextEntries());
   const listeners = new Set<(event: AdapterEvent) => void>();
   const pendingDialogs = new Map<string, (value: string | boolean | null) => void>();
   const unsubscribe = session.subscribe(handle);
@@ -172,7 +188,10 @@ function makePiSession(session: AgentSession) {
     });
   }
   function readMessages(): TranscriptItem[] {
-    return transcriptItems(session.sessionManager.buildContextEntries());
+    return restoredTranscript.items;
+  }
+  function readToolOutputs() {
+    return restoredTranscript.toolOutputs;
   }
   function readModel() {
     return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
@@ -432,6 +451,9 @@ function makePiSession(session: AgentSession) {
     nativePath,
     get messages() {
       return readMessages();
+    },
+    get toolOutputs() {
+      return readToolOutputs();
     },
     get model() {
       return readModel();

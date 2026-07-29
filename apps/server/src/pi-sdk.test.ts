@@ -234,6 +234,76 @@ describe("Pi SDK Effect service", () => {
     ),
   );
 
+  it.effect("restores full oversized tool output and finalizes orphaned calls", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        const sessionDir = path.join(fixture.agentDir, "sessions");
+        const manager = SessionManager.create(fixture.cwd, sessionDir);
+        const oversizedOutput = "x".repeat(12_100);
+        manager.appendMessage({
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tool-large",
+              name: "read",
+              arguments: { path: "large.log" },
+            },
+            {
+              type: "toolCall",
+              id: "tool-orphaned",
+              name: "bash",
+              arguments: { command: "sleep 30" },
+            },
+          ],
+          api: "openai-responses",
+          provider: "openai",
+          model: "gpt-5.5",
+          usage: {
+            input: 10,
+            output: 5,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 15,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "toolUse",
+          timestamp: 1,
+        });
+        manager.appendMessage({
+          role: "toolResult",
+          toolCallId: "tool-large",
+          toolName: "read",
+          content: [{ type: "text", text: oversizedOutput }],
+          isError: false,
+          timestamp: 2,
+        });
+        const nativePath = manager.getSessionFile();
+        if (!nativePath) return yield* Effect.die("Persisted session has no file path");
+
+        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const session = yield* pi.resumeSession(fixture.cwd, nativePath);
+        const large = session.state.messages.find((item) => item.id === "tool-large");
+        const orphaned = session.state.messages.find((item) => item.id === "tool-orphaned");
+
+        assert.strictEqual(large?.type, "tool");
+        if (large?.type !== "tool") return yield* Effect.die("Large tool call was not restored");
+        assert.strictEqual(large.state, "success");
+        assert.isTrue(large.truncated);
+        assert.exists(large.resourceId);
+        assert.strictEqual(large.outputSize, oversizedOutput.length);
+        assert.strictEqual(session.state.toolOutputs.get(large.resourceId)?.text, oversizedOutput);
+        assert.deepInclude(orphaned, {
+          type: "tool",
+          id: "tool-orphaned",
+          state: "error",
+          preview: "Tool execution was interrupted before a result was recorded.",
+        });
+      }),
+    ),
+  );
+
   it.effect("inspects an isolated workspace and reports typed open failures", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -315,6 +385,7 @@ function makeSessionFixture(): SessionFixture {
     nativeId: sessionManager.getSessionId(),
     nativePath: undefined,
     messages,
+    toolOutputs: new Map(),
     model: undefined,
     thinkingLevel: settingsManager.getDefaultThinkingLevel() ?? "off",
     sessionName: undefined,

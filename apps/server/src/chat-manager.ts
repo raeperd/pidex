@@ -197,7 +197,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         steering: [],
         followUp: [],
         extensionDialog: undefined,
-        resources: new Map(),
+        resources: new Map(session.state.toolOutputs),
         eventId: 0,
         events: [],
         sockets: new Set<WebSocket>(),
