@@ -103,7 +103,6 @@ function renderComposer(draft: string, active: boolean) {
       followUpCount: 0,
       hasConfigurationDraft: false,
       models: [],
-      openCompact: () => {},
       persistDraft: () => {},
       requiresAcknowledgement: false,
       runStatus: active ? "running" : "idle",

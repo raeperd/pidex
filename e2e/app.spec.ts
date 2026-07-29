@@ -1296,9 +1296,7 @@ test("preserves edits made while slash compaction is pending", async ({
 
   await prompt.fill("Draft typed while compaction is pending");
   releaseCompaction();
-  await expect(
-    page.getByRole("button", { name: "Compact task (context window 10% used)" }),
-  ).toBeVisible();
+  await expect(page.getByLabel("Context window 10% used")).toBeVisible();
   await expect(prompt).toHaveValue("Draft typed while compaction is pending");
 
   await prompt.fill(
@@ -1465,9 +1463,7 @@ test("ignores compact responses after navigating to another task", async ({ page
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await prompt.fill("Message for the second task");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Compact task (context window 20% used)" }),
-  ).toBeVisible();
+  await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   releaseCompaction();
   await compactResponse;
   await page.evaluate(
@@ -1475,12 +1471,8 @@ test("ignores compact responses after navigating to another task", async ({ page
       new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
 
-  await expect(
-    page.getByRole("button", { name: "Compact task (context window 20% used)" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Compact task (context window 10% used)" }),
-  ).toHaveCount(0);
+  await expect(page.getByLabel("Context window 20% used")).toBeVisible();
+  await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
 });
 
 test("stages configuration without overwriting the next draft", async ({

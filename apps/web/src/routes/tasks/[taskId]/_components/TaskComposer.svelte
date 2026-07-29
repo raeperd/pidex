@@ -84,7 +84,6 @@
     followUpCount,
     hasConfigurationDraft,
     models,
-    openCompact,
     persistDraft,
     requiresAcknowledgement,
     runStatus,
@@ -108,7 +107,6 @@
     followUpCount: number;
     hasConfigurationDraft: boolean;
     models: Workspace["models"];
-    openCompact: () => void;
     persistDraft: () => void;
     requiresAcknowledgement: boolean;
     runStatus: ChatSnapshot["runStatus"];
@@ -325,11 +323,7 @@
         {#if hasConfigurationDraft}<span class="chat-composer__next-turn">Next turn</span>{/if}
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
-        {#if contextUsage}<ContextUsageMeter
-            usage={contextUsage}
-            onclick={openCompact}
-            disabled={active}
-          />{/if}
+        {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
         {#if active}
           <select
             class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground"

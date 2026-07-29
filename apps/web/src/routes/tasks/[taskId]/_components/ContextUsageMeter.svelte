@@ -4,13 +4,7 @@
   const RADIUS = 9.75;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-  let {
-    disabled = false,
-    onclick,
-    usage,
-  }: { disabled?: boolean; onclick: () => void; usage: ContextUsage } = $props();
-  const componentId = $props.id();
-  const detailsId = `${componentId}-details`;
+  let { usage }: { usage: ContextUsage } = $props();
 
   let normalizedPercent = $derived(Math.max(0, Math.min(100, usage.percent ?? 0)));
   let percentageLabel = $derived(formatPercentage(usage.percent));
@@ -18,8 +12,8 @@
   let overloaded = $derived(normalizedPercent > 90);
   let ariaLabel = $derived(
     percentageLabel
-      ? `Compact task (context window ${percentageLabel} used)`
-      : "Compact task (context window usage is being calculated)",
+      ? `Context window ${percentageLabel} used`
+      : "Context window usage is being calculated",
   );
 
   function formatPercentage(value: number | null) {
@@ -37,14 +31,11 @@
 </script>
 
 <div class="context-meter">
-  <button
+  <span
     class="context-meter__trigger"
-    type="button"
+    role="img"
     aria-label={ariaLabel}
-    aria-describedby={detailsId}
-    aria-disabled={disabled}
-    title="Compact task"
-    onclick={disabled ? undefined : onclick}
+    title="Context window usage"
   >
     <svg class="context-meter__ring" viewBox="0 0 24 24" aria-hidden="true">
       <circle class="context-meter__track" cx="12" cy="12" r={RADIUS} />
@@ -57,9 +48,9 @@
         stroke-dashoffset={dashOffset}
       />
     </svg>
-  </button>
+  </span>
 
-  <div class="context-meter__popover" id={detailsId} role="tooltip">
+  <div class="context-meter__popover" role="tooltip">
     <div class="context-meter__heading">
       <strong>Context Window</strong>
       {#if percentageLabel}
@@ -110,17 +101,6 @@
     border-radius: 999px;
     background: transparent;
     color: var(--primary);
-    transition: background-color 140ms ease;
-  }
-
-  .context-meter__trigger[aria-disabled="true"] {
-    cursor: not-allowed;
-    opacity: 0.4;
-  }
-
-  .context-meter__trigger:hover,
-  .context-meter__trigger:focus-visible {
-    background: var(--secondary);
   }
 
   .context-meter__ring {
@@ -173,8 +153,7 @@
       translate 120ms ease 0ms;
   }
 
-  .context-meter:hover .context-meter__popover,
-  .context-meter:focus-within .context-meter__popover {
+  .context-meter:hover .context-meter__popover {
     opacity: 1;
     translate: 0 0;
     transition-delay: 150ms;
