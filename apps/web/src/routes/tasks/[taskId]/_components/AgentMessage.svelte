@@ -126,7 +126,7 @@
   }
 
   .thinking-markdown :global(p) {
-    margin: 0 0 1em;
+    margin: 0 0 1rem;
   }
 
   .thinking-markdown :global(p:last-child) {
