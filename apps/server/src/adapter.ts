@@ -6,6 +6,7 @@ import type {
   TextItem,
   ToolItem,
 } from "@pidex/api";
+import { Effect, Queue, Scope, Stream } from "effect";
 
 export type AdapterEvent =
   | { type: "message"; item: TextItem }
@@ -54,6 +55,143 @@ export interface AdapterSession {
   respondToDialog(requestId: string, value: string | boolean | null): void;
   dispose(): void;
 }
+
+interface AdapterSessionError {
+  readonly _tag: "AdapterSessionError";
+  readonly operation: string;
+  readonly message: string;
+  readonly cause: unknown;
+}
+
+export interface EffectAdapterSession {
+  readonly state: Pick<
+    AdapterSession,
+    | "nativeId"
+    | "nativePath"
+    | "messages"
+    | "model"
+    | "thinkingLevel"
+    | "sessionName"
+    | "contextUsage"
+    | "isIdle"
+  >;
+  readonly events: Stream.Stream<AdapterEvent>;
+  prompt(text: string): Effect.Effect<void, AdapterSessionError>;
+  steer(text: string): Effect.Effect<void, AdapterSessionError>;
+  followUp(text: string): Effect.Effect<void, AdapterSessionError>;
+  abort(): Effect.Effect<void, AdapterSessionError>;
+  clearQueue(kind?: "steering" | "follow-up" | "all"): Effect.Effect<void, AdapterSessionError>;
+  configure(input: {
+    model?: string;
+    thinkingLevel?: AdapterSession["thinkingLevel"];
+  }): Effect.Effect<void, AdapterSessionError>;
+  rename(name: string): Effect.Effect<void, AdapterSessionError>;
+  compact(instructions?: string): Effect.Effect<void, AdapterSessionError>;
+  getStats(): Effect.Effect<
+    { messages: number; toolCalls: number; tokens: number; cost: number },
+    AdapterSessionError
+  >;
+  respondToDialog(
+    requestId: string,
+    value: string | boolean | null,
+  ): Effect.Effect<void, AdapterSessionError>;
+}
+
+export function acquireAdapterSession<E, R>(
+  acquire: Effect.Effect<AdapterSession, E, R>,
+): Effect.Effect<EffectAdapterSession, E, R | Scope.Scope> {
+  return Effect.acquireRelease(acquire, releaseAdapterSession).pipe(
+    Effect.map(toEffectAdapterSession),
+  );
+}
+
+function toEffectAdapterSession(session: AdapterSession): EffectAdapterSession {
+  return {
+    state: session,
+    events: sessionEvents(session),
+    prompt: (text) =>
+      attemptPromise("session.prompt", () => session.prompt(text)).pipe(
+        Effect.onInterrupt(() => abortForCleanup(session)),
+      ),
+    steer: (text) => attemptPromise("session.steer", () => session.steer(text)),
+    followUp: (text) => attemptPromise("session.followUp", () => session.followUp(text)),
+    abort: () => attemptPromise("session.abort", () => session.abort()),
+    clearQueue: (kind) =>
+      attemptSync("session.clearQueue", () => {
+        session.clearQueue(kind);
+      }),
+    configure: (input) => attemptPromise("session.configure", () => session.configure(input)),
+    rename: (name) =>
+      attemptSync("session.rename", () => {
+        session.rename(name);
+      }),
+    compact: (instructions) =>
+      attemptPromise("session.compact", () => session.compact(instructions)),
+    getStats: () => attemptSync("session.getStats", () => session.getStats()),
+    respondToDialog: (requestId, value) =>
+      attemptSync("session.respondToDialog", () => {
+        session.respondToDialog(requestId, value);
+      }),
+  };
+}
+
+function sessionEvents(session: AdapterSession): Stream.Stream<AdapterEvent> {
+  return Stream.callback((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        session.subscribe((event) => {
+          Queue.offerUnsafe(queue, event);
+        }),
+      ),
+      (unsubscribe) => Effect.sync(unsubscribe),
+    ),
+  );
+}
+
+function releaseAdapterSession(session: AdapterSession): Effect.Effect<void> {
+  return abortForCleanup(session).pipe(
+    Effect.andThen(
+      Effect.try({
+        try: () => session.dispose(),
+        catch: (cause) => cause,
+      }).pipe(Effect.ignore),
+    ),
+  );
+}
+
+function abortForCleanup(session: AdapterSession): Effect.Effect<void> {
+  return Effect.tryPromise(() => session.abort()).pipe(Effect.ignore);
+}
+
+function attemptPromise<A>(
+  operation: string,
+  evaluate: () => Promise<A>,
+): Effect.Effect<A, AdapterSessionError> {
+  return Effect.tryPromise({
+    try: evaluate,
+    catch: (cause) => adapterSessionError(operation, cause),
+  });
+}
+
+function attemptSync<A>(
+  operation: string,
+  evaluate: () => A,
+): Effect.Effect<A, AdapterSessionError> {
+  return Effect.try({
+    try: evaluate,
+    catch: (cause) => adapterSessionError(operation, cause),
+  });
+}
+
+function adapterSessionError(operation: string, cause: unknown): AdapterSessionError {
+  return {
+    _tag: "AdapterSessionError",
+    operation,
+    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
+    cause,
+  };
+}
+
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
   let text: string;
   try {

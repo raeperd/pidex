@@ -64,13 +64,14 @@
 <script lang="ts">
   import type { ChatSnapshot, ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
-  import type { ConnectionState } from "../../../_components/AppShellConnection";
+  import type { ConnectionState } from "./AppShellConnection";
   import type {
     TaskConfigurationPatch,
     TaskDelivery,
-  } from "../../../_components/AppShellContext.svelte";
+    TaskStartMode,
+  } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
-  import Icon from "../../../_components/Icon.svelte";
+  import Icon from "./Icon.svelte";
 
   const composerSelectClass =
     "h-full max-w-44 min-w-0 cursor-pointer border-0 border-none bg-transparent pr-5 text-[11px] font-semibold text-inherit outline-none disabled:cursor-not-allowed disabled:opacity-42 max-[560px]:max-w-27 max-[560px]:pr-3.5 max-[560px]:text-[11px] [@supports(appearance:base-select)]:flex [@supports(appearance:base-select)]:items-center [@supports(appearance:base-select)]:gap-1.5 [@supports(appearance:base-select)]:pr-1.5 [@supports(appearance:base-select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:max-h-[min(22rem,calc(100dvh-2rem))] [@supports(appearance:base-select)]:[&::picker(select)]:overflow-y-auto [@supports(appearance:base-select)]:[&::picker(select)]:[position-area:block-start_span-inline-end] [@supports(appearance:base-select)]:[&::picker(select)]:[position-try-fallbacks:flip-block] [@supports(appearance:base-select)]:[&::picker(select)]:mb-2 [@supports(appearance:base-select)]:[&::picker(select)]:rounded-xl [@supports(appearance:base-select)]:[&::picker(select)]:border [@supports(appearance:base-select)]:[&::picker(select)]:border-border-strong [@supports(appearance:base-select)]:[&::picker(select)]:bg-card [@supports(appearance:base-select)]:[&::picker(select)]:p-1 [@supports(appearance:base-select)]:[&::picker(select)]:text-foreground [@supports(appearance:base-select)]:[&::picker(select)]:shadow-[0_18px_48px_rgb(0_0_0/24%)] [@supports(appearance:base-select)]:[&::picker(select)]:[scrollbar-width:thin] [@supports(appearance:base-select)]:[&::picker-icon]:size-3 [@supports(appearance:base-select)]:[&::picker-icon]:ml-0.5 [@supports(appearance:base-select)]:[&::picker-icon]:text-faint [@supports(appearance:base-select)]:[&::picker-icon]:transition-[rotate] [@supports(appearance:base-select)]:[&::picker-icon]:duration-[140ms] [@supports(appearance:base-select)]:[&::picker-icon]:ease-[ease] [@supports(appearance:base-select)]:[&:open::picker-icon]:rotate-180 [@supports(appearance:base-select)]:[&_option]:flex [@supports(appearance:base-select)]:[&_option]:min-h-8 [@supports(appearance:base-select)]:[&_option]:items-center [@supports(appearance:base-select)]:[&_option]:rounded-lg [@supports(appearance:base-select)]:[&_option]:px-2 [@supports(appearance:base-select)]:[&_option]:py-[0.45rem] [@supports(appearance:base-select)]:[&_option]:text-xs [@supports(appearance:base-select)]:[&_option]:font-medium [@supports(appearance:base-select)]:[&_option]:text-muted [@supports(appearance:base-select)]:[&_option]:cursor-pointer [@supports(appearance:base-select)]:[&_option:hover]:bg-secondary [@supports(appearance:base-select)]:[&_option:hover]:text-foreground [@supports(appearance:base-select)]:[&_option:focus-visible]:bg-secondary [@supports(appearance:base-select)]:[&_option:focus-visible]:text-foreground [@supports(appearance:base-select)]:[&_option:checked]:bg-[color-mix(in_srgb,var(--primary)_12%,var(--secondary))] [@supports(appearance:base-select)]:[&_option:checked]:font-[650] [@supports(appearance:base-select)]:[&_option:checked]:text-foreground [@supports(appearance:base-select)]:[&_option::checkmark]:order-1 [@supports(appearance:base-select)]:[&_option::checkmark]:ml-auto [@supports(appearance:base-select)]:[&_option::checkmark]:text-primary";
@@ -82,18 +83,23 @@
     compact,
     connection,
     contextUsage,
+    creatingTask,
     delivery = $bindable(),
     draft = $bindable(),
     followUpCount,
     hasConfigurationDraft,
     models,
     persistDraft,
+    projectName,
     requiresAcknowledgement,
     runStatus,
     selectedModel,
     selectedThinkingLevel,
     send,
+    setStartMode,
     stageConfiguration,
+    startMode,
+    startModeEditable,
     stats,
     steeringCount,
     stop,
@@ -105,18 +111,23 @@
     compact: (instructions?: string) => Promise<boolean>;
     connection: ConnectionState;
     contextUsage?: ContextUsage;
+    creatingTask: boolean;
     delivery: TaskDelivery;
     draft: string;
     followUpCount: number;
     hasConfigurationDraft: boolean;
     models: Workspace["models"];
     persistDraft: () => void;
+    projectName: string;
     requiresAcknowledgement: boolean;
     runStatus: ChatSnapshot["runStatus"];
     selectedModel: string;
     selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     send: () => Promise<void>;
+    setStartMode: (mode: TaskStartMode) => void;
     stageConfiguration: (patch: TaskConfigurationPatch) => void;
+    startMode: TaskStartMode;
+    startModeEditable: boolean;
     stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;
@@ -124,6 +135,8 @@
   } = $props();
 
   let promptInput = $state<HTMLTextAreaElement>();
+  let startMenuOpen = $state(false);
+  let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
   let compactPendingByTask = $state<Record<string, boolean>>({});
   let compactPending = $derived(compactPendingByTask[taskId] ?? false);
   let idleSubmissionDisabled = $derived(
@@ -131,6 +144,7 @@
       !models.length ||
       connection !== "connected" ||
       requiresAcknowledgement ||
+      creatingTask ||
       compactPending,
   );
   const componentId = $props.id();
@@ -220,7 +234,30 @@
       void (active ? send() : submitDraft());
     }
   }
+
+  function dismissStartMenu(event: MouseEvent) {
+    if (
+      startMenuOpen &&
+      event.target instanceof Element &&
+      !event.target.closest("[data-start-menu]")
+    )
+      startMenuOpen = false;
+  }
+
+  function startMenuKeydown(event: KeyboardEvent) {
+    if (startMenuOpen && event.key === "Escape") {
+      startMenuOpen = false;
+      promptInput?.focus();
+    }
+  }
+
+  function chooseStartMode(mode: TaskStartMode) {
+    setStartMode(mode);
+    startMenuOpen = false;
+  }
 </script>
+
+<svelte:window onclick={dismissStartMenu} onkeydown={startMenuKeydown} />
 
 <footer
   class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
@@ -271,6 +308,62 @@
         {/each}
       </div>
     {/if}
+    <div
+      class="flex min-h-9 min-w-0 items-center gap-1 border-b border-border px-3 text-[11px] text-muted"
+      aria-label="Task workspace"
+    >
+      <span class="inline-flex min-w-0 flex-none items-center gap-1.5 px-1.5">
+        <Icon name="folder" size={13} />
+        <span class="max-w-40 overflow-hidden text-ellipsis whitespace-nowrap">{projectName}</span>
+      </span>
+      <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
+      <div class="relative flex-none" data-start-menu>
+        <button
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-[11px] font-medium text-muted hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:opacity-70"
+          onclick={() => (startMenuOpen = !startMenuOpen)}
+          disabled={!startModeEditable || active || creatingTask}
+          aria-label={`Start in ${startModeLabel}`}
+          aria-haspopup="menu"
+          aria-expanded={startMenuOpen}
+          title={startModeEditable
+            ? "Choose where to start this task"
+            : `Started in ${startModeLabel}`}
+        >
+          <Icon name={startMode === "worktree" ? "folder-git" : "folder"} size={13} />
+          {creatingTask ? "Creating worktree…" : startModeLabel}
+          {#if startModeEditable}<Icon name="arrow-down" size={11} />{/if}
+        </button>
+        {#if startMenuOpen}
+          <div
+            class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
+            role="menu"
+            aria-label="Start in"
+          >
+            <p class="m-0 px-2 py-1.5 text-[10px] font-medium text-faint">Start in</p>
+            <button
+              class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+              role="menuitemradio"
+              aria-checked={startMode === "local"}
+              onclick={() => chooseStartMode("local")}
+            >
+              <Icon name="folder" size={14} />
+              <span class="flex-1">Work locally</span>
+              {#if startMode === "local"}<Icon name="check" size={13} />{/if}
+            </button>
+            <button
+              class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+              role="menuitemradio"
+              aria-checked={startMode === "worktree"}
+              onclick={() => chooseStartMode("worktree")}
+            >
+              <Icon name="folder-git" size={14} />
+              <span class="flex-1">New worktree</span>
+              {#if startMode === "worktree"}<Icon name="check" size={13} />{/if}
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
     <textarea
       class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
       bind:this={promptInput}

@@ -8,6 +8,7 @@
     ChevronsDownUp,
     Copy,
     Folder,
+    FolderGit2,
     FolderOpen,
     FolderPlus,
     GripVertical,
@@ -17,6 +18,7 @@
     PencilLine,
     Search,
     ShieldCheck,
+    Split,
     Square,
     SquarePen,
     Wrench,
@@ -33,6 +35,7 @@
     | "compose"
     | "copy"
     | "folder"
+    | "folder-git"
     | "folder-open"
     | "folder-plus"
     | "grip"
@@ -45,6 +48,7 @@
     | "sidebar-expand"
     | "stop"
     | "tool"
+    | "worktree"
     | "x";
 
   const icons: Record<IconName, LucideIcon> = {
@@ -56,6 +60,7 @@
     compose: SquarePen,
     copy: Copy,
     folder: Folder,
+    "folder-git": FolderGit2,
     "folder-open": FolderOpen,
     "folder-plus": FolderPlus,
     grip: GripVertical,
@@ -68,6 +73,7 @@
     "sidebar-expand": PanelLeftOpen,
     stop: Square,
     tool: Wrench,
+    worktree: Split,
     x: X,
   };
 

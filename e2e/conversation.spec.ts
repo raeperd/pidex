@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { basename } from "node:path";
 import {
   emitServerEvent,
@@ -6,6 +6,7 @@ import {
   openTasks,
   rememberWorkspace,
   rpcRequest,
+  waitForFakeWebSocket,
 } from "./support";
 
 test("renders assistant markdown as safe interactive components", async ({
@@ -66,6 +67,8 @@ const answer = 42;
       timestamp: "2026-07-27T00:00:00.000Z",
     },
   });
+
+  await expect(page.getByRole("button", { name: "Start in Work locally" })).toBeDisabled();
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
@@ -402,6 +405,7 @@ test("preserves edits made while slash compaction is pending", async ({
   const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
   await expect(newTaskButton).toBeEnabled();
   await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
@@ -630,6 +634,168 @@ test("ignores compact responses after navigating to another task", async ({ page
   await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
 });
 
+test("opens and dismisses context usage details with pointer and keyboard", async ({
+  page,
+  request,
+}, testInfo) => {
+  if (testInfo.project.name === "mobile") await page.setViewportSize({ width: 390, height: 844 });
+  await installFakeWebSocket(page);
+  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
+  const opened = await rpcRequest<{ id: string }>(
+    request,
+    "workspaces/open",
+    { path: process.cwd() },
+    bootstrap.result.csrfToken,
+  );
+  const created = await rpcRequest<Record<string, unknown>>(
+    request,
+    "chats/create",
+    { workspaceId: opened.result.id },
+    bootstrap.result.csrfToken,
+  );
+  let snapshot = created.result;
+  const taskId = String(snapshot.taskId);
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        json: {
+          ...workspace,
+          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/chats/resume", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    snapshot = {
+      ...payload.json,
+      model: "e2e/model",
+      thinkingLevel: "high",
+      contextUsage: {
+        tokens: 246_000,
+        contextWindow: 258_000,
+        percent: 95.34883720930233,
+        totalProcessedTokens: 2_500_000,
+        compactsAutomatically: true,
+      },
+    };
+    await route.fulfill({ response, json: { ...payload, json: snapshot } });
+  });
+
+  await page.goto(`/tasks/${taskId}`);
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 1,
+    chatId: String(snapshot?.chatId),
+    status: "running",
+    revision: 1,
+    run: {
+      runId: "run_context_usage_e2e",
+      actionId: "action_context_usage_e2e",
+      status: "running",
+      requiresAcknowledgement: false,
+    },
+  });
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+
+  const contextMeter = page.getByRole("button", { name: "Context window 95% used" });
+  const toggleContextMeter = () =>
+    testInfo.project.name === "mobile" ? contextMeter.tap() : contextMeter.click();
+  const detailsId = await contextMeter.getAttribute("aria-controls");
+  expect(detailsId).toBeTruthy();
+  const contextDetails = page.locator(`#${detailsId}`);
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(contextDetails).toHaveAttribute("aria-hidden", "true");
+  await expect(contextDetails).toHaveCSS("opacity", "0");
+  await expect(page.locator(".context-meter__progress")).toHaveClass(/--danger/);
+  await expect(page.locator(".context-meter__bar-fill")).toHaveClass(/--danger/);
+
+  await toggleContextMeter();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+  await expect(contextDetails).toHaveAttribute("aria-hidden", "false");
+  await expect(contextDetails).toHaveCSS("opacity", "1");
+  await contextDetails.click();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+
+  await toggleContextMeter();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(contextDetails).toHaveCSS("opacity", "0");
+
+  await toggleContextMeter();
+  const outsideX = (page.viewportSize()?.width ?? 400) - 20;
+  if (testInfo.project.name === "mobile") await page.touchscreen.tap(outsideX, 120);
+  else await page.mouse.click(outsideX, 120);
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+
+  await toggleContextMeter();
+  await page.keyboard.press("Control+K");
+  const searchInput = page.getByRole("textbox", { name: "Search projects and tasks" });
+  await expect(searchInput).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  await expect(searchInput).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(searchInput).toHaveCount(0);
+  if (testInfo.project.name === "mobile") await page.keyboard.press("Escape");
+
+  await page.getByLabel("Thinking level").focus();
+  await page.keyboard.press("Tab");
+  await expect(contextMeter).toBeFocused();
+  await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+
+  if (testInfo.project.name === "chromium") {
+    await page.mouse.move(0, 0);
+    await contextMeter.hover();
+    await page.mouse.move(0, 0);
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+
+    await contextMeter.hover();
+    await contextMeter.focus();
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "true");
+    await page.mouse.move(0, 0);
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  } else {
+    await page.keyboard.press("Tab");
+    await expect(contextMeter).toHaveAttribute("aria-expanded", "false");
+  }
+
+  await toggleContextMeter();
+  const detailsBox = await contextDetails.boundingBox();
+  const viewport = page.viewportSize();
+  expect(detailsBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(detailsBox!.x).toBeGreaterThanOrEqual(8);
+  expect(detailsBox!.x + detailsBox!.width).toBeLessThanOrEqual(viewport!.width - 8);
+
+  await emitServerEvent(page, {
+    type: "run_status",
+    eventId: 2,
+    chatId: String(snapshot?.chatId),
+    status: "idle",
+    revision: 2,
+  });
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const box = await contextDetails.boundingBox();
+      const width = page.viewportSize()?.width;
+      return Boolean(box && width && box.x >= 8 && box.x + box.width <= width - 8);
+    })
+    .toBe(true);
+});
+
 test("stages configuration without overwriting the next draft", async ({
   page,
   request,
@@ -711,6 +877,7 @@ test("stages configuration without overwriting the next draft", async ({
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
+  await waitForFakeWebSocket(page);
 
   const chatId = String(snapshot?.chatId);
   const contextUsage = {
@@ -729,9 +896,10 @@ test("stages configuration without overwriting the next draft", async ({
   });
   const contextMeter = page.locator(".context-meter__trigger");
   await expect(contextMeter).toBeVisible();
-  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveRole("button");
   await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
-  await contextMeter.hover();
+  if (testInfo.project.name === "mobile") await contextMeter.focus();
+  else await contextMeter.hover();
   const contextDetails = page.getByRole("tooltip");
   await expect(contextDetails).toHaveCSS("opacity", "1");
   await expect(contextDetails).toContainText("Context Window");
@@ -775,7 +943,7 @@ test("stages configuration without overwriting the next draft", async ({
   });
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(thinking).toBeEnabled();
-  await expect(contextMeter).toHaveRole("img");
+  await expect(contextMeter).toHaveRole("button");
   await expect(page.getByRole("dialog", { name: "Compact this task?" })).toHaveCount(0);
 
   const stagedThinking = nextThinking === "high" ? "medium" : "high";
@@ -812,18 +980,3 @@ test("stages configuration without overwriting the next draft", async ({
   expect(mutations[0]?.input).toEqual(expect.objectContaining({ thinkingLevel: stagedThinking }));
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
-
-async function waitForFakeWebSocket(page: Page) {
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (
-            globalThis as typeof globalThis & {
-              pidexTestSocket?: WebSocket;
-            }
-          ).pidexTestSocket?.readyState,
-      ),
-    )
-    .toBe(1);
-}

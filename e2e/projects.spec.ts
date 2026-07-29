@@ -14,16 +14,125 @@ test("selects a project and restores it after reload", async ({ page }, testInfo
     .getByRole("button", { name: new RegExp(`^(Add|Open) ${projectName}$`) })
     .click();
 
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
-  await expect(page.getByLabel("Prompt")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${projectName}?` }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeVisible();
+  await expect(page.getByLabel("Model")).toBeVisible();
+  await expect(page.getByLabel("Thinking level")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("pidex:last-project")))
     .toContain(`/${projectName}`);
 
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Pick a task to continue" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Loading project" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bring Pi with you." })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: `What should we work on in ${projectName}?` }),
+  ).toBeVisible();
   await openTasks(page);
   await expect(page.getByRole("button", { name: `Collapse ${projectName}` })).toBeVisible();
+});
+
+test("groups worktree tasks under their source project", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  const csrfToken = String(bootstrap.result.csrfToken);
+  const source = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: process.cwd(), remember: false },
+    csrfToken,
+  );
+  const sourceWorkspaceId = String(source.result.id);
+  const sourcePath = String(source.result.path);
+  const worktreeWorkspaceId = "grouped_worktree_e2e";
+  const worktreePath = `${process.cwd()}/.pidex-grouped-worktree`;
+  const sourceProject = { id: sourceWorkspaceId, path: sourcePath, worktree: false };
+  const worktreeProject = {
+    id: worktreeWorkspaceId,
+    path: worktreePath,
+    sourceWorkspaceId,
+    worktree: true,
+  };
+  let recentWorkspaces: Record<string, unknown>[] = [sourceProject, worktreeProject];
+  const openedPaths: string[] = [];
+  await page.route("**/api/rpc/system/bootstrap", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...bootstrap.result,
+          recentWorkspaces,
+          projectCandidates: [],
+        },
+      },
+    });
+  });
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    openedPaths.push(input.path);
+    const worktree = input.path === worktreePath;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: {
+        json: {
+          ...source.result,
+          id: worktree ? worktreeWorkspaceId : sourceWorkspaceId,
+          path: worktree ? worktreePath : sourcePath,
+          sessions: worktree
+            ? [
+                {
+                  id: "worktree_task_e2e",
+                  name: "Worktree task",
+                  firstMessage: "Worktree task",
+                  createdAt: "2026-07-28T00:00:00.000Z",
+                  modifiedAt: "2026-07-29T00:00:00.000Z",
+                  messageCount: 1,
+                },
+              ]
+            : Array.from({ length: 6 }, (_, index) => ({
+                id: `local_task_e2e_${index}`,
+                name: index === 0 ? "Local task" : `Older local task ${index}`,
+                firstMessage: index === 0 ? "Local task" : `Older local task ${index}`,
+                createdAt: "2026-07-27T00:00:00.000Z",
+                modifiedAt: `2026-07-28T${String(6 - index).padStart(2, "0")}:00:00.000Z`,
+                messageCount: 1,
+              })),
+        },
+      },
+    });
+  });
+
+  await page.goto("/");
+  await openTasks(page);
+
+  const projects = page.getByRole("navigation", { name: "Projects" });
+  await expect(projects.getByRole("group")).toHaveCount(1);
+  const localTask = projects.getByRole("button", { name: /Local task/ });
+  const worktreeTask = projects.getByRole("button", { name: /Worktree task/ });
+  await expect(localTask).toBeVisible();
+  await expect(worktreeTask).toBeVisible();
+  await expect(localTask.locator("[data-worktree-indicator]")).toHaveCount(0);
+  await expect(worktreeTask.locator("[data-worktree-indicator]")).toBeVisible();
+
+  openedPaths.length = 0;
+  await page.evaluate(({ path }) => localStorage.setItem("pidex:last-project", path), {
+    path: worktreePath,
+  });
+  await page.reload();
+  await expect.poll(() => openedPaths).toEqual(expect.arrayContaining([worktreePath, sourcePath]));
+
+  recentWorkspaces = [worktreeProject];
+  await page.reload();
+  await openTasks(page);
+  await expect(projects.getByRole("group")).toHaveCount(1);
+  await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
 });
 
 test("manually reorders projects and preserves their order after reload", async ({

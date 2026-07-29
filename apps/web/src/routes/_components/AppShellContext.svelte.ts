@@ -3,6 +3,7 @@ import type { Bootstrap, ChatSnapshot, ToolItem, Workspace } from "@pidex/api";
 import type { ConnectionState } from "./AppShellConnection";
 
 export type TaskDelivery = "follow-up" | "steer";
+export type TaskStartMode = "local" | "worktree";
 
 export interface TaskConfigurationPatch {
   model?: string;
@@ -40,11 +41,13 @@ export interface AppShellContext {
     readonly bootstrapError: string;
     readonly connection: ConnectionState;
     readonly retryingConnection: boolean;
+    readonly routeReady: boolean;
     readonly routeLoading: boolean;
     readonly workspace: Workspace | undefined;
   };
   readonly task: {
     readonly active: boolean;
+    readonly creatingTask: boolean;
     readonly delivery: TaskDelivery;
     readonly draft: string;
     readonly hasConfigurationDraft: boolean;
@@ -52,6 +55,8 @@ export interface AppShellContext {
     readonly selectedModel: string;
     readonly selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     readonly snapshot: ChatSnapshot | undefined;
+    readonly startMode: TaskStartMode;
+    readonly startModeEditable: boolean;
     readonly toolElapsedNow: number;
     readonly toolOutputs: Readonly<Record<string, TaskToolOutput>>;
     readonly toolTimings: Readonly<Record<string, TaskToolTiming>>;
@@ -65,8 +70,10 @@ export interface AppShellContext {
     loadToolOutput(item: ToolItem): Promise<void>;
     persistDraft(): void;
     send(): Promise<void>;
+    start(draft: string, configuration: TaskConfigurationPatch): Promise<void>;
     setDelivery(delivery: TaskDelivery): void;
     setDraft(draft: string): void;
+    setStartMode(mode: TaskStartMode): void;
     stageConfiguration(patch: TaskConfigurationPatch): void;
     stop(): Promise<void>;
   };

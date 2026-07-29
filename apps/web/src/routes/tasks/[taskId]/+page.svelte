@@ -6,7 +6,7 @@
     type TaskTranscriptController,
   } from "../../_components/AppShellContext.svelte";
   import Icon from "../../_components/Icon.svelte";
-  import TaskComposer from "./_components/TaskComposer.svelte";
+  import TaskComposer from "../../_components/TaskComposer.svelte";
   import TaskTranscript from "./_components/TaskTranscript.svelte";
 
   const context = getAppShellContext();
@@ -47,16 +47,21 @@
     compact={context.taskActions.compact}
     connection={context.shell.connection}
     contextUsage={context.task.snapshot.contextUsage}
+    creatingTask={context.task.creatingTask}
     followUpCount={context.task.snapshot.followUpQueue.length}
     hasConfigurationDraft={context.task.hasConfigurationDraft}
     models={context.shell.workspace?.models ?? []}
     persistDraft={context.taskActions.persistDraft}
+    projectName={context.shell.workspace?.name ?? "Project"}
     requiresAcknowledgement={Boolean(context.task.snapshot.run?.requiresAcknowledgement)}
     runStatus={context.task.snapshot.runStatus}
     selectedModel={context.task.selectedModel}
     selectedThinkingLevel={context.task.selectedThinkingLevel}
     send={context.taskActions.send}
+    setStartMode={context.taskActions.setStartMode}
     stageConfiguration={context.taskActions.stageConfiguration}
+    startMode={context.task.startMode}
+    startModeEditable={context.task.startModeEditable}
     stats={context.task.snapshot.stats}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}

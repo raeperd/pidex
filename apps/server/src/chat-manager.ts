@@ -66,6 +66,7 @@ export class ChatManager {
   private workspaces = new Map<string, WorkspaceRecord>();
   private chats = new Map<string, ChatRecord>();
   private owners = new Map<string, string>();
+  private disposableWorkspaces = new Set<string>();
 
   constructor(
     readonly pi: PiSdk,
@@ -106,6 +107,31 @@ export class ChatManager {
     const value = this.workspaces.get(id);
     if (!value) throw new Error("Workspace is no longer open");
     return value;
+  }
+
+  markWorkspaceDisposable(id: string) {
+    this.workspace(id);
+    this.disposableWorkspaces.add(id);
+  }
+
+  workspaceCanBeRemoved(id: string) {
+    const workspace = this.workspace(id);
+    const workspaceChats = [...this.chats.values()].filter((chat) => chat.workspaceId === id);
+    return (
+      this.disposableWorkspaces.has(id) &&
+      workspace.info.sessions.every((session) => session.messageCount === 0) &&
+      workspaceChats.every(
+        (chat) => chat.items.length === 0 && ["idle", "error"].includes(chat.runStatus),
+      )
+    );
+  }
+
+  forgetWorkspace(id: string) {
+    if (!this.workspaceCanBeRemoved(id)) throw new Error("Workspace cannot be removed");
+    const workspaceChats = [...this.chats.values()].filter((chat) => chat.workspaceId === id);
+    for (const chat of workspaceChats) this.dispose(chat);
+    this.disposableWorkspaces.delete(id);
+    this.workspaces.delete(id);
   }
 
   async refreshSessions(workspaceId: string) {
@@ -337,6 +363,7 @@ export class ChatManager {
   }
 
   startPrompt(chat: ChatRecord, text: string, outcome: ActionOutcome) {
+    this.disposableWorkspaces.delete(chat.workspaceId);
     chat.revision = Math.max(chat.revision, outcome.revision);
     if (outcome.replayed) return;
     if (!chat.session.isIdle) throw new Error("A run is already active");

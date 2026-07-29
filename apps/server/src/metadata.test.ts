@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,8 +6,91 @@ import { DatabaseSync } from "node:sqlite";
 import { and, eq, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ActionProtocolError, MetadataStore, requestDigest } from "./metadata.js";
+import { Effect } from "effect";
+import { afterAll, afterEach, assert, describe, expect, it, layer, vi } from "@effect/vitest";
+import {
+  ActionProtocolError,
+  Metadata,
+  MetadataError,
+  MetadataStore,
+  makeMetadataLayer,
+  requestDigest,
+} from "./metadata.js";
+
+describe("metadata Effect service", () => {
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "pidex-metadata-effect-"));
+
+  afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
+
+  layer(makeMetadataLayer(stateDir))((effectIt) => {
+    effectIt.effect("persists metadata through Effect-returning methods", () =>
+      Effect.gen(function* () {
+        const metadata = yield* Metadata;
+        const workspaceId = yield* metadata.rememberWorkspace("/tmp/effect-project");
+
+        assert.strictEqual(yield* metadata.workspaceId("/tmp/effect-project"), workspaceId);
+        assert.deepStrictEqual(yield* metadata.recent(), [
+          { id: workspaceId, path: "/tmp/effect-project" },
+        ]);
+      }),
+    );
+
+    effectIt.effect("translates transaction throws into typed metadata errors", () =>
+      Effect.gen(function* () {
+        const metadata = yield* Metadata;
+        const error = yield* metadata.reorderWorkspaces(["missing-workspace"]).pipe(Effect.flip);
+
+        assert.instanceOf(error, MetadataError);
+        assert.strictEqual(error.operation, "reorderWorkspaces");
+      }),
+    );
+
+    effectIt.effect("preserves typed action protocol errors", () =>
+      Effect.gen(function* () {
+        const metadata = yield* Metadata;
+        const request = {
+          actionId: "effectaction0001",
+          clientId: "effectclient0001",
+          expectedRevision: 0,
+          requestDigest: requestDigest({ text: "original" }),
+          sessionKey: "effect-session",
+        };
+        yield* metadata.acceptPrompt(request);
+
+        const error = yield* metadata
+          .acceptPrompt({
+            ...request,
+            requestDigest: requestDigest({ text: "changed" }),
+          })
+          .pipe(Effect.flip);
+
+        assert.instanceOf(error, ActionProtocolError);
+        assert.strictEqual(error.code, "action_conflict");
+      }),
+    );
+
+    effectIt.effect("validates rows read from SQLite with the Drizzle-derived Effect schema", () =>
+      Effect.gen(function* () {
+        const database = new DatabaseSync(path.join(stateDir, "pidex.sqlite"));
+        database
+          .prepare(
+            `INSERT INTO session_state
+              (session_key, revision, run_id, prompt_action_id, run_status,
+               requires_acknowledgement, updated_at)
+             VALUES (?, 1, ?, ?, 'corrupt', 0, datetime('now'))`,
+          )
+          .run("corrupt-session", "corrupt-run", "corrupt-action");
+        database.close();
+
+        const metadata = yield* Metadata;
+        const error = yield* metadata.sessionState("corrupt-session").pipe(Effect.flip);
+
+        assert.instanceOf(error, MetadataError);
+        assert.strictEqual(error.operation, "sessionState");
+      }),
+    );
+  });
+});
 
 describe("metadata store", () => {
   let store: MetadataStore | undefined;
@@ -61,6 +144,26 @@ describe("metadata store", () => {
     expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
     expect(store.workspaceId("/tmp/example-project")).toBe(id);
     expect(store.recent()).toEqual([{ id, path: "/tmp/example-project" }]);
+  });
+
+  it("keeps a worktree attached to its source project across restarts", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-worktree-"));
+    store = new MetadataStore();
+    const sourceWorkspaceId = store.rememberWorkspace("/tmp/example-project");
+    const worktreeId = store.rememberWorkspace("/tmp/example-worktree", sourceWorkspaceId);
+
+    expect(store.recent()).toEqual([
+      { id: sourceWorkspaceId, path: "/tmp/example-project" },
+      {
+        id: worktreeId,
+        path: "/tmp/example-worktree",
+        sourceWorkspaceId,
+      },
+    ]);
+
+    store.close();
+    store = new MetadataStore();
+    expect(store.workspaceProjectId(worktreeId)).toBe(sourceWorkspaceId);
   });
 
   it("persists a manually reordered workspace list across restarts", async () => {

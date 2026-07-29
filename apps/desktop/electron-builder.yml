@@ -1,0 +1,26 @@
+appId: com.raeperd.pidex
+productName: pidex
+electronVersion: 41.5.0
+npmRebuild: false
+directories:
+  buildResources: assets
+  output: ../../release
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ..
+    to: .
+    filter:
+      - server/**/*
+      - web/**/*
+  - from: assets/icon.png
+    to: icon.png
+mac:
+  artifactName: "pidex-${version}-${arch}.${ext}"
+  category: public.app-category.developer-tools
+  hardenedRuntime: false
+  icon: icon.icns
+  identity: null
+  target:
+    - dir

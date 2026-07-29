@@ -31,7 +31,23 @@ async function openTasks(page: Page) {
     await expect(button).toBeVisible();
     await button.click();
   }
+  await expect(page.getByRole("status", { name: "Loading project" })).toHaveCount(0);
   await expect(page.getByLabel("Add project", { exact: true })).toBeInViewport();
+}
+
+async function waitForFakeWebSocket(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              pidexTestSocket?: WebSocket;
+            }
+          ).pidexTestSocket?.readyState,
+      ),
+    )
+    .toBe(1);
 }
 
 async function installFakeWebSocket(page: Page) {
@@ -77,4 +93,11 @@ async function emitServerEvent(page: Page, event: unknown) {
   }, event);
 }
 
-export { emitServerEvent, installFakeWebSocket, openTasks, rememberWorkspace, rpcRequest };
+export {
+  emitServerEvent,
+  installFakeWebSocket,
+  openTasks,
+  rememberWorkspace,
+  rpcRequest,
+  waitForFakeWebSocket,
+};

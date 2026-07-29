@@ -21,6 +21,7 @@
     provideAppShellContext,
     type AppShellContext,
     type TaskDelivery,
+    type TaskStartMode,
     type TaskToolOutput,
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
@@ -32,6 +33,11 @@
   const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
+  interface StarterPrompt {
+    readonly configuration: ChatConfiguration;
+    readonly draft: string;
+    readonly text: string;
+  }
 
   let { children }: { children: Snippet } = $props();
 
@@ -67,6 +73,7 @@
   let retryingConnection = $state(false);
   let loadingEarlier = $state(false);
   let delivery = $state<TaskDelivery>("steer");
+  let startMode = $state<TaskStartMode>("local");
   let pendingPrompt = $state.raw<
     { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
   >();
@@ -109,6 +116,9 @@
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
   let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let taskHasNoTranscript = $derived(
+    Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
+  );
   let hasTopBanner = $derived(
     Boolean(
       error ||
@@ -127,30 +137,74 @@
   let hasConfigurationDraft = $derived(
     configurationDraft.model !== undefined || configurationDraft.thinkingLevel !== undefined,
   );
+  let startModeEditable = $derived(
+    Boolean(
+      snapshot &&
+      taskHasNoTranscript &&
+      !active &&
+      !chatLoading &&
+      !workspaceIsWorktree(snapshot.workspaceId),
+    ),
+  );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  function sourceWorkspaceId(project: RecentWorkspace) {
+    if (project.sourceWorkspaceId) return project.sourceWorkspaceId;
+    if (project.worktree !== true) return undefined;
+    const sources = (bootstrap?.recentWorkspaces ?? []).filter(
+      (candidate) =>
+        candidate.worktree !== true && projectName(candidate.path) === projectName(project.path),
+    );
+    return sources.length === 1 ? sources[0]?.id : undefined;
+  }
   function projectLabel(project: RecentWorkspace) {
     const name = projectName(project.path);
     const duplicates = (bootstrap?.recentWorkspaces ?? []).filter(
-      (entry) => projectName(entry.path) === name,
+      (entry) => !sourceWorkspaceId(entry) && projectName(entry.path) === name,
     );
     if (duplicates.length < 2) return name;
-    return project.path.includes("/.codex/worktrees/") ? `${name} · worktree` : `${name} · local`;
+    const isWorktree = project.worktree || /[\\/]\.codex[\\/]worktrees[\\/]/.test(project.path);
+    return isWorktree ? `${name} · worktree` : `${name} · local`;
+  }
+  function workspaceIsWorktree(workspaceId: string) {
+    return bootstrap?.recentWorkspaces.some(
+      (project) => project.id === workspaceId && project.worktree === true,
+    );
   }
   const workspaceFor = (id: string) =>
     workspaceCache[id] ?? (workspace?.id === id ? workspace : undefined);
+  const worktreesFor = (workspaceId: string) =>
+    (bootstrap?.recentWorkspaces ?? []).filter(
+      (project) => sourceWorkspaceId(project) === workspaceId,
+    );
+  const projectActive = (project: RecentWorkspace) =>
+    workspace?.id === project.id ||
+    worktreesFor(project.id).some((worktree) => worktree.id === workspace?.id);
   const projectExpanded = (id: string) => expandedProjectIds.includes(id);
   function tasksFor(project: RecentWorkspace) {
-    const loaded = workspaceFor(project.id);
-    if (!loaded) return [];
+    const sessions = [project, ...worktreesFor(project.id)]
+      .flatMap((member) =>
+        (workspaceFor(member.id)?.sessions ?? []).map((session) => ({
+          ...session,
+          worktree: member.worktree === true,
+        })),
+      )
+      .toSorted((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
     const query = search.trim().toLowerCase();
-    if (!query || loaded.name.toLowerCase().includes(query)) return loaded.sessions;
-    return loaded.sessions.filter((session) =>
+    if (!query || projectName(project.path).toLowerCase().includes(query)) return sessions;
+    return sessions.filter((session) =>
       `${session.name ?? ""} ${session.firstMessage}`.toLowerCase().includes(query),
     );
   }
+  let rootProjects = $derived.by(() => {
+    const projects = bootstrap?.recentWorkspaces ?? [];
+    return projects.filter((project) => {
+      const sourceId = sourceWorkspaceId(project);
+      return !sourceId || !projects.some((candidate) => candidate.id === sourceId);
+    });
+  });
   let visibleProjects = $derived.by(() => {
     const query = search.trim().toLowerCase();
-    return (bootstrap?.recentWorkspaces ?? []).filter(
+    return rootProjects.filter(
       (project) =>
         !query ||
         projectName(project.path).toLowerCase().includes(query) ||
@@ -188,6 +242,9 @@
       get retryingConnection() {
         return retryingConnection;
       },
+      get routeReady() {
+        return routeReady;
+      },
       get routeLoading() {
         return routeLoading;
       },
@@ -198,6 +255,9 @@
     task: {
       get active() {
         return active;
+      },
+      get creatingTask() {
+        return chatLoading;
       },
       get delivery() {
         return delivery;
@@ -220,6 +280,12 @@
       get snapshot() {
         return snapshot;
       },
+      get startMode() {
+        return startMode;
+      },
+      get startModeEditable() {
+        return startModeEditable;
+      },
       get toolElapsedNow() {
         return toolElapsedNow;
       },
@@ -239,8 +305,12 @@
       loadToolOutput,
       persistDraft,
       send,
+      start: startTask,
       setDelivery: (value) => (delivery = value),
       setDraft: (value) => (draft = value),
+      setStartMode: (value) => {
+        if (startModeEditable) startMode = value;
+      },
       stageConfiguration,
       stop,
     },
@@ -301,10 +371,16 @@
     if (expand && !expandedProjectIds.includes(loaded.id))
       expandedProjectIds = [...expandedProjectIds, loaded.id];
     if (bootstrap) {
-      const entry = { id: loaded.id, path: loaded.path };
       const currentIndex = bootstrap.recentWorkspaces.findIndex(
         (project) => project.id === loaded.id || project.path === loaded.path,
       );
+      const current = bootstrap.recentWorkspaces[currentIndex];
+      const entry = {
+        id: loaded.id,
+        path: loaded.path,
+        ...(current?.worktree === undefined ? {} : { worktree: current.worktree }),
+        ...(current?.sourceWorkspaceId ? { sourceWorkspaceId: current.sourceWorkspaceId } : {}),
+      };
       let recentWorkspaces = bootstrap.recentWorkspaces;
       if (currentIndex < 0 && recentWorkspaces.length < MAX_RECENT_WORKSPACES)
         recentWorkspaces = [...recentWorkspaces, entry];
@@ -349,9 +425,9 @@
   }
   function moveProjectTo(sourceId: string, targetId: string, edge: "before" | "after") {
     if (!bootstrap || sourceId === targetId || projectOrderSaving) return;
-    const sourceIndex = bootstrap.recentWorkspaces.findIndex(({ id }) => id === sourceId);
+    const sourceIndex = rootProjects.findIndex(({ id }) => id === sourceId);
     if (sourceIndex < 0) return;
-    const reordered = [...bootstrap.recentWorkspaces];
+    const reordered = [...rootProjects];
     const [moved] = reordered.splice(sourceIndex, 1);
     if (!moved) return;
     const targetIndex = reordered.findIndex(({ id }) => id === targetId);
@@ -369,10 +445,14 @@
   async function saveProjectOrder(recentWorkspaces: RecentWorkspace[]) {
     if (!bootstrap) return;
     const previous = bootstrap.recentWorkspaces;
+    const reorderedWithWorktrees = recentWorkspaces.flatMap((project) => [
+      project,
+      ...worktreesFor(project.id),
+    ]);
     projectOrderSaving = true;
-    bootstrap = { ...bootstrap, recentWorkspaces };
+    bootstrap = { ...bootstrap, recentWorkspaces: reorderedWithWorktrees };
     try {
-      const persisted = await api.reorderWorkspaces(recentWorkspaces.map(({ id }) => id));
+      const persisted = await api.reorderWorkspaces(reorderedWithWorktrees.map(({ id }) => id));
       bootstrap = { ...bootstrap, recentWorkspaces: persisted };
     } catch (cause) {
       try {
@@ -416,9 +496,23 @@
       }
       rememberWorkspace(loaded, options.expand ?? activate);
       if (activate) {
+        const loadedProject = bootstrap?.recentWorkspaces.find(
+          (project) => project.id === loaded.id || project.path === loaded.path,
+        );
+        if (loadedProject) await loadSourceWorkspace(loadedProject);
+        for (const worktree of worktreesFor(loaded.id))
+          if (!workspaceFor(worktree.id))
+            await openProject(worktree.path, {
+              activate: false,
+              expand: false,
+              remember: false,
+            });
+      }
+      if (activate) {
         chatConnection.close();
         workspace = loaded;
         projectPath = loaded.path;
+        startMode = workspaceIsWorktree(loaded.id) ? "worktree" : "local";
         localStorage.setItem("pidex:last-project", loaded.path);
         snapshot = undefined;
         draft = "";
@@ -437,6 +531,17 @@
       if (activate) projectLoading = false;
       projectLoadingId = "";
     }
+  }
+  async function loadSourceWorkspace(project: RecentWorkspace) {
+    const sourceId = sourceWorkspaceId(project);
+    if (!sourceId || workspaceFor(sourceId)) return;
+    const source = bootstrap?.recentWorkspaces.find((candidate) => candidate.id === sourceId);
+    if (!source) return;
+    await openProject(source.path, {
+      activate: false,
+      expand: false,
+      remember: false,
+    });
   }
   function openProjectPicker() {
     if (projectOrderSaving) return;
@@ -518,12 +623,13 @@
       return;
     }
     expandedProjectIds = [...expandedProjectIds, project.id];
-    if (!workspaceFor(project.id))
-      await openProject(project.path, {
-        activate: false,
-        expand: false,
-        remember: false,
-      });
+    for (const member of [project, ...worktreesFor(project.id)])
+      if (!workspaceFor(member.id))
+        await openProject(member.path, {
+          activate: false,
+          expand: false,
+          remember: false,
+        });
   }
   async function refreshSessions(workspaceId = workspace?.id) {
     if (!workspaceId) return;
@@ -538,7 +644,12 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
-  async function newTask(target = workspace) {
+  async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
+    const text = submittedDraft.trim();
+    if (!text) return;
+    await newTask(workspace, { configuration, draft: submittedDraft, text });
+  }
+  async function newTask(target = workspace, starterPrompt?: StarterPrompt) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
     let created: ChatSnapshot | undefined;
@@ -559,11 +670,12 @@
       chatConnection.close();
       workspace = rememberedTarget;
       projectPath = rememberedTarget.path;
+      startMode = workspaceIsWorktree(rememberedTarget.id) ? "worktree" : "local";
       rememberWorkspace(rememberedTarget);
       localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
-      draft = "";
-      await afterChat("", true);
+      draft = starterPrompt?.draft ?? "";
+      await afterChat(draft, !starterPrompt, !starterPrompt);
       if (sequence !== routeSequence) {
         await disposeCreatedTask(created);
         return;
@@ -571,6 +683,14 @@
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path);
+      if (starterPrompt && snapshot?.chatId === created.chatId) {
+        stageConfiguration(starterPrompt.configuration);
+        const configured = await applyConfigurationDraft();
+        if (snapshot?.chatId !== created.chatId) return;
+        chatConnection.connect(created.chatId);
+        if (!configured) return;
+        await submitPrompt(starterPrompt.text, starterPrompt.draft, "normal");
+      }
     } catch (cause) {
       if (sequence !== routeSequence) {
         if (created) await disposeCreatedTask(created);
@@ -593,6 +713,74 @@
       workspaceFor(project.id) ?? (await openProject(project.path, { activate: false }));
     if (target) await newTask(target);
   }
+  async function prepareWorktreeTask(initialDraft: string) {
+    if (!workspace || !snapshot || chatLoading || projectOrderSaving) return false;
+    const source = workspace;
+    const previousSnapshot = snapshot;
+    const sequence = ++routeSequence;
+    let worktree: Workspace | undefined;
+    let created: ChatSnapshot | undefined;
+    try {
+      error = "";
+      chatLoading = true;
+      worktree = await api.createWorktree(source.id);
+      created = await api.createChat(worktree.id);
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      persistDraft();
+      const refreshedBootstrap = await api.bootstrap();
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      bootstrap = refreshedBootstrap;
+      rememberWorkspace(worktree, false);
+      const previousConfiguration = configurationDrafts[previousSnapshot.taskId];
+      if (previousConfiguration)
+        configurationDrafts = {
+          ...configurationDrafts,
+          [created.taskId]: previousConfiguration,
+        };
+      chatConnection.close();
+      workspace = worktree;
+      projectPath = worktree.path;
+      localStorage.setItem("pidex:last-project", worktree.path);
+      snapshot = created;
+      startMode = "worktree";
+      await afterChat(initialDraft, true);
+      if (sequence !== routeSequence) {
+        await disposeCreatedWorktree(worktree, created);
+        return false;
+      }
+      const path = taskPath(created.taskId);
+      appliedRoute = path;
+      await goto(path, { replaceState: true });
+      await disposeCreatedTask(previousSnapshot);
+      return true;
+    } catch (cause) {
+      if (worktree) await disposeCreatedWorktree(worktree, created);
+      if (sequence !== routeSequence) return false;
+      workspace = source;
+      projectPath = source.path;
+      localStorage.setItem("pidex:last-project", source.path);
+      snapshot = previousSnapshot;
+      error = cause instanceof Error ? cause.message : "Could not create worktree";
+      return false;
+    } finally {
+      if (sequence === routeSequence) chatLoading = false;
+    }
+  }
+  async function disposeCreatedWorktree(worktree: Workspace, created?: ChatSnapshot) {
+    if (created) await disposeCreatedTask(created);
+    try {
+      await api.removeWorktree(worktree.id);
+      bootstrap = await api.bootstrap();
+    } catch {
+      /* Cleanup is best-effort; the original task remains usable if removal fails. */
+    }
+  }
   function navigateToTask(taskId: string) {
     if (!chatLoading) void goto(taskPath(taskId));
   }
@@ -605,6 +793,7 @@
     if (!taskId) {
       snapshot = undefined;
       draft = "";
+      startMode = "local";
       routeLoading = false;
       chatLoading = false;
       return;
@@ -630,6 +819,7 @@
       if (!target) throw new Error("The project for this task is no longer available");
       workspace = target;
       projectPath = target.path;
+      startMode = workspaceIsWorktree(target.id) ? "worktree" : "local";
       rememberWorkspace(target);
       localStorage.setItem("pidex:last-project", target.path);
       snapshot = resumed;
@@ -645,24 +835,28 @@
     }
   }
   async function workspaceById(workspaceId: string) {
-    const cached = workspaceFor(workspaceId);
-    if (cached) return cached;
     const recent = bootstrap?.recentWorkspaces.find((project) => project.id === workspaceId);
+    const cached = workspaceFor(workspaceId);
+    if (cached) {
+      if (recent) await loadSourceWorkspace(recent);
+      return cached;
+    }
     if (!recent) return undefined;
     const loaded = await api.openWorkspace(recent.path, true);
     rememberWorkspace(loaded);
+    await loadSourceWorkspace(recent);
     return loaded;
   }
   function initializeDialogValue(dialog: ExtensionDialog) {
     dialogValue = dialog.kind === "confirm" ? false : (dialog.prefill ?? "");
   }
-  async function afterChat(initialDraft = "", focusComposer = false) {
+  async function afterChat(initialDraft = "", focusComposer = false, connect = true) {
     drawerOpen = false;
     draft = initialDraft || localStorage.getItem(`pidex:draft:${snapshot?.taskId}`) || "";
     if (initialDraft) persistDraft();
     restorePendingPrompt();
     restoreConfigurationDraft();
-    if (snapshot) chatConnection.connect(snapshot.chatId);
+    if (snapshot && connect) chatConnection.connect(snapshot.chatId);
     await tick();
     if (snapshot?.extensionDialog) {
       initializeDialogValue(snapshot.extensionDialog);
@@ -740,6 +934,7 @@
     }
     flushScheduledTextDeltas();
     if (event.type === "snapshot") {
+      if (event.snapshot.revision < snapshot.revision) return;
       snapshot = event.snapshot;
       if (pendingPrompt && event.snapshot.run?.actionId === pendingPrompt.actionId)
         clearPendingPrompt();
@@ -797,10 +992,19 @@
   }
   async function send() {
     if (!snapshot || !draft.trim() || connection !== "connected") return;
-    const chatId = snapshot.chatId;
     const submittedDraft = draft;
     const text = submittedDraft.trim();
     const mode = active ? delivery : "normal";
+    if (
+      mode === "normal" &&
+      startMode === "worktree" &&
+      taskHasNoTranscript &&
+      !workspaceIsWorktree(snapshot.workspaceId) &&
+      !(await prepareWorktreeTask(submittedDraft))
+    )
+      return;
+    if (!snapshot) return;
+    const chatId = snapshot.chatId;
     if (mode === "normal" && !(await applyConfigurationDraft())) return;
     if (snapshot?.chatId !== chatId) return;
     await submitPrompt(text, submittedDraft, mode);
@@ -1232,7 +1436,7 @@
       >
         <span class="inline-flex items-center gap-2"
           >PROJECTS <small class="text-[9px] font-medium tracking-normal opacity-75"
-            >{bootstrap?.recentWorkspaces.length ?? 0}</small
+            >{rootProjects.length}</small
           ></span
         >
         <button
@@ -1291,7 +1495,7 @@
               {/if}
               <div class="group flex min-w-0 items-center gap-0.5">
                 <button
-                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${workspace?.id === project.id ? "text-foreground" : ""}`}
+                  class={`flex h-8 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-muted transition-colors duration-150 group-focus-within:bg-sidebar-hover group-focus-within:text-foreground hover:bg-sidebar-hover hover:text-foreground active:cursor-grabbing max-[900px]:h-10 ${projectActive(project) ? "text-foreground" : ""}`}
                   draggable={!projectOrderSaving}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${projectLabel(project)}`}
@@ -1306,7 +1510,7 @@
                   onclick={() => toggleProject(project)}
                 >
                   <span
-                    class={`grid size-5 flex-none place-items-center rounded text-muted ${workspace?.id === project.id ? "bg-primary/15 text-primary" : ""}`}
+                    class={`grid size-5 flex-none place-items-center rounded text-muted ${projectActive(project) ? "bg-primary/15 text-primary" : ""}`}
                     ><Icon name={expanded ? "folder-open" : "folder"} size={15} /></span
                   >
                   <strong
@@ -1318,7 +1522,7 @@
                       >•••</span
                     >{:else if loaded}<span
                       class="flex-none font-mono text-[9.5px] leading-none text-faint max-[900px]:text-[10.5px]"
-                      >{loaded.sessions.length}</span
+                      >{matchingTasks.length}</span
                     >{/if}
                 </button>
                 <button
@@ -1361,6 +1565,12 @@
                           class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-inherit"
                           >{task.name ?? (task.firstMessage || "Untitled task")}</strong
                         >
+                        {#if task.worktree}<span
+                            class="grid size-4 flex-none rotate-90 place-items-center text-faint"
+                            data-worktree-indicator
+                            aria-label="Worktree"
+                            title="Worktree"><Icon name="worktree" size={14} /></span
+                          >{/if}
                         {#if current && active}<span
                             class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500 max-[900px]:text-[10.5px]"
                             ><i

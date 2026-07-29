@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from "@pidex/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatConnection, type ConnectionState } from "./AppShellConnection";
@@ -52,7 +53,7 @@ describe("ChatConnection", () => {
     expect(second.sent).toEqual([
       JSON.stringify({
         type: "hello",
-        protocolVersion: 6,
+        protocolVersion: PROTOCOL_VERSION,
         chatId: "chat_second",
       }),
     ]);
