@@ -52,34 +52,38 @@ async function waitForFakeWebSocket(page: Page) {
 
 async function installFakeWebSocket(page: Page) {
   await page.addInitScript(() => {
-    class FakeWebSocket extends EventTarget {
-      static readonly CONNECTING = 0;
-      static readonly OPEN = 1;
-      static readonly CLOSED = 3;
-      readyState = FakeWebSocket.CONNECTING;
+    const OPEN = 1;
+    const CLOSED = 3;
+    type FakeWebSocket = EventTarget & {
+      readyState: number;
+      send: () => void;
+      close: () => void;
+    };
 
-      constructor() {
-        super();
-        const scope = globalThis as typeof globalThis & { pidexTestSocket?: FakeWebSocket };
-        scope.pidexTestSocket = this;
-        setTimeout(() => {
-          this.readyState = FakeWebSocket.OPEN;
-          this.dispatchEvent(new Event("open"));
-        });
-      }
-
-      send() {}
-
-      close() {
-        if (this.readyState === FakeWebSocket.CLOSED) return;
-        this.readyState = FakeWebSocket.CLOSED;
-        this.dispatchEvent(new CloseEvent("close", { code: 1000 }));
-      }
-    }
+    const makeFakeWebSocket = (): FakeWebSocket => {
+      const socket = Object.assign(new EventTarget(), {
+        readyState: 0,
+        send() {},
+        close() {
+          if (socket.readyState === CLOSED) return;
+          socket.readyState = CLOSED;
+          socket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
+        },
+      });
+      const scope = globalThis as typeof globalThis & { pidexTestSocket?: FakeWebSocket };
+      scope.pidexTestSocket = socket;
+      setTimeout(() => {
+        socket.readyState = OPEN;
+        socket.dispatchEvent(new Event("open"));
+      });
+      return socket;
+    };
 
     Object.defineProperty(globalThis, "WebSocket", {
       configurable: true,
-      value: FakeWebSocket,
+      value: function () {
+        return makeFakeWebSocket();
+      },
     });
   });
 }

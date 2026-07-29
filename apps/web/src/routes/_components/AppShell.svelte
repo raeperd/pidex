@@ -14,8 +14,12 @@
     type ToolItem,
     type Workspace,
   } from "@pidex/api";
-  import { dialogValue as resolveDialogValue, PidexApiClient } from "./AppShellApiClient";
-  import { ChatConnection, type ConnectionState } from "./AppShellConnection";
+  import {
+    dialogValue as resolveDialogValue,
+    makePidexApiClient,
+    type PidexApiClient,
+  } from "./AppShellApiClient";
+  import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
   import {
     createTaskViewControllerRegistry,
     provideAppShellContext,
@@ -26,7 +30,7 @@
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
-  import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
+  import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
   const TASK_PREVIEW_COUNT = 6;
   const CONFIGURATION_DRAFT_PREFIX = "pidex:configuration-draft:";
@@ -91,10 +95,10 @@
   let renameDialogElement = $state<HTMLDialogElement>();
   let renameValue = $state("");
   const mobileViewport = new MediaQuery("max-width: 900px");
-  const api = new PidexApiClient();
-  const snapshotCache = new TaskSnapshotCache();
+  const api = makePidexApiClient();
+  const snapshotCache = makeTaskSnapshotCache();
   const taskViews = createTaskViewControllerRegistry();
-  const chatConnection = new ChatConnection({
+  const chatConnection = makeChatConnection({
     onEvent: applyEvent,
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),

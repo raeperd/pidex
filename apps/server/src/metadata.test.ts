@@ -12,7 +12,8 @@ import {
   ActionProtocolError,
   Metadata,
   MetadataError,
-  MetadataStore,
+  makeMetadataStore,
+  type MetadataStore,
   makeMetadataLayer,
   requestDigest,
 } from "./metadata.js";
@@ -101,7 +102,7 @@ describe("metadata store", () => {
 
   it("marks an accepted run interrupted after restart and requires acknowledgement", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-metadata-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const request = {
       actionId: "actioncrash0001",
       clientId: "clientcrash001",
@@ -112,7 +113,7 @@ describe("metadata store", () => {
     const accepted = store.acceptPrompt(request);
     store.markPromptStatus(request.sessionKey, accepted.runId, "running");
     store.close();
-    store = new MetadataStore();
+    store = makeMetadataStore();
 
     expect(store.sessionState(request.sessionKey)).toEqual({
       revision: 1,
@@ -138,7 +139,7 @@ describe("metadata store", () => {
 
   it("looks up a known workspace without changing its recent-order metadata", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     expect(store.workspaceId("/tmp/example-project")).toBeUndefined();
     const id = store.rememberWorkspace("/tmp/example-project");
     expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
@@ -148,7 +149,7 @@ describe("metadata store", () => {
 
   it("keeps a worktree attached to its source project across restarts", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-worktree-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const sourceWorkspaceId = store.rememberWorkspace("/tmp/example-project");
     const worktreeId = store.rememberWorkspace("/tmp/example-worktree", sourceWorkspaceId);
 
@@ -162,20 +163,20 @@ describe("metadata store", () => {
     ]);
 
     store.close();
-    store = new MetadataStore();
+    store = makeMetadataStore();
     expect(store.workspaceProjectId(worktreeId)).toBe(sourceWorkspaceId);
   });
 
   it("persists a manually reordered workspace list across restarts", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-order-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const first = store.rememberWorkspace("/tmp/first-project");
     const second = store.rememberWorkspace("/tmp/second-project");
     const third = store.rememberWorkspace("/tmp/third-project");
 
     store.reorderWorkspaces([third, first, second]);
     store.close();
-    store = new MetadataStore();
+    store = makeMetadataStore();
 
     expect(store.recent()).toEqual([
       { id: third, path: "/tmp/third-project" },
@@ -186,7 +187,7 @@ describe("metadata store", () => {
 
   it("keeps a newly remembered workspace inside the 100-project ordering boundary", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-limit-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     for (let index = 0; index < 100; index += 1) store.rememberWorkspace(`/tmp/project-${index}`);
 
     const newestId = store.rememberWorkspace("/tmp/project-100");
@@ -200,7 +201,7 @@ describe("metadata store", () => {
   it("refreshes recency without changing manual order when reopening a workspace", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-recency-"));
     vi.useFakeTimers();
-    const metadata = new MetadataStore();
+    const metadata = makeMetadataStore();
     store = metadata;
     const remembered = Array.from({ length: 100 }, (_, index) => {
       vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
@@ -223,7 +224,7 @@ describe("metadata store", () => {
 
   it("preserves the durable ID of a project evicted from the sidebar", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-id-"));
-    const metadata = new MetadataStore();
+    const metadata = makeMetadataStore();
     store = metadata;
     const remembered = Array.from({ length: 100 }, (_, index) => {
       const workspacePath = `/tmp/durable-project-${index}`;
@@ -234,7 +235,7 @@ describe("metadata store", () => {
     const evicted = remembered.find(({ path: workspacePath }) => !recentPaths.has(workspacePath));
     if (!evicted) throw new Error("Expected one workspace to leave the sidebar history");
     metadata.close();
-    const reopened = new MetadataStore();
+    const reopened = makeMetadataStore();
     store = reopened;
 
     expect(reopened.workspaceId(evicted.path)).toBe(evicted.id);
@@ -263,7 +264,7 @@ describe("metadata store", () => {
     `);
     legacyDatabase.close();
 
-    expect(() => new MetadataStore()).toThrow(/workspace order migration blocked/);
+    expect(() => makeMetadataStore()).toThrow(/workspace order migration blocked/);
 
     const inspection = new DatabaseSync(databasePath);
     const sortOrderColumn = inspection
@@ -275,7 +276,7 @@ describe("metadata store", () => {
 
   it("assigns one durable task ID to a native Pi session", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-task-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
 
     const workspaceId = store.rememberWorkspace("/tmp/task-project");
     const taskId = store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl");
@@ -291,7 +292,7 @@ describe("metadata store", () => {
     });
 
     store.close();
-    store = new MetadataStore();
+    store = makeMetadataStore();
     expect(store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl")).toBe(
       taskId,
     );
@@ -299,7 +300,7 @@ describe("metadata store", () => {
 
   it("persists action transitions and replays through Drizzle transactions", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-actions-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const promptRequest = {
       actionId: "actionprompt001",
       clientId: "clientactions01",
@@ -351,7 +352,7 @@ describe("metadata store", () => {
 
   it("rejects conflicting actions without consuming a revision", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-conflicts-"));
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const request = {
       actionId: "actionconflict01",
       clientId: "clientconflict1",
@@ -378,9 +379,9 @@ describe("metadata store", () => {
   it("initializes only the product tables without a migration backup", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-schema-"));
     process.env.PIDEX_STATE_DIR = stateDir;
-    store = new MetadataStore();
+    store = makeMetadataStore();
     store.close();
-    store = new MetadataStore();
+    store = makeMetadataStore();
 
     const database = new DatabaseSync(path.join(stateDir, "pidex.sqlite"), { readOnly: true });
     const tables = drizzle({ client: database })
@@ -403,7 +404,7 @@ describe("metadata store", () => {
   it("rolls back crash recovery when either durable update fails", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-recovery-"));
     process.env.PIDEX_STATE_DIR = stateDir;
-    store = new MetadataStore();
+    store = makeMetadataStore();
     const request = {
       actionId: "actionrecovery01",
       clientId: "clientrecovery1",
@@ -428,7 +429,7 @@ describe("metadata store", () => {
     `);
     database.close();
 
-    expect(() => new MetadataStore()).toThrow(/Failed query: update "session_state"/);
+    expect(() => makeMetadataStore()).toThrow(/Failed query: update "session_state"/);
 
     const inspection = new DatabaseSync(databasePath);
     const action = inspection
@@ -442,7 +443,7 @@ describe("metadata store", () => {
     inspection.exec("DROP TRIGGER block_session_recovery");
     inspection.close();
 
-    store = new MetadataStore();
+    store = makeMetadataStore();
     expect(store.sessionState(request.sessionKey).run).toMatchObject({
       status: "interrupted",
       requiresAcknowledgement: true,

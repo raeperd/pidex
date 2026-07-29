@@ -1,16 +1,16 @@
 import type { ChatSnapshot } from "@pidex/api";
 import { describe, expect, it } from "vitest";
-import { taskPath, TaskSnapshotCache } from "./TaskNavigationState";
+import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
 const snapshot = (taskId: string, revision: number) => ({ taskId, revision }) as ChatSnapshot;
 
 describe("TaskSnapshotCache", () => {
   it("has no snapshot for a cold route", () => {
-    expect(new TaskSnapshotCache().get("task-1")).toBeUndefined();
+    expect(makeTaskSnapshotCache().get("task-1")).toBeUndefined();
   });
 
   it("returns the latest snapshot when a task is revisited", () => {
-    const cache = new TaskSnapshotCache();
+    const cache = makeTaskSnapshotCache();
     cache.set(snapshot("task-1", 1));
     cache.set(snapshot("task-1", 2));
 
@@ -18,7 +18,7 @@ describe("TaskSnapshotCache", () => {
   });
 
   it("keeps tasks isolated by their globally unique IDs", () => {
-    const cache = new TaskSnapshotCache();
+    const cache = makeTaskSnapshotCache();
     cache.set(snapshot("task-1", 1));
 
     expect(cache.get("task-2")).toBeUndefined();
@@ -26,7 +26,7 @@ describe("TaskSnapshotCache", () => {
 
   it("expires snapshots after the retention window", () => {
     let now = 0;
-    const cache = new TaskSnapshotCache(1_000, () => now);
+    const cache = makeTaskSnapshotCache(1_000, () => now);
     cache.set(snapshot("task-1", 1));
     now = 1_001;
 

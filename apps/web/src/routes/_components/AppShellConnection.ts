@@ -8,90 +8,88 @@ interface ChatConnectionHandlers {
   onStateChange: (state: ConnectionState) => void;
 }
 
-export class ChatConnection {
-  private chatId: string | undefined;
-  private lastEventId = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  private socket: WebSocket | undefined;
+export function makeChatConnection(handlers: ChatConnectionHandlers) {
+  let activeChatId: string | undefined;
+  let lastEventId = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let socket: WebSocket | undefined;
 
-  constructor(private readonly handlers: ChatConnectionHandlers) {}
-
-  connect(chatId: string) {
-    this.chatId = chatId;
-    this.lastEventId = 0;
-    this.open();
+  function connect(chatId: string) {
+    activeChatId = chatId;
+    lastEventId = 0;
+    open();
   }
 
-  reconnect() {
-    if (this.chatId) this.open();
+  function reconnect() {
+    if (activeChatId) open();
   }
 
-  disconnect() {
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
-    const socket = this.socket;
-    this.socket = undefined;
-    socket?.close();
-    this.handlers.onStateChange("disconnected");
+  function disconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+    const activeSocket = socket;
+    socket = undefined;
+    activeSocket?.close();
+    handlers.onStateChange("disconnected");
   }
 
-  close() {
-    this.chatId = undefined;
-    this.lastEventId = 0;
-    this.disconnect();
+  function close() {
+    activeChatId = undefined;
+    lastEventId = 0;
+    disconnect();
   }
 
-  private open() {
-    const chatId = this.chatId;
+  function open() {
+    const chatId = activeChatId;
     if (!chatId) return;
 
-    clearTimeout(this.reconnectTimer);
-    this.handlers.onStateChange("reconnecting");
+    clearTimeout(reconnectTimer);
+    handlers.onStateChange("reconnecting");
 
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${location.host}/api/ws`);
-    const previous = this.socket;
-    this.socket = socket;
+    const nextSocket = new WebSocket(`${scheme}://${location.host}/api/ws`);
+    const previous = socket;
+    socket = nextSocket;
     previous?.close();
 
-    socket.addEventListener("open", () => {
-      if (this.socket !== socket || this.chatId !== chatId) {
-        socket.close();
+    nextSocket.addEventListener("open", () => {
+      if (socket !== nextSocket || activeChatId !== chatId) {
+        nextSocket.close();
         return;
       }
-      this.handlers.onStateChange("connected");
-      socket.send(
+      handlers.onStateChange("connected");
+      nextSocket.send(
         JSON.stringify({
           type: "hello",
           protocolVersion: PROTOCOL_VERSION,
           chatId,
-          ...(this.lastEventId ? { lastEventId: this.lastEventId } : {}),
+          ...(lastEventId ? { lastEventId } : {}),
         }),
       );
     });
-    socket.addEventListener("message", (message) => this.receive(socket, message.data));
-    socket.addEventListener("error", () => socket.close());
-    socket.addEventListener("close", (event) => {
-      if (this.socket !== socket || !this.chatId) return;
+    nextSocket.addEventListener("message", (message) => receive(nextSocket, message.data));
+    nextSocket.addEventListener("error", () => nextSocket.close());
+    nextSocket.addEventListener("close", (event) => {
+      if (socket !== nextSocket || !activeChatId) return;
       if (event.code === 1008) {
-        this.chatId = undefined;
-        this.lastEventId = 0;
-        this.socket = undefined;
-        this.handlers.onStateChange("disconnected");
-        this.handlers.onInvalidChat();
+        activeChatId = undefined;
+        lastEventId = 0;
+        socket = undefined;
+        handlers.onStateChange("disconnected");
+        handlers.onInvalidChat();
         return;
       }
       if (!navigator.onLine) {
-        this.handlers.onStateChange("disconnected");
+        handlers.onStateChange("disconnected");
         return;
       }
-      this.handlers.onStateChange("reconnecting");
-      this.reconnectTimer = setTimeout(() => this.open(), 800);
+      handlers.onStateChange("reconnecting");
+      reconnectTimer = setTimeout(open, 800);
     });
   }
 
-  private receive(socket: WebSocket, data: unknown) {
-    if (this.socket !== socket) return;
+  function receive(source: WebSocket, data: unknown) {
+    if (socket !== source) return;
     let raw: unknown;
     try {
       raw = JSON.parse(String(data));
@@ -99,14 +97,16 @@ export class ChatConnection {
       return;
     }
     if (typeof raw === "object" && raw !== null && "type" in raw && raw.type === "ping") {
-      socket.send(JSON.stringify({ type: "pong" }));
+      source.send(JSON.stringify({ type: "pong" }));
       return;
     }
 
     const parsed = serverEventSchema.safeParse(raw);
-    if (!parsed.success || parsed.data.chatId !== this.chatId) return;
-    this.lastEventId = Math.max(this.lastEventId, parsed.data.eventId);
-    socket.send(JSON.stringify({ type: "ack", eventId: parsed.data.eventId }));
-    this.handlers.onEvent(parsed.data);
+    if (!parsed.success || parsed.data.chatId !== activeChatId) return;
+    lastEventId = Math.max(lastEventId, parsed.data.eventId);
+    source.send(JSON.stringify({ type: "ack", eventId: parsed.data.eventId }));
+    handlers.onEvent(parsed.data);
   }
+
+  return { connect, reconnect, disconnect, close };
 }
