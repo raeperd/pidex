@@ -5,9 +5,11 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { NodeRuntime } from "@effect/platform-node";
-import { BodyLimitPlugin, RPCHandler } from "@orpc/server/node";
+import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
+import { RPCHandler } from "@orpc/server/node";
+import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
 import { wsClientMessageSchema } from "@pidex/api";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { WebSocketServer, type RawData } from "ws";
 import { Chats, makeApplicationRuntime } from "./app-runtime.js";
 import { applicationError, attemptOperation, HttpError } from "./errors.js";
@@ -44,15 +46,42 @@ export async function createPidexServer() {
 export async function createPidexApplication() {
   const runtime = makeApplicationRuntime();
   try {
-    const manager = await runtime.runPromise(Chats);
+    const effectContext = await runtime.context();
+    const manager = Context.get(effectContext, Chats);
     const csrf = await runtime.runPromise(
       attemptOperation("security.csrf", () => randomBytes(32).toString("base64url")),
     );
     const roots = await runtime.runPromise(allowedRoots());
     const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
     const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
-    const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots, runtime }), {
-      plugins: [new BodyLimitPlugin({ maxBodySize: 64 * 1024 })],
+    const apiHandler = new RPCHandler(createRpcApiRouter({ csrf, roots }), {
+      errorStatusMap: {
+        ...COMMON_ERROR_STATUS_MAP,
+        action_conflict: 409,
+        csrf: 403,
+        dialog_mismatch: 409,
+        dialog_value_invalid: 400,
+        internal_error: 500,
+        interrupted_run: 409,
+        model_unavailable: 400,
+        project_missing_from_worktree: 400,
+        project_not_git: 400,
+        project_outside_repository: 400,
+        run_mismatch: 409,
+        session_busy: 409,
+        stale_revision: 409,
+        validation: 400,
+        workspace_forbidden: 403,
+        workspace_missing: 404,
+        workspace_not_directory: 400,
+        workspace_not_managed_worktree: 400,
+        worktree_branch_read_failed: 400,
+        worktree_branch_remove_failed: 400,
+        worktree_create_failed: 400,
+        worktree_has_tasks: 409,
+        worktree_remove_failed: 400,
+      },
+      plugins: [new RequestLimitHandlerPlugin({ maxBodySize: 64 * 1024 })],
     });
 
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
@@ -62,7 +91,10 @@ export async function createPidexApplication() {
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
         const { matched } = await runtime.runPromise(
           attemptOperation("orpc.handle", () =>
-            apiHandler.handle(req, res, { prefix: "/api/rpc", context: { req } }),
+            apiHandler.handle(req, res, {
+              prefix: "/api/rpc",
+              context: { req, "effect/context": effectContext },
+            }),
           ),
         );
         if (matched) return;

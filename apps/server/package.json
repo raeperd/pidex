@@ -15,7 +15,8 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@effect/platform-node": "4.0.0-beta.101",
-    "@orpc/server": "1.14.8",
+    "@orpc/experimental-effect": "2.0.0-beta.21",
+    "@orpc/server": "2.0.0-beta.21",
     "@pidex/api": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
     "effect": "4.0.0-beta.101",
@@ -24,7 +25,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-beta.101",
-    "@orpc/client": "1.14.8",
+    "@orpc/client": "2.0.0-beta.21",
     "@types/node": "catalog:",
     "@types/ws": "8.18.1",
     "tsx": "4.23.1",

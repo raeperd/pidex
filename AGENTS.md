@@ -3,4 +3,6 @@
 - Keep one-use code local. Do not create a new file for a function, helper, or logic used in only one place.
 - Keep route-specific components and logic under the route that owns them. Move code to a parent `_components/` directory only when multiple child routes use it.
 - Keep application wiring in one obvious composition root.
+- Use Effect for effectful application logic; keep plain TypeScript for pure functions and framework UI code.
+- Return typed Effect errors instead of throwing exceptions or exposing raw promises, except at framework boundaries.
 - Prefer real integration tests over mocks; inject dependencies at boundaries when needed.
