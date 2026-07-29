@@ -6,8 +6,6 @@ describe("ContextUsageMeter", () => {
   it("renders context usage as an interactive details trigger", () => {
     const { body } = render(ContextUsageMeter, {
       props: {
-        cost: 1.234,
-        subscription: true,
         usage: {
           tokens: 5_100,
           contextWindow: 100_000,
@@ -24,7 +22,6 @@ describe("ContextUsageMeter", () => {
     expect(body).toContain('aria-expanded="false"');
     expect(body).toContain('role="tooltip"');
     expect(body).toContain('aria-hidden="true"');
-    expect(body).toContain("Session cost");
-    expect(body).toContain("$1.234 (subscription)");
+    expect(body).not.toContain("Session cost");
   });
 });

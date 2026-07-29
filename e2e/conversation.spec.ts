@@ -904,6 +904,7 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(contextDetails).toContainText("Context Window");
   await expect(contextDetails).toContainText("34% · 87k/258k");
   await expect(contextDetails).toContainText("Total processed2.5m");
+  await expect(contextDetails).not.toContainText("Session cost");
   await expect(contextDetails).toContainText("Pi automatically compacts its context when needed.");
   await expect(contextDetails.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "34");
 

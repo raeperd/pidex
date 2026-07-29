@@ -5,8 +5,7 @@
   const RADIUS = 9.75;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-  let { cost, subscription, usage }: { cost: number; subscription: boolean; usage: ContextUsage } =
-    $props();
+  let { usage }: { usage: ContextUsage } = $props();
   const componentId = $props.id();
   const detailsId = `${componentId}-details`;
 
@@ -25,7 +24,6 @@
   let percentageLabel = $derived(formatPercentage(usage.percent));
   let dashOffset = $derived(CIRCUMFERENCE * (1 - normalizedPercent / 100));
   let overloaded = $derived(normalizedPercent > 90);
-  let costLabel = $derived(`$${cost.toFixed(3)}${subscription ? " (subscription)" : ""}`);
   let ariaLabel = $derived(
     percentageLabel
       ? `Context window ${percentageLabel} used`
@@ -233,12 +231,6 @@
       <span class="text-faint">Total processed</span><strong
         class="font-mono text-[10px] font-semibold whitespace-nowrap text-muted tabular-nums"
         >{formatTokens(usage.totalProcessedTokens)}</strong
-      >
-    </div>
-    <div class="flex items-center justify-between gap-3">
-      <span class="text-faint">Session cost</span><strong
-        class="font-mono text-[10px] font-semibold whitespace-nowrap text-muted tabular-nums"
-        >{costLabel}</strong
       >
     </div>
     {#if usage.compactsAutomatically}

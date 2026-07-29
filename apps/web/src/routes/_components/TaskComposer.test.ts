@@ -86,12 +86,11 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
-  it("keeps session cost inside context details without a stats strip", () => {
+  it("renders context details without a stats strip or session cost", () => {
     const body = renderComposer("", false);
 
     expect(body).not.toContain('data-testid="composer-stats"');
-    expect(body).toContain("Session cost");
-    expect(body).toContain("$1.234 (subscription)");
+    expect(body).not.toContain("Session cost");
   });
 
   it("completes a selected command in the composer", () => {
@@ -143,13 +142,6 @@ function renderComposer(draft: string, active: boolean) {
       setStartMode: () => {},
       startMode: "local",
       startModeEditable: true,
-      stats: {
-        messages: 2,
-        toolCalls: 1,
-        tokens: 3_350,
-        cost: 1.234,
-        subscription: true,
-      },
       steeringCount: 0,
       stop: async () => {},
       taskId: "task_test",

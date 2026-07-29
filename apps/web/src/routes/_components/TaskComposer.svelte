@@ -99,7 +99,6 @@
     setStartMode,
     startMode,
     startModeEditable,
-    stats,
     steeringCount,
     stop,
     taskId,
@@ -126,7 +125,6 @@
     setStartMode: (mode: TaskStartMode) => void;
     startMode: TaskStartMode;
     startModeEditable: boolean;
-    stats: ChatSnapshot["stats"];
     steeringCount: number;
     stop: () => Promise<void>;
     taskId: string;
@@ -462,13 +460,7 @@
         </label>
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
-        {#if contextUsage}
-          <ContextUsageMeter
-            usage={contextUsage}
-            cost={stats.cost}
-            subscription={stats.subscription}
-          />
-        {/if}
+        {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
         {#if active}
           <select
             class="h-7 max-w-20 flex-none rounded-lg border-0 bg-transparent pr-4 pl-2 text-[10.5px] font-medium text-muted outline-none hover:bg-secondary hover:text-foreground max-[900px]:h-9 max-[900px]:text-[11px]"

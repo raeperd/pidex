@@ -127,10 +127,7 @@ test("scales mobile task and composer targets without changing desktop density",
   const model = page.getByLabel("Model");
   const send = page.getByRole("button", { name: "Send" });
   await expect(model).toHaveCSS("font-size", "11px");
-  await expect(page.getByTestId("composer-stats")).toHaveCSS(
-    "font-size",
-    mobile ? "10.5px" : "9.5px",
-  );
+  await expect(page.getByTestId("composer-stats")).toHaveCount(0);
   await expect(send).toHaveCSS("width", mobile ? "40px" : "34px");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))

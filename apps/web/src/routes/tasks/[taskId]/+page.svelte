@@ -61,7 +61,6 @@
     setStartMode={context.taskActions.setStartMode}
     startMode={context.task.startMode}
     startModeEditable={context.task.startModeEditable}
-    stats={context.task.snapshot.stats}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
     {taskId}
