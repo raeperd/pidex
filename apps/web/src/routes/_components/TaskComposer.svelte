@@ -161,12 +161,12 @@
   );
   let footerPath = $derived(`${projectPath}${gitBranch ? ` (${gitBranch})` : ""}`);
   let selectedModelInfo = $derived(models.find((model) => model.id === selectedModel));
-  let footerUsage = $derived(formatFooterUsage(stats, contextUsage));
+  let footerUsage = $derived(formatFooterUsage(stats));
   let footerModel = $derived(
     formatFooterModel(selectedModel, selectedModelInfo?.reasoning ?? false, selectedThinkingLevel),
   );
 
-  function formatFooterUsage(sessionStats: ChatSnapshot["stats"], usage: ContextUsage | undefined) {
+  function formatFooterUsage(sessionStats: ChatSnapshot["stats"]) {
     const parts: string[] = [];
     if (sessionStats.inputTokens) parts.push(`↑${formatFooterTokens(sessionStats.inputTokens)}`);
     if (sessionStats.outputTokens) parts.push(`↓${formatFooterTokens(sessionStats.outputTokens)}`);
@@ -181,11 +181,6 @@
       parts.push(`CH${sessionStats.cacheHitRate.toFixed(1)}%`);
     if (sessionStats.cost || sessionStats.subscription)
       parts.push(`$${sessionStats.cost.toFixed(3)}${sessionStats.subscription ? " (sub)" : ""}`);
-    if (usage) {
-      const percent = usage.percent === null ? "?" : `${usage.percent.toFixed(1)}%`;
-      const automatic = usage.compactsAutomatically ? " (auto)" : "";
-      parts.push(`${percent}/${formatFooterTokens(usage.contextWindow)}${automatic}`);
-    }
     return parts.join(" ");
   }
 

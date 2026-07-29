@@ -90,7 +90,8 @@ describe("slashCommandSuggestions", () => {
     const body = renderComposer("", false);
 
     expect(body).toContain("~/Projects/pidex (main)");
-    expect(body).toContain("↑1.0k ↓250 R2.0k W100 CH66.7% $1.234 (sub) 25.0%/272k (auto)");
+    expect(body).toContain("↑1.0k ↓250 R2.0k W100 CH66.7% $1.234 (sub)");
+    expect(body).not.toContain("25.0%/272k (auto)");
     expect(body).toContain("gpt-5.6-sol • high");
   });
 
