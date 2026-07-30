@@ -1,6 +1,29 @@
 import { expect, test } from "@playwright/test";
 import { openTasks, rpcRequest } from "./support";
 
+test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
+  const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
+  await page.route("**/api/rpc/system/bootstrap", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { json: { ...bootstrap.result, recentWorkspaces: [] } },
+    }),
+  );
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Choose a project to start" })).toBeVisible();
+  await expect(page.getByTestId("starter-composer")).toBeVisible();
+  await expect(page.getByLabel("Prompt")).toBeDisabled();
+  await expect(page.getByLabel("Model")).toBeDisabled();
+  await expect(page.getByLabel("Thinking level")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Choose a project to start" }).click();
+  await expect(page.getByRole("dialog", { name: "Add a project" })).toBeVisible();
+});
+
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
   const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
 

@@ -33,6 +33,10 @@
   async function send() {
     const submittedWorkspaceId = workspaceId;
     const submittedDraft = starter.draft;
+    if (!context.shell.workspace) {
+      context.projectActions.openProjectPicker();
+      return;
+    }
     if (starter.submitting || !submittedDraft.trim() || !selectedModel) return;
     updateStarter({ submitting: true }, submittedWorkspaceId);
     try {
@@ -82,8 +86,8 @@
       <div class="mx-auto h-35 w-full rounded-[20px] bg-secondary/75"></div>
     </div>
   </section>
-{:else if context.shell.workspace && !(context.shell.bootstrapError && !context.shell.bootstrap)}
-  {#key context.shell.workspace.id}
+{:else if !(context.shell.bootstrapError && !context.shell.bootstrap)}
+  {#key workspaceId}
     <section
       class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
       aria-labelledby="starter-heading"
@@ -95,8 +99,26 @@
         <h1
           class="m-0 text-center text-[clamp(25px,3vw,36px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
           id="starter-heading"
+          aria-label={context.shell.workspace
+            ? `What should we work on in ${context.shell.workspace.name}?`
+            : "Choose a project to start"}
         >
-          What should we work on in {context.shell.workspace.name}?
+          {#if context.shell.workspace}
+            What should we work on in <button
+              class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+              type="button"
+              onclick={context.projectActions.openProjectPicker}
+              aria-haspopup="dialog"
+              title="Change project">{context.shell.workspace.name}</button
+            >?
+          {:else}
+            <button
+              class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+              type="button"
+              onclick={context.projectActions.openProjectPicker}
+              aria-haspopup="dialog">Choose a project to start</button
+            >
+          {/if}
         </h1>
         <div
           class="relative mx-auto w-full max-w-3xl overflow-visible rounded-[22px] border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)] max-[560px]:rounded-[19px]"
@@ -108,8 +130,10 @@
             oninput={(event) => draftInput(event.currentTarget)}
             onkeydown={keydown}
             rows="2"
-            placeholder="Ask Pi to work on this project…"
-            disabled={starter.submitting}
+            placeholder={context.shell.workspace
+              ? "Ask Pi to work on this project…"
+              : "Choose a project above to start a task"}
+            disabled={!context.shell.workspace || starter.submitting}
             aria-label="Prompt"></textarea>
           <div
             class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-10.5 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
@@ -128,10 +152,10 @@
                   aria-label="Model"
                   value={selectedModel}
                   onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-                  disabled={!context.shell.workspace.models.length || starter.submitting}
+                  disabled={!context.shell.workspace?.models.length || starter.submitting}
                 >
-                  {#each context.shell.workspace.models as model (model.id)}<option value={model.id}
-                      >{model.name}</option
+                  {#each context.shell.workspace?.models ?? [] as model (model.id)}<option
+                      value={model.id}>{model.name}</option
                     >{/each}
                 </select>
               </label>
@@ -155,7 +179,7 @@
                     stageConfiguration({
                       thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
                     })}
-                  disabled={starter.submitting}
+                  disabled={!context.shell.workspace || starter.submitting}
                 >
                   <option value="off">Off</option><option value="minimal">Minimal</option><option
                     value="low">Low</option
@@ -169,7 +193,7 @@
               class="inline-grid size-8.5 flex-none place-items-center rounded-[999px] border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
               onclick={send}
               disabled={!starter.draft.trim() ||
-                !context.shell.workspace.models.length ||
+                !context.shell.workspace?.models.length ||
                 starter.submitting}
               aria-label="Send"><Icon name="send" /></button
             >
@@ -185,64 +209,35 @@
     aria-live="polite"
     aria-relevant="additions text"
   >
-    {#if context.shell.bootstrapError && !context.shell.bootstrap}
+    <div
+      class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+      role="status"
+    >
       <div
-        class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-        role="status"
+        class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
       >
-        <div
-          class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-        >
-          <Icon name="activity" size={22} />
-        </div>
-        <p
-          class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-        >
-          HOST UNAVAILABLE
-        </p>
-        <h1
-          class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-        >
-          Your projects are still on the desktop.
-        </h1>
-        <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-          Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
-          automatically.
-        </p>
-        <button
-          class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-          onclick={context.projectActions.retryConnection}
-          disabled={context.shell.retryingConnection}
-          >{context.shell.retryingConnection ? "Retrying…" : "Retry connection"}</button
-        >
+        <Icon name="activity" size={22} />
       </div>
-    {:else}
-      <div
-        class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
+      <p
+        class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
       >
-        <div
-          class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-        >
-          <span class="font-serif text-[26px] leading-none font-bold">π</span>
-        </div>
-        <p
-          class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
-        >
-          YOUR PRIVATE PI PROJECT
-        </p>
-        <h1
-          class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-        >
-          Bring Pi with you.
-        </h1>
-        <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-          Choose a project to create or resume a task.
-        </p>
-        <button
-          class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
-          onclick={context.projectActions.openProjectPicker}>Add a project</button
-        >
-      </div>
-    {/if}
+        HOST UNAVAILABLE
+      </p>
+      <h1
+        class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
+      >
+        Your projects are still on the desktop.
+      </h1>
+      <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+        Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
+        automatically.
+      </p>
+      <button
+        class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
+        onclick={context.projectActions.retryConnection}
+        disabled={context.shell.retryingConnection}
+        >{context.shell.retryingConnection ? "Retrying…" : "Retry connection"}</button
+      >
+    </div>
   </section>
 {/if}
