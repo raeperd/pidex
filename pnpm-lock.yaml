@@ -185,9 +185,6 @@ importers:
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.1.5(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-      '@typescript/native':
-        specifier: npm:typescript@7.0.2
-        version: typescript@7.0.2
       svelte-check:
         specifier: 'catalog:'
         version: 4.7.3(@typescript/typescript6@6.0.2)(picomatch@4.0.5)(svelte@5.56.7)
