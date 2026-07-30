@@ -94,8 +94,10 @@ test("integrates the starter canvas with macOS window chrome", async ({
 
 test("collapses and restores the desktop sidebar with keyboard focus", async ({
   page,
+  request,
 }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a drawer");
+  await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
   const sidebar = page.getByRole("complementary", { name: "Tasks" });

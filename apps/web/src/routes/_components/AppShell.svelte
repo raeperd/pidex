@@ -1324,6 +1324,7 @@
     if (event.target !== event.currentTarget || event.propertyName !== "grid-template-columns")
       return;
     taskViews.resizeComposer();
+    if (sidebarCollapsed) expandSidebarButton?.focus();
   }
   function constrainSidebarWidth(width: number) {
     return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
