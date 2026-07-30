@@ -130,7 +130,9 @@
   let compactPending = $derived(
     Boolean(snapshot && compactPendingTaskIds.includes(snapshot.taskId)),
   );
-  let isNewTask = $derived(Boolean(snapshot && snapshot.items.length === 0));
+  let isNewTask = $derived(
+    Boolean((routePath === "/" && workspace) || (snapshot && snapshot.items.length === 0)),
+  );
   let taskHasNoTranscript = $derived(
     Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
   );
@@ -230,7 +232,7 @@
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
   let currentTitle = $derived.by(() => {
-    if (!snapshot) return workspace ? "No active task" : "Pidex";
+    if (!snapshot) return workspace?.name ?? "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
     const firstUser = snapshot?.items.find((item) => item.type === "user");
     if (firstUser?.type === "user")
@@ -1322,6 +1324,7 @@
     if (event.target !== event.currentTarget || event.propertyName !== "grid-template-columns")
       return;
     taskViews.resizeComposer();
+    if (sidebarCollapsed) expandSidebarButton?.focus();
   }
   function constrainSidebarWidth(width: number) {
     return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
@@ -1485,7 +1488,7 @@
       <div
         class="mt-2 flex min-h-9 items-center justify-between px-2 text-[13px] font-medium text-muted"
       >
-        <span>Project</span>
+        <span>Projects</span>
         <button
           class="grid size-8 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-9 disabled:cursor-not-allowed disabled:opacity-40"
           onclick={openProjectPicker}

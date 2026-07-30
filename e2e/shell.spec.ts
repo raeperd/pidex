@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { rpcRequest } from "./support";
+import { rememberWorkspace, rpcRequest } from "./support";
 
 test("serves branded assets", async ({ request }) => {
   const png = await request.get("/pidex-icon.png");
@@ -39,17 +39,22 @@ test("navigates home when the Pidex icon is clicked", async ({ page, request }, 
   await expect(page).toHaveURL("/");
 });
 
-test("integrates the application headers with macOS window chrome", async ({ page }, testInfo) => {
+test("integrates the starter canvas with macOS window chrome", async ({
+  page,
+  request,
+}, testInfo) => {
   await installIntegratedTitleBar(page);
+  await rememberWorkspace(request, process.cwd());
 
   await page.goto("/");
 
   const sidebarTitleBar = page.locator("aside > .window-drag-region");
-  const mainTitleBar = page.locator("main > header");
+  const mainDragRegion = page.locator("main > .window-drag-region");
   await expect(sidebarTitleBar).toHaveCSS("-webkit-app-region", "drag");
   await expect(sidebarTitleBar).toHaveCSS("height", "52px");
   await expect(sidebarTitleBar).toHaveCSS("padding-left", "80px");
-  await expect(mainTitleBar).toHaveCSS("height", "52px");
+  await expect(page.locator("main > header")).toHaveCount(0);
+  await expect(mainDragRegion).toHaveCSS("height", "32px");
 
   const appMark = sidebarTitleBar.locator('img[src="/pidex-icon.png"]');
   const appTitle = sidebarTitleBar.getByText("Pidex", { exact: true });
@@ -68,7 +73,7 @@ test("integrates the application headers with macOS window chrome", async ({ pag
   ).toBeLessThanOrEqual(1);
   expect(appTitleBox.x).toBeGreaterThanOrEqual(appMarkBox.x + appMarkBox.width + 6);
 
-  await expect(mainTitleBar).toHaveCSS("-webkit-app-region", "drag");
+  await expect(mainDragRegion).toHaveCSS("-webkit-app-region", "drag");
   await expect(page.getByRole("button", { name: "Search projects and tasks" })).toHaveCSS(
     "-webkit-app-region",
     "no-drag",
@@ -77,30 +82,22 @@ test("integrates the application headers with macOS window chrome", async ({ pag
   if (testInfo.project.name !== "mobile") {
     await collapseSidebar.click();
     const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
-    await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
-    await expect(expandSidebar).toHaveCSS("-webkit-app-region", "no-drag");
-    const expandSidebarBox = await expandSidebar.boundingBox();
-    const mainTitleBox = await mainTitleBar.locator("strong").boundingBox();
-    if (!expandSidebarBox || !mainTitleBox) throw new Error("The desktop title bar is not visible");
-    expect(
-      Math.abs(
-        expandSidebarBox.y +
-          expandSidebarBox.height / 2 -
-          (mainTitleBox.y + mainTitleBox.height / 2),
-      ),
-    ).toBeLessThanOrEqual(1);
+    await expect(expandSidebar).toHaveCSS("left", "80px");
     await expandSidebar.click();
   }
 
   await page.setViewportSize({ width: 800, height: 820 });
-  await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
-  await expect(mainTitleBar).toHaveCSS("padding-left", "80px");
+  const openTasks = page.getByRole("button", { name: "Open tasks" });
+  await expect(openTasks).toBeVisible();
+  await expect(openTasks).toHaveCSS("left", "80px");
 });
 
 test("collapses and restores the desktop sidebar with keyboard focus", async ({
   page,
+  request,
 }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "The mobile sidebar remains a drawer");
+  await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
   const sidebar = page.getByRole("complementary", { name: "Tasks" });

@@ -160,7 +160,8 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(
     page.getByRole("heading").filter({ hasText: "What should we work on in " }),
   ).toBeVisible();
-  await expect(page.getByText("No active task", { exact: true })).toBeVisible();
+  await expect(page.getByText("No active task", { exact: true })).toHaveCount(0);
+  await expect(page.locator("main > header")).toHaveCount(0);
   const initialPrompt = page.getByLabel("Prompt");
   await expect(initialPrompt).toBeVisible();
   await expect(page.getByLabel("Model")).toBeDisabled();
@@ -178,6 +179,9 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     await expect(page.getByRole("button", { name: "Open tasks" })).toBeVisible();
 
   await openTasks(page);
+  await expect(
+    page.getByRole("complementary", { name: "Tasks" }).getByText("Projects", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toHaveCount(0);
   await page.getByRole("button", { name: "Search projects and tasks" }).click();
   await expect(page.getByRole("textbox", { name: "Search projects and tasks" })).toBeFocused();
@@ -199,7 +203,6 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(page.getByLabel("Model")).toHaveValue("e2e/model");
   expect(createRequests).toHaveLength(0);
 
-  await expect(page.locator("main > header")).toBeVisible();
   const topControl =
     testInfo.project.name === "mobile"
       ? page.getByRole("button", { name: "Open tasks" })
@@ -214,7 +217,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   if (testInfo.project.name !== "mobile") {
     await page.getByRole("button", { name: "Collapse sidebar" }).click();
     await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
-    await expect(page.locator("main > header")).toBeVisible();
+    await expect(page.locator("main > header")).toHaveCount(0);
     await page.getByRole("button", { name: "Expand sidebar" }).click();
   }
 
