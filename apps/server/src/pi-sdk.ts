@@ -528,22 +528,19 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       sessionManager: SessionManager.inMemory(cwd),
     });
     const commands: AdapterWorkspaceInfo["commands"] = [];
+    const commandNames = new Set<string>();
+    const addCommand = (name: string, description?: string) => {
+      if (commandNames.has(name)) return;
+      commandNames.add(name);
+      commands.push({ name, ...(description ? { description } : {}) });
+    };
     try {
       for (const command of result.session.extensionRunner.getRegisteredCommands())
-        commands.push({
-          name: command.invocationName,
-          ...(command.description ? { description: command.description } : {}),
-        });
+        addCommand(command.invocationName, command.description);
       for (const prompt of result.session.promptTemplates)
-        commands.push({
-          name: prompt.name,
-          ...(prompt.description ? { description: prompt.description } : {}),
-        });
+        addCommand(prompt.name, prompt.description);
       for (const skill of result.session.resourceLoader.getSkills().skills)
-        commands.push({
-          name: `skill:${skill.name}`,
-          ...(skill.description ? { description: skill.description } : {}),
-        });
+        addCommand(`skill:${skill.name}`, skill.description);
     } finally {
       result.session.dispose();
     }

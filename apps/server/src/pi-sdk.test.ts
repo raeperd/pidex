@@ -108,6 +108,14 @@ Prepare the current branch for release.
 `,
           );
           await writeFile(
+            path.join(fixture.agentDir, "prompts", "review.md"),
+            `---
+description: Run the review prompt
+---
+Review the current changes with the prompt template.
+`,
+          );
+          await writeFile(
             path.join(fixture.agentDir, "skills", "diagnose", "SKILL.md"),
             `---
 name: diagnose
