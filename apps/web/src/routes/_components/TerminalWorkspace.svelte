@@ -2,11 +2,7 @@
   import "@xterm/xterm/css/xterm.css";
   import { FitAddon } from "@xterm/addon-fit";
   import { Terminal } from "@xterm/xterm";
-  import {
-    safeParse,
-    terminalPrototypeServerMessageSchema,
-    type TerminalPrototypeClientMessage,
-  } from "@pidex/api";
+  import { safeParse, terminalServerMessageSchema, type TerminalClientMessage } from "@pidex/api";
   import type { Attachment } from "svelte/attachments";
   import Icon from "./Icon.svelte";
 
@@ -84,9 +80,8 @@
       terminal.open(element);
 
       const scheme = location.protocol === "https:" ? "wss" : "ws";
-      const socket = new WebSocket(`${scheme}://${location.host}/api/prototype/terminal`);
-      const send = (message: TerminalPrototypeClientMessage) =>
-        socket.send(JSON.stringify(message));
+      const socket = new WebSocket(`${scheme}://${location.host}/api/terminal`);
+      const send = (message: TerminalClientMessage) => socket.send(JSON.stringify(message));
       const input = terminal.onData((data) => {
         if (terminalReady && socket.readyState === WebSocket.OPEN) send({ type: "input", data });
       });
@@ -123,7 +118,6 @@
           status = "live";
           detail = message.cwd;
           fit();
-          terminal.focus();
         } else if (message.type === "exit") {
           status = "exited";
           detail = `Exited with code ${message.code}`;
@@ -156,7 +150,7 @@
   function terminalServerMessage(value: unknown) {
     if (typeof value !== "string") return undefined;
     try {
-      const result = safeParse(terminalPrototypeServerMessageSchema, JSON.parse(value));
+      const result = safeParse(terminalServerMessageSchema, JSON.parse(value));
       return result.success ? result.output : undefined;
     } catch {
       return undefined;
@@ -171,8 +165,8 @@
 <section
   class="relative flex min-h-0 min-w-0 w-full flex-none flex-col overflow-hidden border-t border-[#303030] bg-[#151515] text-[#d7d7d7] max-[900px]:!h-[min(38dvh,300px)]"
   style:height={`${height}px`}
-  aria-label="Terminal prototype"
-  data-terminal-prototype="bottom"
+  aria-label="Terminal"
+  data-terminal="bottom"
 >
   <button
     class="absolute inset-x-0 top-0 z-10 h-1.5 cursor-row-resize border-0 bg-transparent p-0"

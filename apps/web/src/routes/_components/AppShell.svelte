@@ -29,7 +29,7 @@
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
-  import TerminalWorkspacePrototype from "./TerminalWorkspacePrototype.svelte";
+  import TerminalWorkspace from "./TerminalWorkspace.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
   const TASK_PREVIEW_COUNT = 6;
@@ -38,7 +38,6 @@
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
-  const terminalPrototypeEnabled = import.meta.env.VITE_TERMINAL_PROTOTYPE === "1";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
     readonly configuration: ChatConfiguration;
@@ -1334,7 +1333,6 @@
   }
   function globalKeydown(event: KeyboardEvent) {
     if (
-      terminalPrototypeEnabled &&
       snapshot &&
       (event.metaKey || event.ctrlKey) &&
       !event.altKey &&
@@ -1687,7 +1685,7 @@
           <Icon name="sidebar-expand" size={19} />
         </button>
       {/if}
-      {#if terminalPrototypeEnabled && snapshot && !terminalOpen}<button
+      {#if snapshot && !terminalOpen}<button
           class="absolute top-2.5 right-2.5 z-9 inline-grid size-8.5 place-items-center rounded-lg border border-border bg-card text-muted hover:border-border-strong hover:text-foreground"
           onclick={() => (terminalOpen = true)}
           aria-label="Open terminal"
@@ -1737,15 +1735,15 @@
         </div>
         {#if snapshot}
           <div class="flex gap-1">
-            {#if terminalPrototypeEnabled}<button
-                class={`inline-grid size-8 place-items-center rounded-lg border text-muted hover:border-border-strong hover:text-foreground ${terminalOpen ? "border-border-strong bg-secondary text-foreground" : "border-border bg-card"}`}
-                onclick={() => (terminalOpen = !terminalOpen)}
-                aria-label={terminalOpen ? "Close terminal" : "Open terminal"}
-                aria-keyshortcuts="Meta+J Control+J"
-                aria-pressed={terminalOpen}
-                title={`${terminalOpen ? "Close" : "Open"} terminal (⌘J)`}
-                ><Icon name="terminal" size={14} /></button
-              >{/if}
+            <button
+              class={`inline-grid size-8 place-items-center rounded-lg border text-muted hover:border-border-strong hover:text-foreground ${terminalOpen ? "border-border-strong bg-secondary text-foreground" : "border-border bg-card"}`}
+              onclick={() => (terminalOpen = !terminalOpen)}
+              aria-label={terminalOpen ? "Close terminal" : "Open terminal"}
+              aria-keyshortcuts="Meta+J Control+J"
+              aria-pressed={terminalOpen}
+              title={`${terminalOpen ? "Close" : "Open"} terminal (⌘J)`}
+              ><Icon name="terminal" size={14} /></button
+            >
             <button
               class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
               onclick={openRename}
@@ -1841,9 +1839,9 @@
       <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {@render children()}
       </div>
-      {#if terminalPrototypeEnabled && terminalOpen && snapshot}
+      {#if terminalOpen && snapshot}
         {#key snapshot.chatId}
-          <TerminalWorkspacePrototype
+          <TerminalWorkspace
             chatId={snapshot.chatId}
             workspaceName={workspace?.name ?? "terminal"}
             onclose={() => (terminalOpen = false)}
