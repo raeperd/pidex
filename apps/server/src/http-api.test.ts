@@ -11,9 +11,12 @@ import { RPCLink } from "@orpc/client/fetch";
 import {
   pidexApiContract,
   PROTOCOL_VERSION,
+  safeParse,
+  terminalPrototypeServerMessageSchema,
   type ChatSnapshot,
   type PidexApiContractClient,
   type ServerEvent,
+  type TerminalPrototypeServerMessage,
 } from "@pidex/api";
 import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
@@ -59,10 +62,12 @@ describe.sequential("HTTP API endpoints", () => {
   let nonGitWorkspaceId: string;
   let chatId: string;
   let httpUrl: string;
+  let terminalWebsocketUrl: string;
   let websocketUrl: string;
   const originalEnvironment = preserveEnvironment([
     "PIDEX_PROJECT_ROOTS",
     "PIDEX_STATE_DIR",
+    "PIDEX_TERMINAL_PROTOTYPE",
     "PI_CODING_AGENT_DIR",
     "PI_CODING_AGENT_SESSION_DIR",
     "WORKSPACE_ROOTS",
@@ -105,6 +110,7 @@ describe.sequential("HTTP API endpoints", () => {
 
     process.env.PIDEX_PROJECT_ROOTS = tempRoot;
     process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
+    process.env.PIDEX_TERMINAL_PROTOTYPE = "1";
     process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
     process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
@@ -114,6 +120,7 @@ describe.sequential("HTTP API endpoints", () => {
     const address = app.server.address() as AddressInfo;
     httpUrl = `http://127.0.0.1:${address.port}`;
     const rpcUrl = `${httpUrl}/api/rpc`;
+    terminalWebsocketUrl = `ws://127.0.0.1:${address.port}/api/prototype/terminal`;
     websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
@@ -538,6 +545,33 @@ describe.sequential("HTTP API endpoints", () => {
     }
   });
 
+  it("opens a terminal in the task workspace and accepts input", async () => {
+    const socket = await connectSocket(terminalWebsocketUrl);
+    try {
+      const readyMessage = waitForTerminalMessage(socket, (message) => message.type === "ready");
+      socket.send(JSON.stringify({ type: "hello", chatId, cols: 80, rows: 24 }));
+
+      await expect(readyMessage).resolves.toMatchObject({
+        type: "ready",
+        cwd: workspacePath,
+      });
+
+      const output = waitForTerminalOutput(socket, "PIDEX_TERMINAL_OK");
+      const command =
+        process.platform === "win32"
+          ? "echo PIDEX_TERMINAL_OK\r"
+          : "printf 'PIDEX_%s\\n' 'TERMINAL_OK'\r";
+      socket.send(JSON.stringify({ type: "input", data: command }));
+      await expect(output).resolves.toContain("PIDEX_TERMINAL_OK");
+
+      const exited = waitForTerminalMessage(socket, (message) => message.type === "exit");
+      socket.send(JSON.stringify({ type: "kill" }));
+      await expect(exited).resolves.toMatchObject({ type: "exit" });
+    } finally {
+      socket.close();
+    }
+  });
+
   it("chats.rename", async () => {
     const chat = await currentChat();
     const result = await api.chats.rename({ ...actionFor(chat), name: "Renamed through HTTP" });
@@ -632,6 +666,14 @@ function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
 }
 
 async function connectChatSocket(url: string, chatId: string) {
+  const socket = await connectSocket(url);
+  const snapshot = waitForSocketEvent(socket, (event) => event.type === "snapshot");
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, chatId }));
+  await snapshot;
+  return socket;
+}
+
+async function connectSocket(url: string) {
   const socket = new WebSocket(url);
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
@@ -641,10 +683,77 @@ async function connectChatSocket(url: string, chatId: string) {
       resolve();
     });
   });
-  const snapshot = waitForSocketEvent(socket, (event) => event.type === "snapshot");
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, chatId }));
-  await snapshot;
   return socket;
+}
+
+function waitForTerminalMessage(
+  socket: WebSocket,
+  matches: (message: TerminalPrototypeServerMessage) => boolean,
+): Promise<TerminalPrototypeServerMessage> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => finish(new Error("Timed out waiting for terminal message")),
+      5_000,
+    );
+    const onMessage = (data: RawData) => {
+      try {
+        const parsed = safeParse(
+          terminalPrototypeServerMessageSchema,
+          JSON.parse(data.toString()),
+        );
+        if (parsed.success && matches(parsed.output)) finish(undefined, parsed.output);
+      } catch {}
+    };
+    const onClose = () => finish(new Error("Terminal closed before the expected message"));
+    const onError = (error: Error) => finish(error);
+    const finish = (error?: Error, message?: TerminalPrototypeServerMessage) => {
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+      if (error) reject(error);
+      else if (message) resolve(message);
+    };
+    socket.on("message", onMessage);
+    socket.once("close", onClose);
+    socket.once("error", onError);
+  });
+}
+
+function waitForTerminalOutput(socket: WebSocket, expected: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(
+      () => finish(new Error("Timed out waiting for terminal output")),
+      5_000,
+    );
+    const onMessage = (data: RawData) => {
+      try {
+        const parsed = safeParse(
+          terminalPrototypeServerMessageSchema,
+          JSON.parse(data.toString()),
+        );
+        if (!parsed.success) return;
+        if (parsed.output.type === "error") finish(new Error(parsed.output.message));
+        if (parsed.output.type !== "output") return;
+        output += parsed.output.data;
+        if (output.includes(expected)) finish(undefined, output);
+      } catch {}
+    };
+    const onClose = () => finish(new Error("Terminal closed before producing expected output"));
+    const onError = (error: Error) => finish(error);
+    const finish = (error?: Error, result?: string) => {
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+      if (error) reject(error);
+      else if (result) resolve(result);
+    };
+    socket.on("message", onMessage);
+    socket.once("close", onClose);
+    socket.once("error", onError);
+  });
 }
 
 function waitForSocketEvent(
