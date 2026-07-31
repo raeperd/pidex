@@ -64,7 +64,7 @@
       status = "connecting";
       detail = "Opening shell…";
       let disposed = false;
-      let helloSent = false;
+      let terminalReady = false;
       let resizeFrame: number | undefined;
       const terminal = new Terminal({
         cursorBlink: true,
@@ -88,14 +88,14 @@
       const send = (message: TerminalPrototypeClientMessage) =>
         socket.send(JSON.stringify(message));
       const input = terminal.onData((data) => {
-        if (socket.readyState === WebSocket.OPEN) send({ type: "input", data });
+        if (terminalReady && socket.readyState === WebSocket.OPEN) send({ type: "input", data });
       });
 
       function fit() {
         if (disposed || !element.clientWidth || !element.clientHeight) return;
         try {
           fitAddon.fit();
-          if (helloSent && socket.readyState === WebSocket.OPEN)
+          if (terminalReady && socket.readyState === WebSocket.OPEN)
             send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
         } catch {
           // The pane can briefly be zero-sized while resizing.
@@ -113,15 +113,16 @@
       socket.addEventListener("open", () => {
         fit();
         send({ type: "hello", chatId, cols: terminal.cols, rows: terminal.rows });
-        helloSent = true;
       });
       socket.addEventListener("message", (event) => {
         const message = terminalServerMessage(event.data);
         if (!message) return;
         if (message.type === "output") terminal.write(message.data);
         else if (message.type === "ready") {
+          terminalReady = true;
           status = "live";
           detail = message.cwd;
+          fit();
           terminal.focus();
         } else if (message.type === "exit") {
           status = "exited";
@@ -145,7 +146,7 @@
         if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
         observer.disconnect();
         input.dispose();
-        if (socket.readyState === WebSocket.OPEN) send({ type: "kill" });
+        if (terminalReady && socket.readyState === WebSocket.OPEN) send({ type: "kill" });
         socket.close(1000, "Terminal pane closed");
         terminal.dispose();
       };
