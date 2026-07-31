@@ -13,11 +13,11 @@ import {
   pidexApiContract,
   PROTOCOL_VERSION,
   safeParse,
-  terminalPrototypeServerMessageSchema,
+  terminalServerMessageSchema,
   type ChatSnapshot,
   type PidexApiContractClient,
   type ServerEvent,
-  type TerminalPrototypeServerMessage,
+  type TerminalServerMessage,
 } from "@pidex/api";
 import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
@@ -103,7 +103,6 @@ describe.sequential("HTTP API endpoints", () => {
 
     vi.stubEnv("PIDEX_PROJECT_ROOTS", tempRoot);
     vi.stubEnv("PIDEX_STATE_DIR", path.join(tempRoot, "state"));
-    vi.stubEnv("PIDEX_TERMINAL_PROTOTYPE", "1");
     vi.stubEnv("PI_CODING_AGENT_DIR", path.join(tempRoot, "agent"));
     vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
     vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
@@ -113,7 +112,7 @@ describe.sequential("HTTP API endpoints", () => {
     const address = app.server.address() as AddressInfo;
     httpUrl = `http://127.0.0.1:${address.port}`;
     const rpcUrl = `${httpUrl}/api/rpc`;
-    terminalWebsocketUrl = `ws://127.0.0.1:${address.port}/api/prototype/terminal`;
+    terminalWebsocketUrl = `ws://127.0.0.1:${address.port}/api/terminal`;
     websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
@@ -722,8 +721,8 @@ async function connectSocket(url: string) {
 
 function waitForTerminalMessage(
   socket: WebSocket,
-  matches: (message: TerminalPrototypeServerMessage) => boolean,
-): Promise<TerminalPrototypeServerMessage> {
+  matches: (message: TerminalServerMessage) => boolean,
+): Promise<TerminalServerMessage> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(
       () => finish(new Error("Timed out waiting for terminal message")),
@@ -731,16 +730,13 @@ function waitForTerminalMessage(
     );
     const onMessage = (data: RawData) => {
       try {
-        const parsed = safeParse(
-          terminalPrototypeServerMessageSchema,
-          JSON.parse(data.toString()),
-        );
+        const parsed = safeParse(terminalServerMessageSchema, JSON.parse(data.toString()));
         if (parsed.success && matches(parsed.output)) finish(undefined, parsed.output);
       } catch {}
     };
     const onClose = () => finish(new Error("Terminal closed before the expected message"));
     const onError = (error: Error) => finish(error);
-    const finish = (error?: Error, message?: TerminalPrototypeServerMessage) => {
+    const finish = (error?: Error, message?: TerminalServerMessage) => {
       clearTimeout(timeout);
       socket.off("message", onMessage);
       socket.off("close", onClose);
@@ -763,10 +759,7 @@ function waitForTerminalOutput(socket: WebSocket, expected: string): Promise<str
     );
     const onMessage = (data: RawData) => {
       try {
-        const parsed = safeParse(
-          terminalPrototypeServerMessageSchema,
-          JSON.parse(data.toString()),
-        );
+        const parsed = safeParse(terminalServerMessageSchema, JSON.parse(data.toString()));
         if (!parsed.success) return;
         if (parsed.output.type === "error") finish(new Error(parsed.output.message));
         if (parsed.output.type !== "output") return;

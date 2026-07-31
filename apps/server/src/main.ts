@@ -10,8 +10,8 @@ import { RPCHandler } from "@orpc/server/node";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
 import {
   safeParse,
-  terminalPrototypeClientMessageSchema,
-  type TerminalPrototypeServerMessage,
+  terminalClientMessageSchema,
+  type TerminalServerMessage,
   wsClientMessageSchema,
 } from "@pidex/api";
 import { Context, Effect } from "effect";
@@ -113,16 +113,11 @@ export async function createPidexApplication() {
       }
     };
     const chatWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-    const terminalPrototypeWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-    const terminalPrototypeEnabled = process.env.PIDEX_TERMINAL_PROTOTYPE === "1";
+    const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
     const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
       const route = new URL(req.url ?? "/", "http://localhost").pathname;
       const target =
-        route === "/api/ws"
-          ? chatWss
-          : terminalPrototypeEnabled && route === "/api/prototype/terminal"
-            ? terminalPrototypeWss
-            : undefined;
+        route === "/api/ws" ? chatWss : route === "/api/terminal" ? terminalWss : undefined;
       if (!target) return false;
       try {
         runtime.runSync(validateRequest(req));
@@ -160,17 +155,14 @@ export async function createPidexApplication() {
       }, 20_000);
       socket.once("close", () => clearInterval(timer));
     });
-    terminalPrototypeWss.on("connection", (socket) => {
-      const send = (message: TerminalPrototypeServerMessage) =>
-        socket.send(JSON.stringify(message));
-      // Prototype question: can a task-scoped xterm surface feel native while a real PTY stays
-      // behind Pidex's existing server boundary?
+    terminalWss.on("connection", (socket) => {
+      const send = (message: TerminalServerMessage) => socket.send(JSON.stringify(message));
       let terminal: pty.IPty | undefined;
       let starting = false;
 
       socket.on("message", (data) => {
-        const message = parseTerminalPrototypeMessage(data);
-        if (!message) return socket.close(1008, "Invalid terminal prototype message");
+        const message = parseTerminalMessage(data);
+        if (!message) return socket.close(1008, "Invalid terminal message");
         if (message.type === "hello") {
           if (terminal || starting) return socket.close(1008, "Terminal already started");
           starting = true;
@@ -238,7 +230,7 @@ export async function createPidexApplication() {
         try {
           terminal?.kill();
         } catch {
-          // The prototype PTY may already have exited.
+          // The PTY may already have exited.
         }
         terminal = undefined;
       });
@@ -251,7 +243,7 @@ export async function createPidexApplication() {
         if (closed) return;
         closed = true;
         for (const socket of chatWss.clients) socket.close(1001, "Server stopping");
-        for (const socket of terminalPrototypeWss.clients) socket.close(1001, "Server stopping");
+        for (const socket of terminalWss.clients) socket.close(1001, "Server stopping");
         await runtime.dispose();
       },
       manager,
@@ -300,9 +292,9 @@ function parseClientMessage(data: RawData) {
   }
 }
 
-function parseTerminalPrototypeMessage(data: RawData) {
+function parseTerminalMessage(data: RawData) {
   try {
-    const result = safeParse(terminalPrototypeClientMessageSchema, JSON.parse(data.toString()));
+    const result = safeParse(terminalClientMessageSchema, JSON.parse(data.toString()));
     return result.success ? result.output : undefined;
   } catch {
     return undefined;

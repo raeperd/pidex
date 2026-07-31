@@ -153,7 +153,7 @@ async function installFakeWebSocket(page: Page) {
       close: () => void;
     };
 
-    const makeFakeWebSocket = (): FakeWebSocket => {
+    const makeFakeWebSocket = (url: string | URL): FakeWebSocket => {
       const socket = Object.assign(new EventTarget(), {
         readyState: 0,
         send() {},
@@ -164,7 +164,8 @@ async function installFakeWebSocket(page: Page) {
         },
       });
       const scope = globalThis as typeof globalThis & { pidexTestSocket?: FakeWebSocket };
-      scope.pidexTestSocket = socket;
+      if (new URL(String(url), location.href).pathname === "/api/ws")
+        scope.pidexTestSocket = socket;
       setTimeout(() => {
         socket.readyState = OPEN;
         socket.dispatchEvent(new Event("open"));
@@ -174,8 +175,8 @@ async function installFakeWebSocket(page: Page) {
 
     Object.defineProperty(globalThis, "WebSocket", {
       configurable: true,
-      value: function () {
-        return makeFakeWebSocket();
+      value: function (url: string | URL) {
+        return makeFakeWebSocket(url);
       },
     });
   });

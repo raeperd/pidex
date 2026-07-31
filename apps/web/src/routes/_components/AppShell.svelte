@@ -91,7 +91,7 @@
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
-  import TerminalWorkspacePrototype from "./TerminalWorkspacePrototype.svelte";
+  import TerminalWorkspace from "./TerminalWorkspace.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
   import Toast from "./Toast.svelte";
 
@@ -116,7 +116,6 @@
     "min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground";
   const dialogInputClass =
     "w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground";
-  const terminalPrototypeEnabled = import.meta.env.VITE_TERMINAL_PROTOTYPE === "1";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
     readonly configuration: ChatConfiguration;
@@ -1517,7 +1516,6 @@
   }
   function globalKeydown(event: KeyboardEvent) {
     if (
-      terminalPrototypeEnabled &&
       snapshot &&
       (event.metaKey || event.ctrlKey) &&
       !event.altKey &&
@@ -1950,22 +1948,19 @@
         </div>
         {#if snapshot}
           <div class="flex gap-1">
-            {#if terminalPrototypeEnabled}
-              <span class="icon-tooltip relative inline-flex">
-                <button
-                  class={`inline-grid size-8 place-items-center rounded-lg border text-muted hover:border-border-strong hover:text-foreground ${terminalOpen ? "border-border-strong bg-secondary text-foreground" : "border-border bg-card"}`}
-                  onclick={() => (terminalOpen = !terminalOpen)}
-                  aria-label={terminalOpen ? "Close terminal" : "Open terminal"}
-                  aria-keyshortcuts="Meta+J Control+J"
-                  aria-pressed={terminalOpen}
-                  ><Icon name="terminal" size={14} /></button
-                >
-                <span
-                  class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
-                  role="tooltip">{terminalOpen ? "Close" : "Open"} terminal (⌘J)</span
-                >
-              </span>
-            {/if}
+            <span class="icon-tooltip relative inline-flex">
+              <button
+                class={`inline-grid size-8 place-items-center rounded-lg border text-muted hover:border-border-strong hover:text-foreground ${terminalOpen ? "border-border-strong bg-secondary text-foreground" : "border-border bg-card"}`}
+                onclick={() => (terminalOpen = !terminalOpen)}
+                aria-label={terminalOpen ? "Close terminal" : "Open terminal"}
+                aria-keyshortcuts="Meta+J Control+J"
+                aria-pressed={terminalOpen}><Icon name="terminal" size={14} /></button
+              >
+              <span
+                class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+                role="tooltip">{terminalOpen ? "Close" : "Open"} terminal (⌘J)</span
+              >
+            </span>
             <span class="icon-tooltip relative inline-flex">
               <button
                 class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
@@ -2050,9 +2045,9 @@
       <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {@render children()}
       </div>
-      {#if terminalPrototypeEnabled && terminalOpen && snapshot}
+      {#if terminalOpen && snapshot}
         {#key snapshot.chatId}
-          <TerminalWorkspacePrototype
+          <TerminalWorkspace
             chatId={snapshot.chatId}
             workspaceName={workspace?.name ?? "terminal"}
             onclose={() => (terminalOpen = false)}

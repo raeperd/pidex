@@ -225,7 +225,7 @@ export const wsClientMessageSchema = v.variant("type", [
   v.object({ type: v.literal("ack"), eventId: positiveInteger() }),
   v.object({ type: v.literal("pong") }),
 ]);
-export const terminalPrototypeClientMessageSchema = v.variant("type", [
+export const terminalClientMessageSchema = v.variant("type", [
   v.object({
     type: v.literal("hello"),
     chatId: idSchema,
@@ -240,7 +240,7 @@ export const terminalPrototypeClientMessageSchema = v.variant("type", [
   }),
   v.object({ type: v.literal("kill") }),
 ]);
-export const terminalPrototypeServerMessageSchema = v.variant("type", [
+export const terminalServerMessageSchema = v.variant("type", [
   v.object({ type: v.literal("ready"), shell: boundedString(4096), cwd: boundedString(4096) }),
   v.object({ type: v.literal("output"), data: boundedString(1024 * 1024) }),
   v.object({ type: v.literal("exit"), code: v.pipe(v.number(), v.safeInteger()) }),
@@ -384,12 +384,8 @@ export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
 export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
 export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
 export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
-export type TerminalPrototypeClientMessage = v.InferOutput<
-  typeof terminalPrototypeClientMessageSchema
->;
-export type TerminalPrototypeServerMessage = v.InferOutput<
-  typeof terminalPrototypeServerMessageSchema
->;
+export type TerminalClientMessage = v.InferOutput<typeof terminalClientMessageSchema>;
+export type TerminalServerMessage = v.InferOutput<typeof terminalServerMessageSchema>;
 
 function boundedString(maximum: number) {
   return v.pipe(v.string(), v.maxLength(maximum));
