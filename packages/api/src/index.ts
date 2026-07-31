@@ -225,6 +225,27 @@ export const wsClientMessageSchema = v.variant("type", [
   v.object({ type: v.literal("ack"), eventId: positiveInteger() }),
   v.object({ type: v.literal("pong") }),
 ]);
+export const terminalPrototypeClientMessageSchema = v.variant("type", [
+  v.object({
+    type: v.literal("hello"),
+    chatId: idSchema,
+    cols: v.pipe(v.number(), v.safeInteger(), v.minValue(2), v.maxValue(500)),
+    rows: v.pipe(v.number(), v.safeInteger(), v.minValue(1), v.maxValue(300)),
+  }),
+  v.object({ type: v.literal("input"), data: boundedString(64 * 1024) }),
+  v.object({
+    type: v.literal("resize"),
+    cols: v.pipe(v.number(), v.safeInteger(), v.minValue(2), v.maxValue(500)),
+    rows: v.pipe(v.number(), v.safeInteger(), v.minValue(1), v.maxValue(300)),
+  }),
+  v.object({ type: v.literal("kill") }),
+]);
+export const terminalPrototypeServerMessageSchema = v.variant("type", [
+  v.object({ type: v.literal("ready"), shell: boundedString(4096), cwd: boundedString(4096) }),
+  v.object({ type: v.literal("output"), data: boundedString(1024 * 1024) }),
+  v.object({ type: v.literal("exit"), code: v.pipe(v.number(), v.safeInteger()) }),
+  v.object({ type: v.literal("error"), message: boundedString(4096) }),
+]);
 const openWorkspaceSchema = v.object({
   path: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
   remember: v.optional(v.boolean()),
@@ -363,6 +384,12 @@ export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
 export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
 export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
 export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
+export type TerminalPrototypeClientMessage = v.InferOutput<
+  typeof terminalPrototypeClientMessageSchema
+>;
+export type TerminalPrototypeServerMessage = v.InferOutput<
+  typeof terminalPrototypeServerMessageSchema
+>;
 
 function boundedString(maximum: number) {
   return v.pipe(v.string(), v.maxLength(maximum));

@@ -12,6 +12,7 @@ allowBuilds:
   electron-winstaller: false
   esbuild: true
   msgpackr-extract: false
+  node-pty: true
   protobufjs: false
 
 packageExtensions:
