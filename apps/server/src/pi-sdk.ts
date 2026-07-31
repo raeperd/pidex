@@ -517,8 +517,36 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    const { trust, loader, modelRuntime, sessionDir } = await services(cwd);
+    const { agentDir, settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
+    const result = await createAgentSession({
+      cwd,
+      agentDir,
+      settingsManager: settings,
+      resourceLoader: loader,
+      modelRuntime,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    const commands: AdapterWorkspaceInfo["commands"] = [];
+    try {
+      for (const command of result.session.extensionRunner.getRegisteredCommands())
+        commands.push({
+          name: command.invocationName,
+          ...(command.description ? { description: command.description } : {}),
+        });
+      for (const prompt of result.session.promptTemplates)
+        commands.push({
+          name: prompt.name,
+          ...(prompt.description ? { description: prompt.description } : {}),
+        });
+      for (const skill of result.session.resourceLoader.getSkills().skills)
+        commands.push({
+          name: `skill:${skill.name}`,
+          ...(skill.description ? { description: skill.description } : {}),
+        });
+    } finally {
+      result.session.dispose();
+    }
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
       ...loader
         .getSkills()
@@ -557,10 +585,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       trusted: trust.trusted,
       protectedResourcesSkipped: trust.skipped,
       resourceDiagnostics: diagnostics,
-      commands: loader.getPrompts().prompts.map((prompt) => ({
-        name: prompt.name,
-        ...(prompt.description ? { description: prompt.description } : {}),
-      })),
+      commands,
     };
   }
 

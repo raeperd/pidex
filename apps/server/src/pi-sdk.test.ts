@@ -81,6 +81,65 @@ describe("Effect Pi adapter", () => {
 });
 
 describe("Pi SDK Effect service", () => {
+  it.effect("discovers Pi extension, prompt template, and skill commands", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        yield* Effect.tryPromise(async () => {
+          await mkdir(path.join(fixture.agentDir, "extensions"), { recursive: true });
+          await mkdir(path.join(fixture.agentDir, "prompts"), { recursive: true });
+          await mkdir(path.join(fixture.agentDir, "skills", "diagnose"), { recursive: true });
+          await writeFile(
+            path.join(fixture.agentDir, "extensions", "review.ts"),
+            `export default function (pi) {
+  pi.registerCommand("review", {
+    description: "Review the current changes",
+    handler: async () => {},
+  });
+}
+`,
+          );
+          await writeFile(
+            path.join(fixture.agentDir, "prompts", "release.md"),
+            `---
+description: Prepare a release
+---
+Prepare the current branch for release.
+`,
+          );
+          await writeFile(
+            path.join(fixture.agentDir, "skills", "diagnose", "SKILL.md"),
+            `---
+name: diagnose
+description: Diagnose a failing command
+---
+Diagnose the failure before proposing a fix.
+`,
+          );
+        });
+        const pi = makePiSdkService(
+          makePiSdk({
+            agentDir: fixture.agentDir,
+            sessionDir: path.join(fixture.agentDir, "sessions"),
+          }),
+        );
+
+        const workspace = yield* pi.inspectWorkspace(fixture.cwd);
+
+        assert.deepEqual(
+          workspace.commands.filter((command) =>
+            ["review", "release", "skill:diagnose"].includes(command.name),
+          ),
+          [
+            { name: "review", description: "Review the current changes" },
+            { name: "release", description: "Prepare a release" },
+            { name: "skill:diagnose", description: "Diagnose a failing command" },
+          ],
+        );
+      }),
+    ),
+  );
+
   it.effect("opens a real Pi session inside an Effect scope", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -317,7 +376,6 @@ describe("Pi SDK Effect service", () => {
 
         const workspace = yield* pi.inspectWorkspace(fixture.cwd);
         assert.deepEqual(workspace.sessions, []);
-        assert.deepEqual(workspace.commands, []);
         assert.isTrue(workspace.trusted);
 
         const error = yield* pi

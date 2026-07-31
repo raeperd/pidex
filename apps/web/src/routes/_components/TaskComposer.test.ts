@@ -68,6 +68,31 @@ describe("slashCommandSuggestions", () => {
     ).toEqual([{ name: "compact", description: "Manually compact the session context" }]);
   });
 
+  it("fuzzy matches and ranks commands like Pi's terminal composer", () => {
+    expect(
+      slashCommandSuggestions("/rv", [
+        { name: "resolve", description: "Resolve comments" },
+        { name: "review", description: "Review the current changes" },
+        { name: "release", description: "Prepare a release" },
+      ]),
+    ).toEqual([
+      { name: "review", description: "Review the current changes" },
+      { name: "resolve", description: "Resolve comments" },
+    ]);
+  });
+
+  it("uses Pi's alphanumeric fallback when matching commands", () => {
+    expect(slashCommandSuggestions("/review2", [{ name: "2-review" }])).toEqual([
+      { name: "2-review" },
+    ]);
+  });
+
+  it("matches Pi's slash-separated fuzzy query tokens", () => {
+    expect(slashCommandSuggestions("/skill/diag", [{ name: "skill:diagnose" }])).toEqual([
+      { name: "skill:diagnose" },
+    ]);
+  });
+
   it("renders matching commands above the composer", () => {
     const body = renderComposer("/com", false);
 

@@ -14,10 +14,68 @@
     draft: string,
     commands: ComposerCommand[],
   ): ComposerCommand[] {
-    const match = /^\/([^\s]*)$/.exec(draft);
-    if (!match) return [];
-    const query = match[1].toLowerCase();
-    return commands.filter((command) => command.name.toLowerCase().startsWith(query));
+    const slashMatch = /^\/([^\s]*)$/.exec(draft);
+    if (!slashMatch) return [];
+    const query = slashMatch[1].toLowerCase();
+    if (!query) return commands;
+    return commands
+      .map((command) => ({ command, score: fuzzyCommandScore(query, command.name) }))
+      .filter(
+        (result): result is { command: ComposerCommand; score: number } =>
+          result.score !== undefined,
+      )
+      .toSorted((left, right) => left.score - right.score)
+      .map(({ command }) => command);
+  }
+
+  function fuzzyCommandScore(query: string, text: string): number | undefined {
+    let score = 0;
+    for (const token of query.split(/[\s/]+/).filter(Boolean)) {
+      const tokenScore = fuzzyMatchScore(token, text);
+      if (tokenScore === undefined) return undefined;
+      score += tokenScore;
+    }
+    return score;
+  }
+
+  function fuzzyMatchScore(query: string, text: string): number | undefined {
+    const primaryScore = fuzzyOrderedMatchScore(query.toLowerCase(), text.toLowerCase());
+    if (primaryScore !== undefined) return primaryScore;
+    const alphaNumericMatch = /^(?<letters>[a-z]+)(?<digits>[0-9]+)$/.exec(query);
+    const numericAlphaMatch = /^(?<digits>[0-9]+)(?<letters>[a-z]+)$/.exec(query);
+    const swappedQuery = alphaNumericMatch
+      ? `${alphaNumericMatch.groups?.digits ?? ""}${alphaNumericMatch.groups?.letters ?? ""}`
+      : numericAlphaMatch
+        ? `${numericAlphaMatch.groups?.letters ?? ""}${numericAlphaMatch.groups?.digits ?? ""}`
+        : undefined;
+    if (!swappedQuery) return undefined;
+    const swappedScore = fuzzyOrderedMatchScore(swappedQuery, text.toLowerCase());
+    return swappedScore === undefined ? undefined : swappedScore + 5;
+  }
+
+  function fuzzyOrderedMatchScore(query: string, normalizedText: string): number | undefined {
+    if (query.length > normalizedText.length) return undefined;
+    let queryIndex = 0;
+    let lastMatchIndex = -1;
+    let consecutiveMatches = 0;
+    let score = 0;
+    for (let index = 0; index < normalizedText.length && queryIndex < query.length; index += 1) {
+      if (normalizedText[index] !== query[queryIndex]) continue;
+      const wordBoundary = index === 0 || /[\s\-_./:]/.test(normalizedText[index - 1]);
+      if (lastMatchIndex === index - 1) {
+        consecutiveMatches += 1;
+        score -= consecutiveMatches * 5;
+      } else {
+        consecutiveMatches = 0;
+        if (lastMatchIndex >= 0) score += (index - lastMatchIndex - 1) * 2;
+      }
+      if (wordBoundary) score -= 10;
+      score += index * 0.1;
+      lastMatchIndex = index;
+      queryIndex += 1;
+    }
+    if (queryIndex < query.length) return undefined;
+    return query === normalizedText ? score - 100 : score;
   }
 
   export function completeSlashCommand(command: ComposerCommand): string {
