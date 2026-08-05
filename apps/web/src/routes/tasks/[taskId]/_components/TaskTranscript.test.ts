@@ -1,4 +1,4 @@
-import type { TextItem, ToolItem } from "@pidex/api";
+import type { SkillItem, TextItem, ToolItem } from "@pidex/api";
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
 import {
@@ -81,5 +81,31 @@ describe("TaskTranscript", () => {
     expect(body.indexOf("pwd")).toBeLessThan(body.indexOf("git status"));
     expect(body.indexOf("git status")).toBeLessThan(body.indexOf("find ."));
     expect(body.indexOf("find .")).toBeLessThan(body.indexOf("go test ./..."));
+  });
+
+  it("renders native Pi skill activity with expandable instructions", () => {
+    const skill: SkillItem = {
+      type: "skill",
+      id: "skill-diagnose",
+      name: "diagnose",
+      content: "Diagnose the failure before proposing a fix.",
+      timestamp: "2026-07-30T00:00:00.000Z",
+    };
+
+    const body = render(TaskTranscript, {
+      props: {
+        items: [skill],
+        loadEarlier: async () => {},
+        loadToolOutput: async () => {},
+        loadingEarlier: false,
+        toolElapsedNow: 0,
+        toolOutputs: {},
+        toolTimings: {},
+        transcriptStart: 0,
+      },
+    }).body;
+
+    expect(body).toContain('aria-label="Skill loaded: diagnose"');
+    expect(body).toContain("Diagnose the failure before proposing a fix.");
   });
 });

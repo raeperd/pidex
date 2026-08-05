@@ -1,7 +1,7 @@
 import { oc, type RouterContractClient } from "@orpc/contract";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = z
   .string()
@@ -100,6 +100,13 @@ export const textItemSchema = z.object({
   complete: z.boolean(),
   timestamp: z.string(),
 });
+export const skillItemSchema = z.object({
+  type: z.literal("skill"),
+  id: z.string().max(200),
+  name: z.string().max(64),
+  content: z.string().max(1_000_000),
+  timestamp: z.string(),
+});
 export const toolItemSchema = z.object({
   type: z.literal("tool"),
   id: z.string().max(200),
@@ -119,6 +126,7 @@ export const noticeItemSchema = z.object({
 });
 export const transcriptItemSchema = z.discriminatedUnion("type", [
   textItemSchema,
+  skillItemSchema,
   toolItemSchema,
   noticeItemSchema,
 ]);
@@ -167,7 +175,10 @@ export const chatSnapshotSchema = z.object({
 const eventBase = z.object({ eventId: z.number().int().positive(), chatId: idSchema });
 export const serverEventSchema = z.discriminatedUnion("type", [
   eventBase.extend({ type: z.literal("snapshot"), snapshot: chatSnapshotSchema }),
-  eventBase.extend({ type: z.literal("message"), item: textItemSchema }),
+  eventBase.extend({
+    type: z.literal("message"),
+    item: z.union([textItemSchema, skillItemSchema]),
+  }),
   eventBase.extend({
     type: z.literal("text_delta"),
     itemId: z.string(),
@@ -336,6 +347,7 @@ export type Health = z.infer<typeof healthSchema>;
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
 export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
 export type TextItem = z.infer<typeof textItemSchema>;
+export type SkillItem = z.infer<typeof skillItemSchema>;
 export type ToolItem = z.infer<typeof toolItemSchema>;
 export type NoticeItem = z.infer<typeof noticeItemSchema>;
 export type ExtensionDialog = z.infer<typeof extensionDialogSchema>;

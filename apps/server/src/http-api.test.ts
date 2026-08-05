@@ -76,6 +76,16 @@ describe.sequential("HTTP API endpoints", () => {
     await mkdir(path.join(workspacePath, ".pi"), { recursive: true });
     await mkdir(nonGitWorkspacePath);
     await writeFile(path.join(workspacePath, ".pi", "SYSTEM.md"), "Test system prompt.\n");
+    await mkdir(path.join(tempRoot, "agent", "extensions"), { recursive: true });
+    await writeFile(
+      path.join(tempRoot, "agent", "extensions", "finish.ts"),
+      `export default function (pi) {
+  pi.registerCommand("finish", {
+    handler: async (_args, ctx) => ctx.ui.notify("command finished"),
+  });
+}
+`,
+    );
     await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: repositoryPath });
     await execFileAsync("git", ["add", "."], { cwd: repositoryPath });
     await execFileAsync(
@@ -411,6 +421,26 @@ describe.sequential("HTTP API endpoints", () => {
       "stale_revision",
       409,
     );
+  });
+
+  it("completes an extension command that returns while Pi is idle", async () => {
+    const created = await api.chats.create({ workspaceId });
+
+    await api.chats.sendMessage({
+      ...actionFor(created),
+      text: "/finish",
+      delivery: "normal",
+    });
+
+    await expect
+      .poll(async () => api.chats.get({ chatId: created.chatId }), { timeout: 5_000 })
+      .toMatchObject({ runStatus: "idle", run: { status: "completed" } });
+    await expect(
+      api.chats.transcript({ chatId: created.chatId, before: 1, limit: 50 }),
+    ).resolves.toMatchObject({
+      items: [{ type: "notice", level: "info", text: "command finished" }],
+      total: 1,
+    });
   });
 
   it("chats.abort", async () => {
