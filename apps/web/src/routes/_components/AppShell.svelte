@@ -150,11 +150,10 @@
   let selectedThinkingLevel = $derived(snapshot?.thinkingLevel ?? "medium");
   let startModeEditable = $derived(
     Boolean(
-      snapshot &&
-      taskHasNoTranscript &&
+      ((routePath === "/" && workspace && !snapshot) || (snapshot && taskHasNoTranscript)) &&
       !active &&
       !chatLoading &&
-      !workspaceIsWorktree(snapshot.workspaceId),
+      !workspaceIsWorktree(snapshot?.workspaceId ?? workspace?.id ?? ""),
     ),
   );
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
@@ -662,6 +661,7 @@
   async function newTask(target = workspace, starterPrompt?: StarterPrompt) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
+    let worktree: Workspace | undefined;
     let created: ChatSnapshot | undefined;
     try {
       error = "";
@@ -671,18 +671,40 @@
         expand: false,
       });
       if (!rememberedTarget) return;
-      created = await api.createChat(rememberedTarget.id);
+      const createInWorktree =
+        Boolean(starterPrompt) &&
+        startMode === "worktree" &&
+        !workspaceIsWorktree(rememberedTarget.id);
+      const taskWorkspace = createInWorktree
+        ? (worktree = await api.createWorktree(rememberedTarget.id))
+        : rememberedTarget;
+      if (sequence !== routeSequence && worktree) {
+        await disposeCreatedWorktree(worktree);
+        return;
+      }
+      created = await api.createChat(taskWorkspace.id);
       if (sequence !== routeSequence) {
-        await disposeCreatedTask(created);
+        if (worktree) await disposeCreatedWorktree(worktree, created);
+        else await disposeCreatedTask(created);
         return;
       }
       persistDraft();
+      if (worktree) bootstrap = await api.bootstrap();
+      if (sequence !== routeSequence) {
+        if (worktree) await disposeCreatedWorktree(worktree, created);
+        else await disposeCreatedTask(created);
+        return;
+      }
       chatConnection.close();
-      workspace = rememberedTarget;
-      projectPath = rememberedTarget.path;
-      startMode = workspaceIsWorktree(rememberedTarget.id) ? "worktree" : "local";
-      rememberWorkspace(rememberedTarget);
-      localStorage.setItem("pidex:last-project", rememberedTarget.path);
+      workspace = taskWorkspace;
+      projectPath = taskWorkspace.path;
+      startMode = worktree
+        ? "worktree"
+        : workspaceIsWorktree(taskWorkspace.id)
+          ? "worktree"
+          : "local";
+      rememberWorkspace(taskWorkspace, worktree === undefined);
+      localStorage.setItem("pidex:last-project", taskWorkspace.path);
       snapshot = created;
       draft = starterPrompt?.draft ?? "";
       await afterChat(draft, !starterPrompt, !starterPrompt);
@@ -702,9 +724,12 @@
       }
     } catch (cause) {
       if (sequence !== routeSequence) {
-        if (created) await disposeCreatedTask(created);
+        if (worktree) await disposeCreatedWorktree(worktree, created);
+        else if (created) await disposeCreatedTask(created);
         return;
       }
+      if (worktree && (!created || snapshot?.chatId !== created.chatId))
+        await disposeCreatedWorktree(worktree, created);
       error = cause instanceof Error ? cause.message : "Could not create task";
     } finally {
       if (sequence === routeSequence) chatLoading = false;
