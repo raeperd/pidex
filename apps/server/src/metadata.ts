@@ -559,6 +559,7 @@ export function makeMetadataStore(stateDir?: string) {
               eq(actions.sessionKey, sessionKey),
               eq(actions.runId, runId),
               eq(actions.kind, "prompt"),
+              inArray(actions.status, ["accepted", "running"]),
             ),
           )
           .run();
@@ -568,7 +569,13 @@ export function makeMetadataStore(stateDir?: string) {
             requiresAcknowledgement: status === "interrupted",
             updatedAt: now,
           })
-          .where(and(eq(sessionState.sessionKey, sessionKey), eq(sessionState.runId, runId)))
+          .where(
+            and(
+              eq(sessionState.sessionKey, sessionKey),
+              eq(sessionState.runId, runId),
+              inArray(sessionState.runStatus, ["accepted", "running", "stopping"]),
+            ),
+          )
           .run();
       },
       { behavior: "immediate" },

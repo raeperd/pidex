@@ -3,7 +3,7 @@ import * as v from "valibot";
 
 export { safeParse } from "valibot";
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = v.pipe(
   v.string(),
@@ -104,6 +104,13 @@ export const textItemSchema = v.object({
   complete: v.boolean(),
   timestamp: v.string(),
 });
+export const skillItemSchema = v.object({
+  type: v.literal("skill"),
+  id: boundedString(200),
+  name: boundedString(64),
+  content: boundedString(1_000_000),
+  timestamp: v.string(),
+});
 export const toolItemSchema = v.object({
   type: v.literal("tool"),
   id: boundedString(200),
@@ -123,6 +130,7 @@ export const noticeItemSchema = v.object({
 });
 export const transcriptItemSchema = v.variant("type", [
   textItemSchema,
+  skillItemSchema,
   toolItemSchema,
   noticeItemSchema,
 ]);
@@ -175,7 +183,11 @@ export const serverEventSchema = v.variant("type", [
     type: v.literal("snapshot"),
     snapshot: chatSnapshotSchema,
   }),
-  v.object({ ...eventBase.entries, type: v.literal("message"), item: textItemSchema }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("message"),
+    item: v.union([textItemSchema, skillItemSchema]),
+  }),
   v.object({
     ...eventBase.entries,
     type: v.literal("text_delta"),
@@ -374,6 +386,7 @@ export type Health = v.InferOutput<typeof healthSchema>;
 export type Bootstrap = v.InferOutput<typeof bootstrapSchema>;
 export type TranscriptItem = v.InferOutput<typeof transcriptItemSchema>;
 export type TextItem = v.InferOutput<typeof textItemSchema>;
+export type SkillItem = v.InferOutput<typeof skillItemSchema>;
 export type ToolItem = v.InferOutput<typeof toolItemSchema>;
 export type NoticeItem = v.InferOutput<typeof noticeItemSchema>;
 export type ExtensionDialog = v.InferOutput<typeof extensionDialogSchema>;

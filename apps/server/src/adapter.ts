@@ -4,6 +4,7 @@ import type {
   ExtensionDialog,
   ModelInfo,
   SessionSummary,
+  SkillItem,
   TextItem,
   TranscriptItem,
   ToolItem,
@@ -11,7 +12,7 @@ import type {
 import { Effect, Queue, Scope, Stream } from "effect";
 
 export type AdapterEvent =
-  | { type: "message"; item: TextItem }
+  | { type: "message"; item: TextItem | SkillItem }
   | { type: "delta"; itemId: string; delta: string; channel: "text" | "thinking" }
   | { type: "tool"; item: ToolItem; output?: { text: string; sourceTruncated: boolean } }
   | { type: "queue"; steering: string[]; followUp: string[] }

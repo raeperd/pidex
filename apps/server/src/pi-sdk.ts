@@ -6,6 +6,7 @@ import {
   getAgentDir,
   hasTrustRequiringProjectResources,
   ModelRuntime,
+  parseSkillBlock,
   ProjectTrustStore,
   SessionManager,
   SettingsManager,
@@ -14,7 +15,14 @@ import {
   type ExtensionUIContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { ContextUsage, ExtensionDialog, TextItem, TranscriptItem, ToolItem } from "@pidex/api";
+import type {
+  ContextUsage,
+  ExtensionDialog,
+  SkillItem,
+  TextItem,
+  TranscriptItem,
+  ToolItem,
+} from "@pidex/api";
 import { Effect, Scope } from "effect";
 import {
   acquireAdapterSession,
@@ -84,16 +92,17 @@ function transcriptItems(entries: SessionEntry[]) {
     if (entry.type !== "message") continue;
     const message = entry.message;
     if (message.role === "user" || message.role === "assistant") {
-      const item: TextItem = {
-        type: message.role,
-        id: entry.id,
-        text: textOf(message.content),
-        complete: true,
-        timestamp: entry.timestamp,
-      };
       const thinking = thinkingOf(message.content);
-      if (thinking) item.thinking = thinking;
-      items.push(item);
+      items.push(
+        ...messageItems({
+          type: message.role,
+          id: entry.id,
+          text: textOf(message.content),
+          complete: true,
+          timestamp: entry.timestamp,
+          ...(thinking ? { thinking } : {}),
+        }),
+      );
       if (message.role === "assistant")
         for (const part of message.content) {
           if (part.type !== "toolCall") continue;
@@ -141,6 +150,20 @@ function transcriptItems(entries: SessionEntry[]) {
   return { items, toolOutputs };
 }
 
+function messageItems(input: TextItem): Array<TextItem | SkillItem> {
+  if (input.type !== "user") return [input];
+  const skill = parseSkillBlock(input.text);
+  if (!skill) return [input];
+  const item: SkillItem = {
+    type: "skill",
+    id: `${input.id}-skill`,
+    name: skill.name,
+    content: skill.content,
+    timestamp: input.timestamp,
+  };
+  return skill.userMessage ? [item, { ...input, text: skill.userMessage }] : [item];
+}
+
 function resolvedSessionDir(
   cwd: string,
   agentDir: string,
@@ -178,6 +201,7 @@ function makePiSession(session: AgentSession) {
   const restoredTranscript = transcriptItems(session.sessionManager.buildContextEntries());
   const listeners = new Set<(event: AdapterEvent) => void>();
   const pendingDialogs = new Map<string, (value: string | boolean | null) => void>();
+  let settlementGeneration = 0;
   const unsubscribe = session.subscribe(handle);
   async function bind() {
     await session.bindExtensions({
@@ -221,24 +245,26 @@ function makePiSession(session: AgentSession) {
   function emit(event: AdapterEvent) {
     for (const listener of listeners) listener(event);
   }
+  function emitSettled() {
+    settlementGeneration += 1;
+    emit({ type: "settled" });
+  }
   function handle(event: AgentSessionEvent) {
     if (
       event.type === "message_start" &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
-      emit({
-        type: "message",
-        item: {
-          type: event.message.role,
-          id: messageId(event.message),
-          text: textOf(event.message.content),
-          ...(thinkingOf(event.message.content)
-            ? { thinking: thinkingOf(event.message.content) }
-            : {}),
-          complete: false,
-          timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
-        },
-      });
+      const item: TextItem = {
+        type: event.message.role,
+        id: messageId(event.message),
+        text: textOf(event.message.content),
+        ...(thinkingOf(event.message.content)
+          ? { thinking: thinkingOf(event.message.content) }
+          : {}),
+        complete: false,
+        timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
+      };
+      for (const message of messageItems(item)) emit({ type: "message", item: message });
     } else if (event.type === "message_update") {
       const update = event.assistantMessageEvent;
       if (update.type === "text_delta")
@@ -259,19 +285,17 @@ function makePiSession(session: AgentSession) {
       event.type === "message_end" &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
-      emit({
-        type: "message",
-        item: {
-          type: event.message.role,
-          id: messageId(event.message),
-          text: textOf(event.message.content),
-          ...(thinkingOf(event.message.content)
-            ? { thinking: thinkingOf(event.message.content) }
-            : {}),
-          complete: true,
-          timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
-        },
-      });
+      const item: TextItem = {
+        type: event.message.role,
+        id: messageId(event.message),
+        text: textOf(event.message.content),
+        ...(thinkingOf(event.message.content)
+          ? { thinking: thinkingOf(event.message.content) }
+          : {}),
+        complete: true,
+        timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
+      };
+      for (const message of messageItems(item)) emit({ type: "message", item: message });
       if (event.message.role === "assistant") scheduleContextUsage();
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800);
@@ -305,7 +329,7 @@ function makePiSession(session: AgentSession) {
       emit({ type: "tool", item, output });
     } else if (event.type === "queue_update")
       emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
-    else if (event.type === "agent_settled") emit({ type: "settled" });
+    else if (event.type === "agent_settled") emitSettled();
     else if (event.type === "compaction_start")
       emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
     else if (event.type === "compaction_end") {
@@ -386,7 +410,9 @@ function makePiSession(session: AgentSession) {
     } as unknown as ExtensionUIContext;
   }
   async function prompt(text: string) {
+    const previousSettlement = settlementGeneration;
     await session.prompt(text);
+    if (session.isIdle && settlementGeneration === previousSettlement) emitSettled();
   }
   async function steer(text: string) {
     await session.steer(text);
@@ -517,8 +543,33 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    const { trust, loader, modelRuntime, sessionDir } = await services(cwd);
+    const { agentDir, settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
+    const result = await createAgentSession({
+      cwd,
+      agentDir,
+      settingsManager: settings,
+      resourceLoader: loader,
+      modelRuntime,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    const commands: AdapterWorkspaceInfo["commands"] = [];
+    const commandNames = new Set<string>();
+    const addCommand = (name: string, description?: string) => {
+      if (commandNames.has(name)) return;
+      commandNames.add(name);
+      commands.push({ name, ...(description ? { description } : {}) });
+    };
+    try {
+      for (const command of result.session.extensionRunner.getRegisteredCommands())
+        addCommand(command.invocationName, command.description);
+      for (const prompt of result.session.promptTemplates)
+        addCommand(prompt.name, prompt.description);
+      for (const skill of result.session.resourceLoader.getSkills().skills)
+        addCommand(`skill:${skill.name}`, skill.description);
+    } finally {
+      result.session.dispose();
+    }
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
       ...loader
         .getSkills()
@@ -557,10 +608,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       trusted: trust.trusted,
       protectedResourcesSkipped: trust.skipped,
       resourceDiagnostics: diagnostics,
-      commands: loader.getPrompts().prompts.map((prompt) => ({
-        name: prompt.name,
-        ...(prompt.description ? { description: prompt.description } : {}),
-      })),
+      commands,
     };
   }
 

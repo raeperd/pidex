@@ -81,6 +81,111 @@ describe("Effect Pi adapter", () => {
 });
 
 describe("Pi SDK Effect service", () => {
+  it.effect("discovers Pi extension, prompt template, and skill commands", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        yield* Effect.tryPromise(async () => {
+          await mkdir(path.join(fixture.agentDir, "extensions"), { recursive: true });
+          await mkdir(path.join(fixture.agentDir, "prompts"), { recursive: true });
+          await mkdir(path.join(fixture.agentDir, "skills", "diagnose"), { recursive: true });
+          await writeFile(
+            path.join(fixture.agentDir, "extensions", "review.ts"),
+            `export default function (pi) {
+  pi.registerCommand("review", {
+    description: "Review the current changes",
+    handler: async () => {},
+  });
+}
+`,
+          );
+          await writeFile(
+            path.join(fixture.agentDir, "prompts", "release.md"),
+            `---
+description: Prepare a release
+---
+Prepare the current branch for release.
+`,
+          );
+          await writeFile(
+            path.join(fixture.agentDir, "prompts", "review.md"),
+            `---
+description: Run the review prompt
+---
+Review the current changes with the prompt template.
+`,
+          );
+          await writeFile(
+            path.join(fixture.agentDir, "skills", "diagnose", "SKILL.md"),
+            `---
+name: diagnose
+description: Diagnose a failing command
+---
+Diagnose the failure before proposing a fix.
+`,
+          );
+        });
+        const pi = makePiSdkService(
+          makePiSdk({
+            agentDir: fixture.agentDir,
+            sessionDir: path.join(fixture.agentDir, "sessions"),
+          }),
+        );
+
+        const workspace = yield* pi.inspectWorkspace(fixture.cwd);
+
+        assert.deepEqual(
+          workspace.commands.filter((command) =>
+            ["review", "release", "skill:diagnose"].includes(command.name),
+          ),
+          [
+            { name: "review", description: "Review the current changes" },
+            { name: "release", description: "Prepare a release" },
+            { name: "skill:diagnose", description: "Diagnose a failing command" },
+          ],
+        );
+      }),
+    ),
+  );
+
+  it.effect("settles a prompt handled immediately by an extension command", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        yield* Effect.tryPromise(async () => {
+          await mkdir(path.join(fixture.agentDir, "extensions"), { recursive: true });
+          await writeFile(
+            path.join(fixture.agentDir, "extensions", "finish.ts"),
+            `export default function (pi) {
+  pi.registerCommand("finish", {
+    handler: async (_args, ctx) => ctx.ui.notify("command finished"),
+  });
+}
+`,
+          );
+        });
+        const sdk = makePiSdk({
+          agentDir: fixture.agentDir,
+          sessionDir: path.join(fixture.agentDir, "sessions"),
+        });
+        const commandSession = yield* Effect.acquireRelease(
+          Effect.tryPromise(() => sdk.createSession(fixture.cwd)),
+          (session) => Effect.sync(() => session.dispose()),
+        );
+        const events: AdapterEvent[] = [];
+        const unsubscribe = commandSession.subscribe((event) => events.push(event));
+
+        yield* Effect.tryPromise(() => commandSession.prompt("/finish"));
+        unsubscribe();
+
+        assert.deepEqual(events, [
+          { type: "notice", level: "info", text: "command finished" },
+          { type: "settled" },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("opens a real Pi session inside an Effect scope", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -97,6 +202,79 @@ describe("Pi SDK Effect service", () => {
         assert.strictEqual(session.state.messages.length, 0);
         assert.strictEqual(session.state.isIdle, true);
         assert.include(session.state.nativePath ?? "", fixture.agentDir);
+      }),
+    ),
+  );
+
+  it.effect("restores native Pi skill invocations as skill activity", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* isolatedPiWorkspace;
+        const sessionDir = path.join(fixture.agentDir, "sessions");
+        const manager = SessionManager.create(fixture.cwd, sessionDir);
+        const skillPath = path.join(fixture.agentDir, "skills", "diagnose", "SKILL.md");
+        const userId = manager.appendMessage({
+          role: "user",
+          content: `<skill name="diagnose" location="${skillPath}">
+References are relative to ${path.dirname(skillPath)}.
+
+Diagnose the failure before proposing a fix.
+</skill>
+
+Find the root cause`,
+          timestamp: 1,
+        });
+        const assistantId = manager.appendMessage({
+          role: "assistant",
+          content: [{ type: "text", text: "The root cause is isolated." }],
+          api: "openai-responses",
+          provider: "openai",
+          model: "gpt-5.5",
+          usage: {
+            input: 10,
+            output: 5,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 15,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: 2,
+        });
+        const nativePath = manager.getSessionFile();
+        if (!nativePath) return yield* Effect.die("Persisted session has no file path");
+        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
+
+        const session = yield* pi.resumeSession(fixture.cwd, nativePath);
+
+        assert.deepEqual(
+          session.state.messages.map((item) => ({ ...item, timestamp: "timestamp" })),
+          [
+            {
+              type: "skill",
+              id: `${userId}-skill`,
+              name: "diagnose",
+              content: `References are relative to ${path.dirname(skillPath)}.
+
+Diagnose the failure before proposing a fix.`,
+              timestamp: "timestamp",
+            },
+            {
+              type: "user",
+              id: userId,
+              text: "Find the root cause",
+              complete: true,
+              timestamp: "timestamp",
+            },
+            {
+              type: "assistant",
+              id: assistantId,
+              text: "The root cause is isolated.",
+              complete: true,
+              timestamp: "timestamp",
+            },
+          ],
+        );
       }),
     ),
   );
@@ -317,7 +495,6 @@ describe("Pi SDK Effect service", () => {
 
         const workspace = yield* pi.inspectWorkspace(fixture.cwd);
         assert.deepEqual(workspace.sessions, []);
-        assert.deepEqual(workspace.commands, []);
         assert.isTrue(workspace.trusted);
 
         const error = yield* pi

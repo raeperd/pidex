@@ -350,6 +350,25 @@ describe("metadata store", () => {
     ).toMatchObject({ revision: 4, replayed: false });
   });
 
+  it("does not overwrite a terminal prompt status with a late settlement", async () => {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-settlement-"));
+    store = makeMetadataStore();
+    const request = {
+      actionId: "actionsettle001",
+      clientId: "clientsettle001",
+      expectedRevision: 0,
+      requestDigest: requestDigest({ text: "work" }),
+      sessionKey: "session-settlement",
+    };
+    const accepted = store.acceptPrompt(request);
+    store.markPromptStatus(request.sessionKey, accepted.runId, "running");
+    store.markPromptStatus(request.sessionKey, accepted.runId, "cancelled");
+
+    store.markPromptStatus(request.sessionKey, accepted.runId, "completed");
+
+    expect(store.sessionState(request.sessionKey).run?.status).toBe("cancelled");
+  });
+
   it("rejects conflicting actions without consuming a revision", async () => {
     process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-conflicts-"));
     store = makeMetadataStore();

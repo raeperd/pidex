@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { TranscriptItem, ToolItem } from "@pidex/api";
+  import type { SkillItem, TranscriptItem, ToolItem } from "@pidex/api";
   import { toolCallKind } from "./ToolCall.svelte";
 
   export type TranscriptRow =
@@ -55,6 +55,8 @@
   import { tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import AgentMessage from "./AgentMessage.svelte";
+  import AgentMessageBody from "./AgentMessageBody.svelte";
+  import { parseAgentMessage } from "./AgentMessageParser";
   import type { TaskToolOutput, TaskToolTiming } from "../../../_components/AppShellContext.svelte";
   import Icon from "../../../_components/Icon.svelte";
   import TaskNotice from "./TaskNotice.svelte";
@@ -149,6 +151,32 @@
   </ToolCall>
 {/snippet}
 
+{#snippet skillActivity(item: SkillItem)}
+  <details
+    class="group/skill my-3 rounded-xl border border-border bg-card/50"
+    aria-label={`Skill loaded: ${item.name}`}
+  >
+    <summary
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-[11px] transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+    >
+      <span class="font-bold text-primary">[skill]</span>
+      <strong class="font-semibold text-foreground">{item.name}</strong>
+      <span class="text-faint">loaded</span>
+      <span class="ml-auto text-faint transition-transform group-open/skill:rotate-90"
+        ><Icon name="chevron" size={12} /></span
+      >
+    </summary>
+    <div
+      class="markdown border-t border-border px-3 py-2.5 font-mono text-[12px] leading-[1.55] text-muted [overflow-wrap:anywhere]"
+    >
+      <AgentMessageBody
+        nodes={parseAgentMessage(item.content)}
+        theme={darkMode.current ? "dark" : "light"}
+      />
+    </div>
+  </details>
+{/snippet}
+
 {#snippet toolGroup(row: Extract<TranscriptRow, { kind: "tools" }>)}
   {@const previous = row.items.slice(0, -1)}
   {@const latest = row.items.at(-1)}
@@ -208,6 +236,8 @@
           timestamp={row.item.timestamp}
           theme={darkMode.current ? "dark" : "light"}
         />
+      {:else if row.item.type === "skill"}
+        {@render skillActivity(row.item)}
       {:else if row.item.type === "notice"}
         <TaskNotice level={row.item.level} text={row.item.text} />
       {/if}

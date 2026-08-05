@@ -119,5 +119,19 @@ describe("Pidex API schemas", () => {
         channel: "text",
       }),
     ).toMatchObject({ success: true });
+    expect(
+      safeParse(serverEventSchema, {
+        type: "message",
+        eventId: 2,
+        chatId: "chat_123",
+        item: {
+          type: "skill",
+          id: "skill_123",
+          name: "diagnose",
+          content: "Diagnose the failure before proposing a fix.",
+          timestamp: "2026-08-05T00:00:00.000Z",
+        },
+      }),
+    ).toMatchObject({ success: true });
   });
 });
