@@ -33,7 +33,7 @@
 
   const TASK_PREVIEW_COUNT = 6;
   const SIDEBAR_WIDTH_STORAGE_KEY = "pidex:sidebar-width";
-  const DEFAULT_SIDEBAR_WIDTH = 320;
+  const DEFAULT_SIDEBAR_WIDTH = 272;
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
@@ -1452,8 +1452,8 @@
             draggable="false"
           />
         {/if}
-        <strong class="text-[15px] font-semibold tracking-tight">Pidex</strong>
-        <span class="font-mono text-[9px] leading-none font-medium tracking-[0.16em] text-faint"
+        <strong class="text-heading font-semibold tracking-tight">Pidex</strong>
+        <span class="font-mono text-meta leading-none font-medium tracking-[0.16em] text-faint"
           >LOCAL</span
         >
       </a>
@@ -1475,7 +1475,7 @@
       >
         <Icon name="search" />
         <input
-          class="w-full min-w-0 border-0 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
+          class="w-full min-w-0 border-0 bg-transparent text-ui text-foreground outline-none placeholder:text-muted"
           bind:this={searchInput}
           bind:value={search}
           aria-label="Search projects and tasks"
@@ -1486,7 +1486,7 @@
 
     <section class="flex min-h-0 flex-1 flex-col px-0.5 pb-2">
       <div
-        class="mt-2 flex min-h-9 items-center justify-between px-2 text-[13px] font-medium text-muted"
+        class="mt-2 flex min-h-9 items-center justify-between px-2 text-ui font-medium text-muted"
       >
         <span>Projects</span>
         <button
@@ -1505,11 +1505,11 @@
         {#if visibleProjects.length === 0}
           <div class="flex flex-col items-center gap-2 px-4.5 py-7 text-center text-faint">
             <Icon name={search ? "search" : "folder"} size={18} />
-            <p class="m-0 max-w-45 text-[11.5px] leading-relaxed">
+            <p class="m-0 max-w-45 text-control leading-relaxed">
               {search ? "No matching projects or tasks." : "Add a project to get started."}
             </p>
             {#if !search}<button
-                class="min-h-7 rounded-lg border border-border bg-transparent px-2.5 text-[11px] text-muted hover:border-border-strong hover:text-foreground"
+                class="min-h-7 rounded-lg border border-border bg-transparent px-2.5 text-control text-muted hover:border-border-strong hover:text-foreground"
                 onclick={openProjectPicker}>Add project</button
               >{/if}
           </div>
@@ -1568,11 +1568,11 @@
                     ><Icon name={expanded ? "folder-open" : "folder"} size={17} /></span
                   >
                   <strong
-                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-medium text-foreground"
+                    class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ui font-medium text-foreground"
                     >{projectLabel(project)}</strong
                   >
                   {#if projectLoadingId === project.id}<span
-                      class="flex-none font-mono text-[9.5px] leading-none tracking-wider text-faint max-[900px]:text-[10.5px]"
+                      class="flex-none font-mono text-meta leading-none tracking-wider text-faint max-[900px]:text-meta"
                       >•••</span
                     >{/if}
                 </button>
@@ -1594,13 +1594,13 @@
                   ></span>
                   {#if projectLoadingId === project.id && !loaded}
                     <p
-                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-[12.5px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       Loading tasks…
                     </p>
                   {:else if loaded && shownTasks.length === 0}
                     <p
-                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-[12.5px] text-faint max-[900px]:h-10 max-[900px]:py-2.5"
+                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
                       {search ? "No matching tasks." : "No tasks yet."}
                     </p>
@@ -1608,7 +1608,7 @@
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
                       <button
-                        class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-[13.5px] text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
+                        class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-ui text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => navigateToTask(task.id)}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
@@ -1624,19 +1624,19 @@
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
                         {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-[9.5px] font-semibold text-sky-500 max-[900px]:text-[10.5px]"
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-sky-500 max-[900px]:text-meta"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
                           >{:else}<time
-                            class="flex-none font-mono text-[10.5px] leading-none text-faint tabular-nums"
+                            class="flex-none font-mono text-meta leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
                           >{/if}
                       </button>
                     {/each}
                     {#if hiddenTasks > 0}
                       <button
-                        class="min-h-8 w-full border-0 bg-transparent pr-2.5 pl-[22px] text-left text-[11.5px] text-faint hover:text-foreground max-[900px]:min-h-10"
+                        class="min-h-8 w-full border-0 bg-transparent pr-2.5 pl-[22px] text-left text-control text-faint hover:text-foreground max-[900px]:min-h-10"
                         onclick={() =>
                           (taskLimits = { ...taskLimits, [project.id]: sessionLimit + 10 })}
                         >Show more <span class="ml-1 opacity-65">{hiddenTasks} hidden</span></button
@@ -1716,7 +1716,7 @@
         {#if snapshot}
           <div class="flex gap-1">
             <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
               onclick={openRename}
               disabled={active}
               aria-label="Rename"
@@ -1751,7 +1751,7 @@
           ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
           while disconnected.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold disabled:opacity-40"
+          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
           onclick={retryConnection}
           disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
@@ -1766,7 +1766,7 @@
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold"
+          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
           onclick={acknowledgeInterrupted}>Acknowledge</button
         >
       </div>
@@ -1781,7 +1781,7 @@
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
         >{#if window.pidexDesktop}<button
-            class="flex-none border border-current px-2 py-1.5 text-[10.5px] font-semibold"
+            class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
             onclick={approveProjectTrust}>Review & trust</button
           >{/if}
       </div>
@@ -1827,7 +1827,7 @@
         <Icon name="folder-plus" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold" id="project-dialog-title">Add a project</h2>
+        <h2 class="m-0 text-heading font-semibold" id="project-dialog-title">Add a project</h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
           Choose by project name. Folder paths stay out of the main workspace UI.
         </p>
@@ -1838,7 +1838,7 @@
     >
       <Icon name="search" size={15} />
       <input
-        class="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none"
+        class="min-w-0 flex-1 border-0 bg-transparent p-0 text-ui text-foreground outline-none"
         bind:value={projectQuery}
         aria-label="Filter available projects"
         placeholder="Filter projects"
@@ -1847,13 +1847,13 @@
     </label>
     <div class="flex min-h-12 items-center justify-between gap-3 px-0.5 pt-2.5 pb-2">
       <span class="grid gap-0.5"
-        ><strong class="text-[11.5px] font-semibold text-foreground">Projects</strong><small
-          class="text-[10px] text-faint">{availableProjects.length} folders discovered</small
+        ><strong class="text-control font-semibold text-foreground">Projects</strong><small
+          class="text-meta text-faint">{availableProjects.length} folders discovered</small
         ></span
       >
       {#if (bootstrap?.projectCandidates ?? []).some((candidate) => !projectAdded(candidate))}
         <button
-          class="min-h-7 rounded-lg border border-border bg-transparent px-2 text-[10.5px] font-semibold text-muted hover:border-border-strong hover:text-foreground disabled:opacity-40"
+          class="min-h-7 rounded-lg border border-border bg-transparent px-2 text-meta font-semibold text-muted hover:border-border-strong hover:text-foreground disabled:opacity-40"
           type="button"
           onclick={addAllProjects}
           disabled={projectBatchLoading || projectOrderSaving}
@@ -1866,7 +1866,7 @@
     >
       {#if availableProjects.length === 0}
         <div
-          class="flex min-h-33 flex-col items-center justify-center gap-2 text-[11.5px] text-faint"
+          class="flex min-h-33 flex-col items-center justify-center gap-2 text-control text-faint"
         >
           <Icon name="folder" size={18} /><span
             >{projectQuery ? "No matching projects" : "No project folders were found"}</span
@@ -1882,19 +1882,18 @@
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
             <span
-              class={`grid size-8 flex-none place-items-center rounded-lg border text-[11px] font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
+              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
               >{candidate.name.slice(0, 1).toUpperCase()}</span
             >
             <span class="grid min-w-0 flex-1 gap-1"
-              ><strong
-                class="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-medium"
+              ><strong class="overflow-hidden text-ellipsis whitespace-nowrap text-ui font-medium"
                 >{candidate.name}</strong
-              ><small class="text-[10px] text-faint"
+              ><small class="text-meta text-faint"
                 >{projectAdded(candidate) ? "Added to Pidex" : "Local project"}</small
               ></span
             >
             <span
-              class={`min-w-10 text-right text-[10.5px] font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
+              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
               >{projectAdded(candidate) ? "Open" : "Add"}</span
             >
           </button>
@@ -1904,13 +1903,13 @@
     <div class="mt-3 flex items-center justify-end gap-2">
       {#if window.pidexDesktop}<button
           type="button"
-          class="mr-auto inline-flex min-h-8.5 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
+          class="mr-auto inline-flex min-h-8.5 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground disabled:opacity-40"
           onclick={browseProject}
           disabled={projectBatchLoading || projectOrderSaving}
           ><Icon name="folder" size={14} /> Browse another folder</button
         >{/if}
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground disabled:opacity-40"
+        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground disabled:opacity-40"
         type="button"
         onclick={() => projectDialogElement?.close()}
         disabled={projectBatchLoading}>Done</button
@@ -1943,28 +1942,28 @@
         <Icon name="rename" />
       </div>
       <div>
-        <h2 class="m-0 text-[15px] font-semibold" id="rename-dialog-title">Rename task</h2>
+        <h2 class="m-0 text-heading font-semibold" id="rename-dialog-title">Rename task</h2>
         <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
           Give this task a concise, memorable name.
         </p>
       </div>
     </div>
-    <label class="mb-1.5 block text-[11px] font-medium text-muted" for="session-name"
+    <label class="mb-1.5 block text-control font-medium text-muted" for="session-name"
       >Task name</label
     >
     <input
-      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
       id="session-name"
       bind:value={renameValue}
       autocomplete="off"
     />
     <div class="mt-5 flex justify-end gap-2">
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
+        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
         type="button"
         onclick={() => renameDialogElement?.close()}>Cancel</button
       ><button
-        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
+        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground disabled:opacity-40"
         type="submit"
         disabled={!renameValue.trim()}>Save name</button
       >
@@ -1997,7 +1996,7 @@
           <Icon name="activity" />
         </div>
         <div>
-          <h2 class="m-0 text-[15px] font-semibold" id="extension-dialog-title">
+          <h2 class="m-0 text-heading font-semibold" id="extension-dialog-title">
             {snapshot.extensionDialog.title}
           </h2>
           {#if snapshot.extensionDialog.message}<p
@@ -2009,7 +2008,7 @@
       </div>
       {#if snapshot.extensionDialog.kind === "select"}
         <select
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
           bind:value={dialogValue}
           aria-label="Response"
           >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
@@ -2017,7 +2016,7 @@
             >{/each}</select
         >
       {:else if snapshot.extensionDialog.kind === "confirm"}
-        <label class="flex items-center gap-2 text-[13px] text-foreground"
+        <label class="flex items-center gap-2 text-ui text-foreground"
           ><input
             type="checkbox"
             checked={Boolean(dialogValue)}
@@ -2026,13 +2025,13 @@
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
         <textarea
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
           bind:value={dialogValue}
           aria-label="Response"
           rows="8"></textarea>
       {:else}
         <input
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-[13px] text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
           bind:value={dialogValue}
           aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}
@@ -2040,11 +2039,11 @@
       {/if}
       <div class="mt-5 flex justify-end gap-2">
         <button
-          class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-[11px] font-medium text-muted hover:text-foreground"
+          class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
           type="button"
           onclick={() => answerDialog(snapshot!.extensionDialog!, true)}>Cancel</button
         ><button
-          class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-[11px] font-medium text-primary-foreground"
+          class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground"
           type="submit">Continue</button
         >
       </div>

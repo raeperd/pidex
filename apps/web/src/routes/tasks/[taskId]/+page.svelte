@@ -83,7 +83,7 @@
           <Icon name="activity" size={22} />
         </div>
         <p
-          class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+          class="m-0 mb-2.5 font-mono text-meta leading-none font-semibold tracking-widest text-faint uppercase"
         >
           HOST UNAVAILABLE
         </p>
@@ -127,7 +127,7 @@
           <span class="font-serif text-[26px] leading-none font-bold">π</span>
         </div>
         <p
-          class="m-0 mb-2.5 font-mono text-[10px] leading-none font-semibold tracking-widest text-faint uppercase"
+          class="m-0 mb-2.5 font-mono text-meta leading-none font-semibold tracking-widest text-faint uppercase"
         >
           YOUR PRIVATE PI PROJECT
         </p>

@@ -120,6 +120,13 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
+  it("hides immutable workspace controls for an existing task", () => {
+    const body = renderComposer("", false, false);
+
+    expect(body).not.toContain('aria-label="Task workspace"');
+    expect(body).not.toContain('aria-label="Start in Work locally"');
+  });
+
   it("renders context details without a stats strip or session cost", () => {
     const body = renderComposer("", false);
 
@@ -138,7 +145,7 @@ describe("slashCommandSuggestions", () => {
   });
 });
 
-function renderComposer(draft: string, active: boolean) {
+function renderComposer(draft: string, active: boolean, startModeEditable = true) {
   return render(TaskComposer, {
     props: {
       active,
@@ -176,7 +183,7 @@ function renderComposer(draft: string, active: boolean) {
       send: async () => {},
       setStartMode: () => {},
       startMode: "local",
-      startModeEditable: true,
+      startModeEditable,
       steeringCount: 0,
       stop: async () => {},
     },

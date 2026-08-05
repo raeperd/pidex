@@ -52,7 +52,7 @@
 <article class="group/assistant my-6 min-w-0 px-2 py-1">
   {#if thinking}
     <div
-      class="thinking-markdown mb-2 font-mono text-[12px] leading-[1.55] italic text-faint [overflow-wrap:anywhere]"
+      class="thinking-markdown mb-2 font-sans text-control italic text-faint [overflow-wrap:anywhere]"
     >
       {#if !complete}<span class="mb-2 inline-flex gap-0.5" aria-label="Thinking"
           ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
@@ -64,13 +64,13 @@
     </div>
   {/if}
   <div
-    class="markdown terminal-markdown font-mono text-[12.5px] leading-[1.55] text-foreground/95 [overflow-wrap:anywhere]"
+    class="markdown terminal-markdown font-sans text-body text-foreground/95 [overflow-wrap:anywhere]"
   >
     <AgentMessageBody {nodes} streaming={!complete} {theme} />
   </div>
   {#if complete && text.trim()}
     <footer
-      class="mt-2 flex items-center gap-2 text-[10.5px] text-faint opacity-70 transition-opacity group-hover/assistant:opacity-100 focus-within:opacity-100"
+      class="mt-2 flex items-center gap-2 text-meta text-faint opacity-70 transition-opacity group-hover/assistant:opacity-100 focus-within:opacity-100"
     >
       <span class="group/copy relative inline-flex">
         <button
@@ -82,7 +82,7 @@
           <Icon name={copied ? "check" : "copy"} size={13} />
         </button>
         <span
-          class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-1/2 z-20 -translate-x-1/2 rounded-md border border-border-strong bg-card px-2 py-1 text-[10.5px] leading-none whitespace-nowrap text-foreground opacity-0 shadow-lg transition-opacity duration-100 group-hover/copy:opacity-100 group-focus-within/copy:opacity-100"
+          class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-1/2 z-20 -translate-x-1/2 rounded-md border border-border-strong bg-card px-2 py-1 text-meta leading-none whitespace-nowrap text-foreground opacity-0 shadow-lg transition-opacity duration-100 group-hover/copy:opacity-100 group-focus-within/copy:opacity-100"
           role="tooltip">{copied ? "Copied" : "Copy"}</span
         >
       </span>
@@ -95,20 +95,6 @@
 </article>
 
 <style>
-  .terminal-markdown :global(h1),
-  .terminal-markdown :global(h2),
-  .terminal-markdown :global(h3),
-  .terminal-markdown :global(h4),
-  .terminal-markdown :global(h5),
-  .terminal-markdown :global(h6) {
-    margin: 1.15em 0 0.55em;
-    color: var(--warning);
-    font-size: 1em;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1.55;
-  }
-
   .terminal-markdown :global(p),
   .terminal-markdown :global(ul),
   .terminal-markdown :global(ol) {

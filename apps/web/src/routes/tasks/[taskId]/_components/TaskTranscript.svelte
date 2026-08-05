@@ -128,7 +128,7 @@
   >
     {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
       <button
-        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-40"
+        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary disabled:opacity-40"
         onclick={() => loadToolOutput(item)}
         disabled={toolOutputs[item.resourceId]?.loading}
         >{toolOutputs[item.resourceId]?.loading
@@ -139,12 +139,12 @@
       >
     {/if}
     {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-        class="mt-2 text-[10px] text-faint"
+        class="mt-2 text-meta text-faint"
       >
         The host bounded this output at its safety limit.
       </p>{/if}
     {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-        class="mt-2 text-[10px] text-danger"
+        class="mt-2 text-meta text-danger"
       >
         {toolOutputs[item.resourceId]?.error}
       </p>{/if}
@@ -184,7 +184,7 @@
     {#if previous.length > 0}
       <details class="group/tool-history">
         <summary
-          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-[11px] text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
+          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
         >
           <span class="transition-transform duration-150 group-open/tool-history:rotate-90"
             ><Icon name="chevron" size={12} /></span
@@ -213,10 +213,10 @@
   aria-relevant="additions text"
 >
   <div
-    class="mx-auto w-full max-w-3xl px-2 pt-2 pb-3.5 font-mono text-[12.5px] leading-[1.55] max-[350px]:px-1.5"
+    class="mx-auto w-full max-w-transcript px-2 pt-2 pb-3.5 font-sans text-body max-[350px]:px-1.5"
   >
     {#if transcriptStart > 0}<button
-        class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-[10.5px] text-muted hover:text-foreground disabled:opacity-40"
+        class="mx-auto mb-6 block rounded-full border border-border bg-card px-2.5 py-1.5 text-meta text-muted hover:text-foreground disabled:opacity-40"
         onclick={prependEarlierMessages}
         disabled={loadingEarlier}
         >{loadingEarlier
@@ -246,6 +246,6 @@
 </section>
 
 {#if !nearBottom}<button
-    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10.5px] text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
+    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
     onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
   >{/if}

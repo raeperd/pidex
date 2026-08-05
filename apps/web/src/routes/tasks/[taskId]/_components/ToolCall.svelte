@@ -197,7 +197,7 @@
 
 <div
   class={[
-    "tool-call min-w-0 text-[12px] leading-[1.5]",
+    "tool-call min-w-0 text-control leading-[1.5]",
     header.kind === "shell"
       ? "tool-call--shell rounded-lg bg-secondary/70 px-2 py-2 font-mono"
       : "tool-call--activity font-sans",
@@ -229,7 +229,7 @@
           >{header.range}</span
         >{/if}
     </span>
-    <span class="ml-auto flex flex-none items-center gap-1.5 text-[10.5px] text-faint">
+    <span class="ml-auto flex flex-none items-center gap-1.5 text-meta text-faint">
       {#if timing}<span class="tool-call__timing">{timing}</span>{/if}
       {#if status === "running"}
         <span class="animate-spin text-primary" aria-label="Running"

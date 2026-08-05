@@ -157,13 +157,22 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
 
-  await expect(
-    page.getByRole("heading").filter({ hasText: "What should we work on in " }),
-  ).toBeVisible();
+  const starterHeading = page
+    .getByRole("heading")
+    .filter({ hasText: "What should we work on in " });
+  await expect(starterHeading).toBeVisible();
+  await expect(starterHeading).toHaveCSS(
+    "font-size",
+    testInfo.project.name === "mobile" ? "20px" : "30px",
+  );
+  await expect(starterHeading).toHaveCSS("font-weight", "600");
   await expect(page.getByText("No active task", { exact: true })).toHaveCount(0);
   await expect(page.locator("main > header")).toHaveCount(0);
   const initialPrompt = page.getByLabel("Prompt");
   await expect(initialPrompt).toBeVisible();
+  const starterComposer = page.getByTestId("chat-composer");
+  await expect(starterComposer).toHaveCSS("border-radius", "16px");
+  expect((await starterComposer.boundingBox())?.height).toBeLessThanOrEqual(122);
   await expect(page.getByLabel("Model")).toBeDisabled();
   await expect(page.getByLabel("Thinking level")).toHaveValue("medium");
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
