@@ -170,7 +170,9 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(page.locator("main > header")).toHaveCount(0);
   const initialPrompt = page.getByLabel("Prompt");
   await expect(initialPrompt).toBeVisible();
-  expect((await page.getByTestId("chat-composer").boundingBox())?.height).toBeLessThanOrEqual(122);
+  const starterComposer = page.getByTestId("chat-composer");
+  await expect(starterComposer).toHaveCSS("border-radius", "16px");
+  expect((await starterComposer.boundingBox())?.height).toBeLessThanOrEqual(122);
   await expect(page.getByLabel("Model")).toBeDisabled();
   await expect(page.getByLabel("Thinking level")).toHaveValue("medium");
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();

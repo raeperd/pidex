@@ -88,7 +88,7 @@ const answer = 42;
   const assistantBody = page.locator(".markdown").filter({ hasText: "Rendered result" });
   await expect(transcriptBody).toHaveCSS("max-width", "576px");
   await expect(transcriptBody).toHaveCSS("font-family", /DM Sans/);
-  await expect(userPrompt).toHaveCSS("border-radius", "24px");
+  await expect(userPrompt).toHaveCSS("border-radius", "16px");
   await expect(userPrompt).toHaveCSS("font-family", /DM Sans/);
   await expect
     .poll(() =>
