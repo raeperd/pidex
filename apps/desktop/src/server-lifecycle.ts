@@ -1,10 +1,33 @@
-import { Duration, Effect, Schedule, type Scope } from "effect";
+import { Duration, Effect, Schedule, Stream, type Scope } from "effect";
+import { ChildProcess } from "effect/unstable/process";
 
 export interface DesktopServerError {
   readonly _tag: "DesktopServerError";
   readonly operation: string;
   readonly message: string;
   readonly cause: unknown;
+}
+
+export function makeAuthenticatedServerCommand(
+  executable: string,
+  args: ReadonlyArray<string>,
+  desktopBootstrapCredential: string,
+  options: Omit<ChildProcess.CommandOptions, "additionalFds">,
+) {
+  const environment = { ...options.env };
+  delete environment.PIDEX_ALLOW_ENV_BOOTSTRAP;
+  delete environment.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL;
+  return ChildProcess.make(executable, args, {
+    ...options,
+    env: environment,
+    extendEnv: false,
+    additionalFds: {
+      fd3: {
+        type: "input",
+        stream: Stream.make(new TextEncoder().encode(desktopBootstrapCredential)),
+      },
+    },
+  });
 }
 
 export const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(

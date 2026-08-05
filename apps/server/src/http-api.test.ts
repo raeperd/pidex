@@ -18,10 +18,14 @@ import {
 import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { rpcAuthorization } from "./http-api.js";
 import { createPidexServer } from "./main.js";
 
 const execFileAsync = promisify(execFile);
 let lastRpcResponseStatus: number | undefined;
+let testClientId = "";
+let testCsrfToken = "";
+let testSessionCookie = "";
 
 const coveredEndpoints = [
   "system.health",
@@ -109,16 +113,21 @@ describe.sequential("HTTP API endpoints", () => {
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
     process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
 
-    app = await createPidexServer();
+    app = await createPidexServer({
+      desktopBootstrapCredential: "desktop-bootstrap-test-credential",
+    });
     await listen(app);
     const address = app.server.address() as AddressInfo;
     httpUrl = `http://127.0.0.1:${address.port}`;
     const rpcUrl = `${httpUrl}/api/rpc`;
     websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
-    publicApi = createClient(rpcUrl);
+    testSessionCookie = await createDesktopSession(httpUrl);
+    publicApi = createClient(rpcUrl, undefined, testSessionCookie);
     const bootstrap = await publicApi.system.bootstrap({});
-    api = createClient(rpcUrl, bootstrap.csrfToken);
+    testClientId = bootstrap.clientId;
+    testCsrfToken = bootstrap.csrfToken;
+    api = createClient(rpcUrl, bootstrap.csrfToken, testSessionCookie);
     workspaceId = (await api.workspaces.open({ path: workspacePath, remember: false })).id;
     chatId = (await api.chats.create({ workspaceId })).chatId;
   }, 30_000);
@@ -135,6 +144,15 @@ describe.sequential("HTTP API endpoints", () => {
   it("keeps the endpoint coverage manifest synchronized with the contract", () => {
     expect([...new Set(coveredEndpoints)]).toHaveLength(coveredEndpoints.length);
     expect(contractEndpoints(pidexApiContract).toSorted()).toEqual(coveredEndpoints.toSorted());
+    expect(Object.keys(rpcAuthorization).toSorted()).toEqual(coveredEndpoints.toSorted());
+    expect(rpcAuthorization).toMatchObject({
+      "system.health": "public",
+      "system.bootstrap": "authenticated",
+      "workspaces.open": "desktop",
+      "workspaces.trust": "desktop",
+      "chats.get": "authenticated",
+      "chats.configure": "desktop",
+    });
   });
 
   it("system.health", async () => {
@@ -173,7 +191,13 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("rejects invalid oRPC transport requests", async () => {
     const bootstrap = await publicApi.system.bootstrap({});
-    const invalid = await rawRpcRequest(httpUrl, "chats/create", {}, bootstrap.csrfToken);
+    const invalid = await rawRpcRequest(
+      httpUrl,
+      "chats/create",
+      {},
+      bootstrap.csrfToken,
+      testSessionCookie,
+    );
     expect(invalid.response.status).toBe(400);
     expect(invalid.result).toEqual(
       expect.objectContaining({ code: "BAD_REQUEST", message: "Input validation failed" }),
@@ -183,6 +207,7 @@ describe.sequential("HTTP API endpoints", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        cookie: testSessionCookie,
         "x-pidex-csrf": bootstrap.csrfToken,
       },
       body: "{",
@@ -192,9 +217,13 @@ describe.sequential("HTTP API endpoints", () => {
       expect.objectContaining({ code: "BAD_REQUEST" }),
     );
 
-    const missingCsrf = await rawRpcRequest(httpUrl, "chats/create", {
-      workspaceId: "workspace_12345",
-    });
+    const missingCsrf = await rawRpcRequest(
+      httpUrl,
+      "chats/create",
+      { workspaceId: "workspace_12345" },
+      undefined,
+      testSessionCookie,
+    );
     expect(missingCsrf.response.status).toBe(403);
     expect(missingCsrf.result).toEqual(
       expect.objectContaining({ code: "csrf", message: "Invalid CSRF token" }),
@@ -205,6 +234,7 @@ describe.sequential("HTTP API endpoints", () => {
       "chats/create",
       { workspaceId: "x".repeat(70 * 1024) },
       bootstrap.csrfToken,
+      testSessionCookie,
     );
     expect(oversized.response.status).toBe(413);
     expect(oversized.result).toEqual(expect.objectContaining({ code: "PAYLOAD_TOO_LARGE" }));
@@ -602,7 +632,11 @@ describe.sequential("HTTP API endpoints", () => {
   }
 });
 
-function createClient(url: string, csrfToken?: string): PidexApiContractClient {
+function createClient(
+  url: string,
+  csrfToken?: string,
+  sessionCookie?: string,
+): PidexApiContractClient {
   const endpoint = new URL(url);
   const link = new RPCLink({
     origin: endpoint.origin,
@@ -612,7 +646,10 @@ function createClient(url: string, csrfToken?: string): PidexApiContractClient {
       lastRpcResponseStatus = response.status;
       return response;
     },
-    ...(csrfToken ? { headers: { "x-pidex-csrf": csrfToken } } : {}),
+    headers: {
+      ...(csrfToken ? { "x-pidex-csrf": csrfToken } : {}),
+      ...(sessionCookie ? { cookie: sessionCookie } : {}),
+    },
   });
   return createORPCClient(link);
 }
@@ -625,14 +662,22 @@ async function expectRpcError(operation: Promise<unknown>, code: string, status:
 function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
   return {
     chatId: chat.chatId,
-    clientId: "http_api_test_client",
+    clientId: testClientId,
     actionId: randomUUID().replaceAll("-", ""),
     expectedRevision: chat.revision + revisionOffset,
   };
 }
 
 async function connectChatSocket(url: string, chatId: string) {
-  const socket = new WebSocket(url);
+  const ticketUrl = new URL("/api/auth/websocket-ticket", url);
+  ticketUrl.protocol = ticketUrl.protocol === "wss:" ? "https:" : "http:";
+  const ticketResponse = await fetch(ticketUrl, {
+    method: "POST",
+    headers: { cookie: testSessionCookie, "x-pidex-csrf": testCsrfToken },
+  });
+  const ticketBody: unknown = await ticketResponse.json();
+  if (!isSecretResponse(ticketBody)) throw new Error("Expected a WebSocket ticket");
+  const socket = new WebSocket(`${url}?ticket=${ticketBody.secret}`);
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
     socket.once("error", onError);
@@ -715,15 +760,43 @@ async function rawRpcRequest(
   procedure: string,
   input: unknown,
   csrfToken?: string,
+  sessionCookie?: string,
 ) {
   const headers = new Headers({ "content-type": "application/json" });
   if (csrfToken) headers.set("x-pidex-csrf", csrfToken);
+  if (sessionCookie) headers.set("cookie", sessionCookie);
   const response = await fetch(`${origin}/api/rpc/${procedure}`, {
     method: "POST",
     headers,
     body: JSON.stringify({ json: input }),
   });
   return { response, result: await rawRpcResult(response) };
+}
+
+async function createDesktopSession(origin: string) {
+  const grantResponse = await fetch(`${origin}/api/auth/desktop-grant`, {
+    method: "POST",
+    headers: { authorization: "Bearer desktop-bootstrap-test-credential" },
+  });
+  const grantBody: unknown = await grantResponse.json();
+  if (!isSecretResponse(grantBody)) throw new Error("Expected a desktop grant");
+  const sessionResponse = await fetch(`${origin}/api/auth/desktop-session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ secret: grantBody.secret }),
+  });
+  const cookie = sessionResponse.headers.get("set-cookie")?.split(";", 1)[0];
+  if (!cookie) throw new Error("Expected a desktop session cookie");
+  return cookie;
+}
+
+function isSecretResponse(value: unknown): value is { readonly secret: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "secret" in value &&
+    typeof value.secret === "string"
+  );
 }
 
 async function rawRpcResult(response: Response) {

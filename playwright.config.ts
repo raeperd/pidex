@@ -4,6 +4,8 @@ import path from "node:path";
 const e2ePort = Number(process.env.PIDEX_E2E_PORT ?? 40_000 + (process.pid % 20_000));
 process.env.PIDEX_E2E_PORT = String(e2ePort);
 const e2eOrigin = `http://127.0.0.1:${e2ePort}`;
+const e2eBootstrapCredential = "pidex-e2e-desktop-bootstrap-credential-0001";
+process.env.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL = e2eBootstrapCredential;
 export default defineConfig({
   testDir: "./e2e",
   timeout: 40_000,
@@ -36,6 +38,8 @@ export default defineConfig({
       PIDEX_PROJECT_ROOTS: process.cwd(),
       WORKSPACE_ROOTS: process.cwd(),
       PIDEX_STATE_DIR: path.join(os.tmpdir(), `pidex-e2e-${process.pid}`),
+      PIDEX_ALLOW_ENV_BOOTSTRAP: "1",
+      PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL: e2eBootstrapCredential,
     },
   },
 });

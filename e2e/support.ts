@@ -1,5 +1,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
+const authenticatedRequests = new WeakSet<APIRequestContext>();
+
 async function rememberWorkspace(request: APIRequestContext, workspacePath: string) {
   const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
   expect(bootstrap.response.ok()).toBe(true);
@@ -18,11 +20,38 @@ async function rpcRequest<T = unknown>(
   input: unknown,
   csrfToken?: string,
 ) {
+  await ensureAuthenticated(request);
   const response = await request.post(`/api/rpc/${procedure}`, {
     headers: csrfToken ? { "X-Pidex-CSRF": csrfToken } : undefined,
     data: { json: input },
   });
   return { response, result: ((await response.json()) as { json: T }).json };
+}
+
+async function ensureAuthenticated(request: APIRequestContext) {
+  if (authenticatedRequests.has(request)) return;
+  const bootstrapCredential = process.env.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL;
+  if (!bootstrapCredential) throw new Error("The E2E desktop bootstrap credential is missing");
+  const grantResponse = await request.post("/api/auth/desktop-grant", {
+    headers: { authorization: `Bearer ${bootstrapCredential}` },
+  });
+  if (!grantResponse.ok()) throw new Error("The E2E host rejected its desktop bootstrap");
+  const grant: unknown = await grantResponse.json();
+  if (!hasSecret(grant)) throw new Error("The E2E host returned an invalid desktop grant");
+  const sessionResponse = await request.post("/api/auth/desktop-session", {
+    data: { secret: grant.secret },
+  });
+  if (!sessionResponse.ok()) throw new Error("The E2E host rejected its desktop grant");
+  authenticatedRequests.add(request);
+}
+
+function hasSecret(value: unknown): value is { readonly secret: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "secret" in value &&
+    typeof value.secret === "string"
+  );
 }
 
 async function openTasks(page: Page) {
@@ -51,6 +80,13 @@ async function waitForFakeWebSocket(page: Page) {
 }
 
 async function installFakeWebSocket(page: Page) {
+  await page.route("**/api/auth/websocket-ticket", (route) =>
+    route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      json: { secret: "e2e_fake_websocket_ticket_00000001", expiresAt: Date.now() + 60_000 },
+    }),
+  );
   await page.addInitScript(() => {
     const OPEN = 1;
     const CLOSED = 3;

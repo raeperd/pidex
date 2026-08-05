@@ -1,5 +1,7 @@
 import {
+  authGrantSchema,
   pidexApiContract,
+  safeParse,
   type ActionOutcome,
   type Bootstrap,
   type ChatSnapshot,
@@ -17,13 +19,11 @@ import { ResponseValidationLinkPlugin } from "@orpc/contract/plugins";
 
 type Delivery = "normal" | "steer" | "follow-up";
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
+let desktopSessionEstablished = false;
 
 export function makePidexApiClient() {
   let csrfToken = "";
-
-  const stored = localStorage.getItem("pidex:client-id");
-  const clientId = stored ?? createActionId();
-  if (!stored) localStorage.setItem("pidex:client-id", clientId);
+  let clientId = "";
 
   const link = new RPCLink({
     url: "/api/rpc",
@@ -33,9 +33,23 @@ export function makePidexApiClient() {
   const client: PidexApiContractClient = createORPCClient(link);
 
   async function bootstrap(): Promise<Bootstrap> {
+    await ensureDesktopSession();
     const result = await client.system.bootstrap({});
     csrfToken = result.csrfToken;
+    clientId = result.clientId;
     return result;
+  }
+
+  async function websocketTicket(): Promise<string> {
+    const response = await fetch("/api/auth/websocket-ticket", {
+      method: "POST",
+      headers: { "X-Pidex-CSRF": csrfToken },
+    });
+    if (!response.ok) throw new Error("Pidex could not authorize the live connection");
+    const body: unknown = await response.json();
+    const result = safeParse(authGrantSchema, body);
+    if (!result.success) throw new Error("Pidex returned an invalid live-connection ticket");
+    return result.output.secret;
   }
 
   function openWorkspace(path: string, remember = true): Promise<Workspace> {
@@ -198,6 +212,7 @@ export function makePidexApiClient() {
   return {
     createActionId,
     bootstrap,
+    websocketTicket,
     openWorkspace,
     createWorktree,
     removeWorktree,
@@ -220,6 +235,37 @@ export function makePidexApiClient() {
     answerDialog,
   };
 }
+
+async function ensureDesktopSession() {
+  if (desktopSessionEstablished) return;
+  const grant = await window.pidexDesktop?.takeAuthGrant?.();
+  const bootstrapCredential = grant ?? PIDEX_DEV_BOOTSTRAP_CREDENTIAL;
+  if (!bootstrapCredential) return;
+  const grantResponse = grant
+    ? { secret: grant }
+    : await createDevelopmentGrant(bootstrapCredential);
+  const response = await fetch("/api/auth/desktop-session", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(grantResponse),
+  });
+  if (!response.ok) throw new Error("Pidex could not authenticate this desktop window");
+  desktopSessionEstablished = true;
+}
+
+async function createDevelopmentGrant(bootstrapCredential: string) {
+  const response = await fetch("/api/auth/desktop-grant", {
+    method: "POST",
+    headers: { authorization: `Bearer ${bootstrapCredential}` },
+  });
+  const body: unknown = await response.json();
+  const result = safeParse(authGrantSchema, body);
+  if (!response.ok || !result.success)
+    throw new Error("Pidex could not create a development desktop grant");
+  return result.output;
+}
+
+declare const PIDEX_DEV_BOOTSTRAP_CREDENTIAL: string;
 
 export type PidexApiClient = ReturnType<typeof makePidexApiClient>;
 

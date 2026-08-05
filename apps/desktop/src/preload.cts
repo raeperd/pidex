@@ -4,6 +4,12 @@ const { contextBridge, ipcRenderer } = electron;
 
 contextBridge.exposeInMainWorld("pidexDesktop", {
   usesIntegratedTitleBar: process.platform === "darwin",
-  pickProject: (): Promise<string | null> =>
-    ipcRenderer.invoke("pidex:pick-project") as Promise<string | null>,
+  pickProject: async (): Promise<string | null> => {
+    const value: unknown = await ipcRenderer.invoke("pidex:pick-project");
+    return typeof value === "string" ? value : null;
+  },
+  takeAuthGrant: async (): Promise<string | null> => {
+    const value: unknown = await ipcRenderer.invoke("pidex:take-auth-grant");
+    return typeof value === "string" ? value : null;
+  },
 });

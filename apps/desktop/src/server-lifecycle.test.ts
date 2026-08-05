@@ -1,6 +1,56 @@
-import { assert, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Ref } from "effect";
-import { desktopServerError, superviseServer, waitForServer } from "./server-lifecycle.js";
+import { NodeServices } from "@effect/platform-node";
+import { assert, it, layer } from "@effect/vitest";
+import { Deferred, Effect, Fiber, Ref, Stream } from "effect";
+import {
+  desktopServerError,
+  makeAuthenticatedServerCommand,
+  superviseServer,
+  waitForServer,
+} from "./server-lifecycle.js";
+
+layer(NodeServices.layer)("desktop server bootstrap channel", (test) => {
+  test.effect("passes the credential through fd3 without argv or environment exposure", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const secret = "fd3-only-desktop-bootstrap-credential";
+        const script = [
+          'const fs = require("node:fs")',
+          'const fd3 = fs.readFileSync(3, "utf8")',
+          "process.stdout.write(JSON.stringify({ argv: process.argv, environmentContains: Object.values(process.env).includes(fd3), fd3 }))",
+        ].join(";");
+        const handle = yield* makeAuthenticatedServerCommand(
+          process.execPath,
+          ["-e", script],
+          secret,
+          {
+            env: {
+              PIDEX_ALLOW_ENV_BOOTSTRAP: "1",
+              PIDEX_BOOTSTRAP_PROBE: "1",
+              PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL: secret,
+            },
+            extendEnv: true,
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        const output = yield* handle.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runFold(
+            () => "",
+            (text, chunk) => text + chunk,
+          ),
+        );
+        yield* handle.exitCode;
+        const result: unknown = JSON.parse(output);
+        if (!isBootstrapProbe(result)) throw new Error("Invalid bootstrap probe output");
+
+        assert.deepStrictEqual(result.argv.includes(secret), false);
+        assert.isFalse(result.environmentContains);
+        assert.strictEqual(result.fd3, secret);
+      }),
+    ),
+  );
+});
 
 it.effect("releases the server process when supervision is interrupted", () =>
   Effect.gen(function* () {
@@ -37,3 +87,21 @@ it.effect("reports recent logs after readiness retries are exhausted", () =>
     assert.include(error.message, "server failed");
   }),
 );
+
+function isBootstrapProbe(value: unknown): value is {
+  readonly argv: string[];
+  readonly environmentContains: boolean;
+  readonly fd3: string;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "argv" in value &&
+    Array.isArray(value.argv) &&
+    value.argv.every((argument) => typeof argument === "string") &&
+    "environmentContains" in value &&
+    typeof value.environmentContains === "boolean" &&
+    "fd3" in value &&
+    typeof value.fd3 === "string"
+  );
+}
