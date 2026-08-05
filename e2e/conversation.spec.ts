@@ -80,7 +80,7 @@ const answer = 42;
     },
   });
 
-  await expect(page.getByRole("button", { name: "Start in Work locally" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start in Work locally" })).toHaveCount(0);
 
   await expect(page.getByRole("heading", { name: "Rendered result" })).toBeVisible();
   const transcriptBody = page.getByRole("log").locator(":scope > div");

@@ -380,64 +380,67 @@
         {/each}
       </div>
     {/if}
-    <div
-      class="flex min-h-9 min-w-0 items-center gap-1 border-b border-border px-3 text-control text-muted"
-      aria-label="Task workspace"
-    >
-      <span class="inline-flex min-w-0 flex-none items-center gap-1.5 px-1.5">
-        <Icon name="folder" size={13} />
-        <span class="max-w-40 overflow-hidden text-ellipsis whitespace-nowrap">{projectName}</span>
-      </span>
-      <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
-      <div class="relative flex-none" data-start-menu>
-        <button
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-control font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
-          onclick={() => (startMenuOpen = !startMenuOpen)}
-          disabled={!startModeEditable || active || creatingTask}
-          aria-label={`Start in ${startModeLabel}`}
-          aria-haspopup="menu"
-          aria-expanded={startMenuOpen}
-          title={startModeEditable
-            ? "Choose where to start this task"
-            : `Started in ${startModeLabel}`}
-        >
-          <Icon name={startMode === "worktree" ? "folder-git" : "folder"} size={13} />
-          {creatingTask ? "Creating worktree…" : startModeLabel}
-          {#if startModeEditable}<Icon name="arrow-down" size={11} />{/if}
-        </button>
-        {#if startMenuOpen}
-          <div
-            class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
-            role="menu"
-            aria-label="Start in"
+    {#if startModeEditable || creatingTask}
+      <div
+        class="flex min-h-9 min-w-0 items-center gap-1 border-b border-border px-3 text-control text-muted"
+        aria-label="Task workspace"
+      >
+        <span class="inline-flex min-w-0 flex-none items-center gap-1.5 px-1.5">
+          <Icon name="folder" size={13} />
+          <span class="max-w-40 overflow-hidden text-ellipsis whitespace-nowrap">{projectName}</span
           >
-            <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
-            <button
-              class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
-              role="menuitemradio"
-              aria-checked={startMode === "local"}
-              onclick={() => chooseStartMode("local")}
+        </span>
+        <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
+        <div class="relative flex-none" data-start-menu>
+          <button
+            class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-control font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
+            onclick={() => (startMenuOpen = !startMenuOpen)}
+            disabled={!startModeEditable || active || creatingTask}
+            aria-label={`Start in ${startModeLabel}`}
+            aria-haspopup="menu"
+            aria-expanded={startMenuOpen}
+            title={startModeEditable
+              ? "Choose where to start this task"
+              : `Started in ${startModeLabel}`}
+          >
+            <Icon name={startMode === "worktree" ? "folder-git" : "folder"} size={13} />
+            {creatingTask ? "Creating worktree…" : startModeLabel}
+            {#if startModeEditable}<Icon name="arrow-down" size={11} />{/if}
+          </button>
+          {#if startMenuOpen}
+            <div
+              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
+              role="menu"
+              aria-label="Start in"
             >
-              <Icon name="folder" size={14} />
-              <span class="flex-1">Work locally</span>
-              {#if startMode === "local"}<Icon name="check" size={13} />{/if}
-            </button>
-            <button
-              class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
-              role="menuitemradio"
-              aria-checked={startMode === "worktree"}
-              onclick={() => chooseStartMode("worktree")}
-            >
-              <Icon name="folder-git" size={14} />
-              <span class="flex-1">New worktree</span>
-              {#if startMode === "worktree"}<Icon name="check" size={13} />{/if}
-            </button>
-          </div>
-        {/if}
+              <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
+              <button
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                role="menuitemradio"
+                aria-checked={startMode === "local"}
+                onclick={() => chooseStartMode("local")}
+              >
+                <Icon name="folder" size={14} />
+                <span class="flex-1">Work locally</span>
+                {#if startMode === "local"}<Icon name="check" size={13} />{/if}
+              </button>
+              <button
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                role="menuitemradio"
+                aria-checked={startMode === "worktree"}
+                onclick={() => chooseStartMode("worktree")}
+              >
+                <Icon name="folder-git" size={14} />
+                <span class="flex-1">New worktree</span>
+                {#if startMode === "worktree"}<Icon name="check" size={13} />{/if}
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
-    </div>
+    {/if}
     <textarea
-      class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+      class="block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
       {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
