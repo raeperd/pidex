@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, serverEventSchema, type ServerEvent } from "@pidex/api";
+import { PROTOCOL_VERSION, safeParse, serverEventSchema, type ServerEvent } from "@pidex/api";
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
@@ -101,11 +101,11 @@ export function makeChatConnection(handlers: ChatConnectionHandlers) {
       return;
     }
 
-    const parsed = serverEventSchema.safeParse(raw);
-    if (!parsed.success || parsed.data.chatId !== activeChatId) return;
-    lastEventId = Math.max(lastEventId, parsed.data.eventId);
-    source.send(JSON.stringify({ type: "ack", eventId: parsed.data.eventId }));
-    handlers.onEvent(parsed.data);
+    const parsed = safeParse(serverEventSchema, raw);
+    if (!parsed.success || parsed.output.chatId !== activeChatId) return;
+    lastEventId = Math.max(lastEventId, parsed.output.eventId);
+    source.send(JSON.stringify({ type: "ack", eventId: parsed.output.eventId }));
+    handlers.onEvent(parsed.output);
   }
 
   return { connect, reconnect, disconnect, close };

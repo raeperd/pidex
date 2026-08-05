@@ -8,7 +8,7 @@ import { NodeRuntime } from "@effect/platform-node";
 import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
-import { wsClientMessageSchema } from "@pidex/api";
+import { safeParse, wsClientMessageSchema } from "@pidex/api";
 import { Context, Effect } from "effect";
 import { WebSocketServer, type RawData } from "ws";
 import { Chats, makeApplicationRuntime } from "./app-runtime.js";
@@ -204,8 +204,8 @@ function serveWebApp(res: ServerResponse, route: string, webRoot: string) {
 
 function parseClientMessage(data: RawData) {
   try {
-    const result = wsClientMessageSchema.safeParse(JSON.parse(data.toString()));
-    return result.success ? result.data : undefined;
+    const result = safeParse(wsClientMessageSchema, JSON.parse(data.toString()));
+    return result.success ? result.output : undefined;
   } catch {
     return undefined;
   }

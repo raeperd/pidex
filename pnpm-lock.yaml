@@ -107,7 +107,7 @@ importers:
         version: link:../../packages/api
       drizzle-orm:
         specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(zod@4.1.12)
+        version: 1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.1.12)
       effect:
         specifier: 4.0.0-beta.101
         version: 4.0.0-beta.101
@@ -206,9 +206,9 @@ importers:
       '@orpc/contract':
         specifier: 2.0.0-beta.21
         version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
-      zod:
-        specifier: 4.1.12
-        version: 4.1.12
+      valibot:
+        specifier: 1.4.2
+        version: 1.4.2(typescript@7.0.2)
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -3644,6 +3644,14 @@ packages:
     resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
     hasBin: true
 
+  valibot@1.4.2:
+    resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   vfile-message@4.0.3:
     resolution: {integrity: sha512-QTHzsGd1EhbZs4AsQ20JX1rC3cOlt/IWJruk893DfLRr57lcnOeMaWG4K0JrRta4mIJZKth2Au3mM3u03/JWKw==}
 
@@ -5661,11 +5669,12 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  drizzle-orm@1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(zod@4.1.12):
+  drizzle-orm@1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.1.12):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       effect: 4.0.0-beta.101
       typebox: 1.1.38
+      valibot: 1.4.2(typescript@7.0.2)
       zod: 4.1.12
 
   dunder-proto@1.0.1:
@@ -7137,6 +7146,10 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   uuid@14.0.1: {}
+
+  valibot@1.4.2(typescript@7.0.2):
+    optionalDependencies:
+      typescript: 7.0.2
 
   vfile-message@4.0.3:
     dependencies:
