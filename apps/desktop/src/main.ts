@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { healthSchema, type PidexApiContractClient } from "@pidex/api";
+import { healthSchema, safeParse, type PidexApiContractClient } from "@pidex/api";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
@@ -193,14 +193,14 @@ const checkServerHealth = Effect.tryPromise({
   catch: (cause) => desktopServerError("server.health", "Pidex could not reach its server", cause),
 }).pipe(
   Effect.flatMap((health) => {
-    const result = healthSchema.safeParse(health);
+    const result = safeParse(healthSchema, health);
     return result.success
       ? Effect.void
       : Effect.fail(
           desktopServerError(
             "server.health",
             "Pidex received an invalid health response",
-            result.error,
+            result.issues,
           ),
         );
   }),

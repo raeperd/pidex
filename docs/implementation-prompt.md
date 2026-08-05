@@ -18,7 +18,7 @@ When the documents use different implementation technologies, preserve the behav
 - use Svelte 5, Vite, and Tailwind CSS 4 rather than React;
 - use Node HTTP and WebSocket rather than Express and Server-Sent Events;
 - keep Electron as the server-process supervisor and desktop shell;
-- keep shared browser-safe Zod schemas and types in `packages/api`;
+- keep shared browser-safe Valibot schemas and types in `packages/api`;
 - keep Pi JSONL as the conversation source of truth and use SQLite only for Pidex metadata;
 - do not add features solely because they appear in the PRD or technical reference.
 
@@ -51,7 +51,7 @@ apps/
 └── server/    # HTTP, WebSocket, Pi adapter, SQLite, and local security
 
 packages/
-└── api/       # Browser-safe Zod schemas and inferred protocol types
+└── api/       # Browser-safe Valibot schemas and inferred protocol types
 ```
 
 Maintain this dependency direction:
@@ -108,7 +108,7 @@ Use the technologies fixed by `docs/architecture.md` and the existing manifests:
 - strict TypeScript and native ESM;
 - Electron 41 with a sandboxed, context-isolated renderer;
 - Svelte 5, Vite, and Tailwind CSS 4;
-- Zod 4 for browser-safe API and persisted-data validation;
+- Valibot for browser-safe API validation and Effect Schema for persisted-data validation;
 - Node's built-in HTTP and `node:sqlite` modules, with Drizzle ORM for typed database access;
 - `ws` on the server and native `WebSocket` in the browser;
 - Pi's exact-matched Node SDK;
@@ -138,7 +138,7 @@ Electron must spawn and supervise the compiled server child process, wait for re
 ## Build Order
 
 1. Complete environment discovery and version matching.
-2. Define the shared Zod protocol, then connect the matched Pi SDK.
+2. Define the shared Valibot protocol, then connect the matched Pi SDK.
 3. Complete one end-to-end vertical slice: open project, create session, send, stream through WebSocket, settle, reconnect, restart, and resume.
 4. Add the remaining Pi session controls.
 5. Add local security, responsive polish, production serving, Electron supervision, tests, and documentation.

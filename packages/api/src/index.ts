@@ -1,14 +1,17 @@
 import { oc, type RouterContractClient } from "@orpc/contract";
-import { z } from "zod";
+import * as v from "valibot";
+
+export { safeParse } from "valibot";
 
 export const PROTOCOL_VERSION = 9;
 export const MAX_RECENT_WORKSPACES = 100;
-export const idSchema = z
-  .string()
-  .min(8)
-  .max(128)
-  .regex(/^[A-Za-z0-9_-]+$/);
-export const thinkingLevelSchema = z.enum([
+export const idSchema = v.pipe(
+  v.string(),
+  v.minLength(8),
+  v.maxLength(128),
+  v.regex(/^[A-Za-z0-9_-]+$/),
+);
+export const thinkingLevelSchema = v.picklist([
   "off",
   "minimal",
   "low",
@@ -17,8 +20,8 @@ export const thinkingLevelSchema = z.enum([
   "xhigh",
   "max",
 ]);
-export const runStatusSchema = z.enum(["idle", "running", "stopping", "compacting", "error"]);
-export const actionStatusSchema = z.enum([
+export const runStatusSchema = v.picklist(["idle", "running", "stopping", "compacting", "error"]);
+export const actionStatusSchema = v.picklist([
   "accepted",
   "running",
   "completed",
@@ -26,264 +29,289 @@ export const actionStatusSchema = z.enum([
   "failed",
   "interrupted",
 ]);
-export const runOutcomeSchema = z.object({
+export const runOutcomeSchema = v.object({
   runId: idSchema,
   actionId: idSchema,
   status: actionStatusSchema,
-  requiresAcknowledgement: z.boolean(),
+  requiresAcknowledgement: v.boolean(),
 });
-export const actionOutcomeSchema = z.object({
-  accepted: z.literal(true),
+export const actionOutcomeSchema = v.object({
+  accepted: v.literal(true),
   actionId: idSchema,
   runId: idSchema,
   status: actionStatusSchema,
-  revision: z.number().int().nonnegative(),
-  replayed: z.boolean(),
+  revision: nonnegativeInteger(),
+  replayed: v.boolean(),
 });
-export const modelSchema = z.object({
-  id: z.string().max(200),
-  provider: z.string().max(100),
-  name: z.string().max(200),
-  reasoning: z.boolean(),
+export const modelSchema = v.object({
+  id: boundedString(200),
+  provider: boundedString(100),
+  name: boundedString(200),
+  reasoning: v.boolean(),
 });
-export const sessionSummarySchema = z.object({
+export const sessionSummarySchema = v.object({
   id: idSchema,
-  name: z.string().max(300).optional(),
-  firstMessage: z.string().max(500),
-  createdAt: z.string(),
-  modifiedAt: z.string(),
-  messageCount: z.number().int().nonnegative(),
+  name: v.optional(boundedString(300)),
+  firstMessage: boundedString(500),
+  createdAt: v.string(),
+  modifiedAt: v.string(),
+  messageCount: nonnegativeInteger(),
 });
-export const workspaceSchema = z.object({
+export const workspaceSchema = v.object({
   id: idSchema,
-  path: z.string().max(4096),
-  name: z.string().max(300),
-  trusted: z.boolean().nullable(),
-  protectedResourcesSkipped: z.boolean(),
-  resourceDiagnostics: z
-    .array(z.object({ level: z.enum(["warning", "error"]), message: z.string().max(1000) }))
-    .max(50),
-  models: z.array(modelSchema),
-  sessions: z.array(sessionSummarySchema),
-  commands: z.array(z.object({ name: z.string(), description: z.string().optional() })),
+  path: boundedString(4096),
+  name: boundedString(300),
+  trusted: v.nullable(v.boolean()),
+  protectedResourcesSkipped: v.boolean(),
+  resourceDiagnostics: v.pipe(
+    v.array(v.object({ level: v.picklist(["warning", "error"]), message: boundedString(1000) })),
+    v.maxLength(50),
+  ),
+  models: v.array(modelSchema),
+  sessions: v.array(sessionSummarySchema),
+  commands: v.array(v.object({ name: v.string(), description: v.optional(v.string()) })),
 });
-export const recentWorkspaceSchema = z.object({
+export const recentWorkspaceSchema = v.object({
   id: idSchema,
-  path: z.string().max(4096),
-  sourceWorkspaceId: idSchema.optional(),
-  worktree: z.boolean().optional(),
+  path: boundedString(4096),
+  sourceWorkspaceId: v.optional(idSchema),
+  worktree: v.optional(v.boolean()),
 });
-export const projectCandidateSchema = z.object({
-  name: z.string().min(1).max(300),
-  path: z.string().max(4096),
+export const projectCandidateSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(300)),
+  path: boundedString(4096),
 });
-export const healthSchema = z.object({
-  ok: z.literal(true),
-  protocolVersion: z.literal(PROTOCOL_VERSION),
+export const healthSchema = v.object({
+  ok: v.literal(true),
+  protocolVersion: v.literal(PROTOCOL_VERSION),
 });
-export const bootstrapSchema = z.object({
-  protocolVersion: z.literal(PROTOCOL_VERSION),
-  csrfToken: z.string().min(32),
-  piVersion: z.string().max(100),
-  recentWorkspaces: z.array(recentWorkspaceSchema).max(MAX_RECENT_WORKSPACES),
-  projectCandidates: z.array(projectCandidateSchema).max(200),
-  warning: z.string().max(1000),
+export const bootstrapSchema = v.object({
+  protocolVersion: v.literal(PROTOCOL_VERSION),
+  csrfToken: v.pipe(v.string(), v.minLength(32)),
+  piVersion: boundedString(100),
+  recentWorkspaces: v.pipe(v.array(recentWorkspaceSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
+  projectCandidates: v.pipe(v.array(projectCandidateSchema), v.maxLength(200)),
+  warning: boundedString(1000),
 });
-export const sessionsResponseSchema = z.object({ sessions: z.array(sessionSummarySchema) });
-export const okResponseSchema = z.object({ ok: z.literal(true) });
-export const acceptedResponseSchema = z.object({ accepted: z.literal(true) });
-export const textItemSchema = z.object({
-  type: z.enum(["user", "assistant"]),
-  id: z.string().max(200),
-  text: z.string().max(1_000_000),
-  thinking: z.string().max(1_000_000).optional(),
-  complete: z.boolean(),
-  timestamp: z.string(),
+export const sessionsResponseSchema = v.object({ sessions: v.array(sessionSummarySchema) });
+export const okResponseSchema = v.object({ ok: v.literal(true) });
+export const acceptedResponseSchema = v.object({ accepted: v.literal(true) });
+export const textItemSchema = v.object({
+  type: v.picklist(["user", "assistant"]),
+  id: boundedString(200),
+  text: boundedString(1_000_000),
+  thinking: v.optional(boundedString(1_000_000)),
+  complete: v.boolean(),
+  timestamp: v.string(),
 });
-export const toolItemSchema = z.object({
-  type: z.literal("tool"),
-  id: z.string().max(200),
-  name: z.string().max(200),
-  argumentSummary: z.string().max(1000),
-  state: z.enum(["running", "success", "error"]),
-  preview: z.string().max(16_384),
-  truncated: z.boolean(),
-  resourceId: idSchema.optional(),
-  outputSize: z.number().int().nonnegative().optional(),
+export const toolItemSchema = v.object({
+  type: v.literal("tool"),
+  id: boundedString(200),
+  name: boundedString(200),
+  argumentSummary: boundedString(1000),
+  state: v.picklist(["running", "success", "error"]),
+  preview: boundedString(16_384),
+  truncated: v.boolean(),
+  resourceId: v.optional(idSchema),
+  outputSize: v.optional(nonnegativeInteger()),
 });
-export const noticeItemSchema = z.object({
-  type: z.literal("notice"),
-  id: z.string().max(200),
-  level: z.enum(["info", "warning", "error"]),
-  text: z.string().max(4000),
+export const noticeItemSchema = v.object({
+  type: v.literal("notice"),
+  id: boundedString(200),
+  level: v.picklist(["info", "warning", "error"]),
+  text: boundedString(4000),
 });
-export const transcriptItemSchema = z.discriminatedUnion("type", [
+export const transcriptItemSchema = v.variant("type", [
   textItemSchema,
   toolItemSchema,
   noticeItemSchema,
 ]);
-export const extensionDialogSchema = z.object({
+export const extensionDialogSchema = v.object({
   id: idSchema,
-  kind: z.enum(["select", "confirm", "input", "editor"]),
-  title: z.string().max(500),
-  message: z.string().max(4000).optional(),
-  options: z.array(z.string().max(500)).max(100).optional(),
-  placeholder: z.string().max(500).optional(),
-  prefill: z.string().max(20_000).optional(),
+  kind: v.picklist(["select", "confirm", "input", "editor"]),
+  title: boundedString(500),
+  message: v.optional(boundedString(4000)),
+  options: v.optional(v.pipe(v.array(boundedString(500)), v.maxLength(100))),
+  placeholder: v.optional(boundedString(500)),
+  prefill: v.optional(boundedString(20_000)),
 });
-const statsSchema = z.object({
-  messages: z.number(),
-  toolCalls: z.number(),
-  tokens: z.number(),
-  cost: z.number(),
-  subscription: z.boolean(),
+const statsSchema = v.object({
+  messages: finiteNumber(),
+  toolCalls: finiteNumber(),
+  tokens: finiteNumber(),
+  cost: finiteNumber(),
+  subscription: v.boolean(),
 });
-export const contextUsageSchema = z.object({
-  tokens: z.number().int().nonnegative().nullable(),
-  contextWindow: z.number().int().positive(),
-  percent: z.number().nonnegative().nullable(),
-  totalProcessedTokens: z.number().int().nonnegative(),
-  compactsAutomatically: z.boolean(),
+export const contextUsageSchema = v.object({
+  tokens: v.nullable(nonnegativeInteger()),
+  contextWindow: positiveInteger(),
+  percent: v.nullable(nonnegativeNumber()),
+  totalProcessedTokens: nonnegativeInteger(),
+  compactsAutomatically: v.boolean(),
 });
-export const chatSnapshotSchema = z.object({
+export const chatSnapshotSchema = v.object({
   chatId: idSchema,
   workspaceId: idSchema,
   taskId: idSchema,
-  sessionName: z.string().max(300).optional(),
-  revision: z.number().int().nonnegative(),
-  run: runOutcomeSchema.optional(),
+  sessionName: v.optional(boundedString(300)),
+  revision: nonnegativeInteger(),
+  run: v.optional(runOutcomeSchema),
   runStatus: runStatusSchema,
-  model: z.string().max(300).optional(),
+  model: v.optional(boundedString(300)),
   thinkingLevel: thinkingLevelSchema,
-  items: z.array(transcriptItemSchema).max(200),
-  transcriptStart: z.number().int().nonnegative(),
-  transcriptTotal: z.number().int().nonnegative(),
-  steeringQueue: z.array(z.string().max(20_000)),
-  followUpQueue: z.array(z.string().max(20_000)),
+  items: v.pipe(v.array(transcriptItemSchema), v.maxLength(200)),
+  transcriptStart: nonnegativeInteger(),
+  transcriptTotal: nonnegativeInteger(),
+  steeringQueue: v.array(boundedString(20_000)),
+  followUpQueue: v.array(boundedString(20_000)),
   stats: statsSchema,
-  contextUsage: contextUsageSchema.optional(),
-  extensionDialog: extensionDialogSchema.optional(),
+  contextUsage: v.optional(contextUsageSchema),
+  extensionDialog: v.optional(extensionDialogSchema),
 });
-const eventBase = z.object({ eventId: z.number().int().positive(), chatId: idSchema });
-export const serverEventSchema = z.discriminatedUnion("type", [
-  eventBase.extend({ type: z.literal("snapshot"), snapshot: chatSnapshotSchema }),
-  eventBase.extend({ type: z.literal("message"), item: textItemSchema }),
-  eventBase.extend({
-    type: z.literal("text_delta"),
-    itemId: z.string(),
-    delta: z.string().max(32_768),
-    channel: z.enum(["text", "thinking"]),
+const eventBase = v.object({ eventId: positiveInteger(), chatId: idSchema });
+export const serverEventSchema = v.variant("type", [
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("snapshot"),
+    snapshot: chatSnapshotSchema,
   }),
-  eventBase.extend({ type: z.literal("tool"), item: toolItemSchema }),
-  eventBase.extend({
-    type: z.literal("run_status"),
+  v.object({ ...eventBase.entries, type: v.literal("message"), item: textItemSchema }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("text_delta"),
+    itemId: v.string(),
+    delta: boundedString(32_768),
+    channel: v.picklist(["text", "thinking"]),
+  }),
+  v.object({ ...eventBase.entries, type: v.literal("tool"), item: toolItemSchema }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("run_status"),
     status: runStatusSchema,
-    revision: z.number().int().nonnegative(),
-    run: runOutcomeSchema.optional(),
+    revision: nonnegativeInteger(),
+    run: v.optional(runOutcomeSchema),
   }),
-  eventBase.extend({
-    type: z.literal("queue"),
-    steering: z.array(z.string()),
-    followUp: z.array(z.string()),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("queue"),
+    steering: v.array(v.string()),
+    followUp: v.array(v.string()),
   }),
-  eventBase.extend({ type: z.literal("notice"), item: noticeItemSchema }),
-  eventBase.extend({ type: z.literal("session"), name: z.string().optional(), stats: statsSchema }),
-  eventBase.extend({ type: z.literal("context_usage"), usage: contextUsageSchema }),
-  eventBase.extend({
-    type: z.literal("extension_dialog"),
-    dialog: extensionDialogSchema.optional(),
+  v.object({ ...eventBase.entries, type: v.literal("notice"), item: noticeItemSchema }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("session"),
+    name: v.optional(v.string()),
+    stats: statsSchema,
+  }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("context_usage"),
+    usage: contextUsageSchema,
+  }),
+  v.object({
+    ...eventBase.entries,
+    type: v.literal("extension_dialog"),
+    dialog: v.optional(extensionDialogSchema),
   }),
 ]);
-export const wsClientMessageSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("hello"),
-    protocolVersion: z.literal(PROTOCOL_VERSION),
+export const wsClientMessageSchema = v.variant("type", [
+  v.object({
+    type: v.literal("hello"),
+    protocolVersion: v.literal(PROTOCOL_VERSION),
     chatId: idSchema,
-    lastEventId: z.number().int().nonnegative().optional(),
+    lastEventId: v.optional(nonnegativeInteger()),
   }),
-  z.object({ type: z.literal("ack"), eventId: z.number().int().positive() }),
-  z.object({ type: z.literal("pong") }),
+  v.object({ type: v.literal("ack"), eventId: positiveInteger() }),
+  v.object({ type: v.literal("pong") }),
 ]);
-export const openWorkspaceSchema = z.object({
-  path: z.string().min(1).max(4096),
-  remember: z.boolean().optional(),
+export const openWorkspaceSchema = v.object({
+  path: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
+  remember: v.optional(v.boolean()),
 });
-export const reorderWorkspacesSchema = z.object({
-  workspaceIds: z.array(idSchema).max(MAX_RECENT_WORKSPACES),
+export const reorderWorkspacesSchema = v.object({
+  workspaceIds: v.pipe(v.array(idSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
 });
-export const recentWorkspacesResponseSchema = z.object({
-  recentWorkspaces: z.array(recentWorkspaceSchema).max(MAX_RECENT_WORKSPACES),
+export const recentWorkspacesResponseSchema = v.object({
+  recentWorkspaces: v.pipe(v.array(recentWorkspaceSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
 });
-export const trustWorkspaceSchema = z.object({ trusted: z.boolean() });
-export const createChatSchema = z.object({ workspaceId: idSchema });
-export const resumeChatSchema = z.object({ taskId: idSchema });
-export const actionRequestSchema = z.object({
+export const trustWorkspaceSchema = v.object({ trusted: v.boolean() });
+export const createChatSchema = v.object({ workspaceId: idSchema });
+export const resumeChatSchema = v.object({ taskId: idSchema });
+export const actionRequestSchema = v.object({
   clientId: idSchema,
   actionId: idSchema,
-  expectedRevision: z.number().int().nonnegative(),
+  expectedRevision: nonnegativeInteger(),
 });
-const actionRequestBase = actionRequestSchema;
-export const messageRequestSchema = actionRequestBase.extend({
-  text: z
-    .string()
-    .min(1)
-    .max(20_000)
-    .refine((value) => value.trim().length > 0, "Prompt cannot be blank"),
-  delivery: z.enum(["normal", "steer", "follow-up"]),
-  runId: idSchema.optional(),
+export const messageRequestSchema = v.object({
+  ...actionRequestSchema.entries,
+  text: v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.maxLength(20_000),
+    v.check((value) => value.trim().length > 0, "Prompt cannot be blank"),
+  ),
+  delivery: v.picklist(["normal", "steer", "follow-up"]),
+  runId: v.optional(idSchema),
 });
-export const abortRequestSchema = actionRequestBase.extend({ runId: idSchema });
-export const acknowledgeInterruptedRequestSchema = actionRequestBase.pick({
-  clientId: true,
-  actionId: true,
-  expectedRevision: true,
+export const abortRequestSchema = v.object({ ...actionRequestSchema.entries, runId: idSchema });
+export const acknowledgeInterruptedRequestSchema = v.pick(actionRequestSchema, [
+  "clientId",
+  "actionId",
+  "expectedRevision",
+]);
+export const configRequestSchema = v.pipe(
+  v.object({
+    ...actionRequestSchema.entries,
+    model: v.optional(boundedString(300)),
+    thinkingLevel: v.optional(thinkingLevelSchema),
+  }),
+  v.check(
+    (value) => value.model !== undefined || value.thinkingLevel !== undefined,
+    "At least one configuration field is required",
+  ),
+);
+export const renameRequestSchema = v.object({
+  ...actionRequestSchema.entries,
+  name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
 });
-export const configRequestSchema = actionRequestBase
-  .extend({
-    model: z.string().max(300).optional(),
-    thinkingLevel: thinkingLevelSchema.optional(),
-  })
-  .refine((value) => value.model !== undefined || value.thinkingLevel !== undefined, {
-    message: "At least one configuration field is required",
-  });
-export const renameRequestSchema = actionRequestBase.extend({
-  name: z.string().trim().min(1).max(200),
+export const compactRequestSchema = v.object({
+  ...actionRequestSchema.entries,
+  instructions: v.optional(boundedString(4000)),
 });
-export const compactRequestSchema = actionRequestBase.extend({
-  instructions: z.string().max(4000).optional(),
-});
-export const dialogResponseSchema = actionRequestBase.extend({
+export const dialogResponseSchema = v.object({
+  ...actionRequestSchema.entries,
   requestId: idSchema,
-  value: z.union([z.string().max(20_000), z.boolean(), z.null()]),
+  value: v.union([boundedString(20_000), v.boolean(), v.null()]),
 });
-export const toolOutputChunkSchema = z.object({
+export const toolOutputChunkSchema = v.object({
   resourceId: idSchema,
-  offset: z.number().int().nonnegative(),
-  nextOffset: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative(),
-  text: z.string().max(16_384),
-  complete: z.boolean(),
-  sourceTruncated: z.boolean(),
+  offset: nonnegativeInteger(),
+  nextOffset: nonnegativeInteger(),
+  total: nonnegativeInteger(),
+  text: boundedString(16_384),
+  complete: v.boolean(),
+  sourceTruncated: v.boolean(),
 });
-export const transcriptPageSchema = z.object({
-  items: z.array(transcriptItemSchema).max(100),
-  start: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative(),
+export const transcriptPageSchema = v.object({
+  items: v.pipe(v.array(transcriptItemSchema), v.maxLength(100)),
+  start: nonnegativeInteger(),
+  total: nonnegativeInteger(),
 });
 
-const emptyInputSchema = z.object({});
-const chatIdInputSchema = z.object({ chatId: idSchema });
-const workspaceIdInputSchema = z.object({ workspaceId: idSchema });
-const toolOutputInputSchema = z.object({
+const emptyInputSchema = v.object({});
+const chatIdInputSchema = v.object({ chatId: idSchema });
+const workspaceIdInputSchema = v.object({ workspaceId: idSchema });
+const toolOutputInputSchema = v.object({
   chatId: idSchema,
   resourceId: idSchema,
-  offset: z.number().int().nonnegative().default(0),
-  limit: z.number().int().positive().default(16_384),
+  offset: v.optional(nonnegativeInteger(), 0),
+  limit: v.optional(positiveInteger(), 16_384),
 });
-const transcriptInputSchema = z.object({
+const transcriptInputSchema = v.object({
   chatId: idSchema,
-  before: z.number().int().nonnegative().default(0),
-  limit: z.number().int().min(1).max(100).default(50),
+  before: v.optional(nonnegativeInteger(), 0),
+  limit: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1), v.maxValue(100)), 50),
 });
 
 export const pidexApiContract = {
@@ -297,7 +325,9 @@ export const pidexApiContract = {
     removeWorktree: oc.input(workspaceIdInputSchema).output(okResponseSchema),
     reorder: oc.input(reorderWorkspacesSchema).output(recentWorkspacesResponseSchema),
     sessions: oc.input(workspaceIdInputSchema).output(sessionsResponseSchema),
-    trust: oc.input(trustWorkspaceSchema.extend({ workspaceId: idSchema })).output(workspaceSchema),
+    trust: oc
+      .input(v.object({ ...trustWorkspaceSchema.entries, workspaceId: idSchema }))
+      .output(workspaceSchema),
   },
   chats: {
     create: oc.input(createChatSchema).output(chatSnapshotSchema),
@@ -305,45 +335,73 @@ export const pidexApiContract = {
     get: oc.input(chatIdInputSchema).output(chatSnapshotSchema),
     dispose: oc.input(chatIdInputSchema).output(okResponseSchema),
     sendMessage: oc
-      .input(messageRequestSchema.extend({ chatId: idSchema }))
+      .input(v.object({ ...messageRequestSchema.entries, chatId: idSchema }))
       .output(actionOutcomeSchema),
-    abort: oc.input(abortRequestSchema.extend({ chatId: idSchema })).output(actionOutcomeSchema),
+    abort: oc
+      .input(v.object({ ...abortRequestSchema.entries, chatId: idSchema }))
+      .output(actionOutcomeSchema),
     acknowledgeInterrupted: oc
-      .input(acknowledgeInterruptedRequestSchema.extend({ chatId: idSchema }))
+      .input(v.object({ ...acknowledgeInterruptedRequestSchema.entries, chatId: idSchema }))
       .output(actionOutcomeSchema),
     toolOutput: oc.input(toolOutputInputSchema).output(toolOutputChunkSchema),
     transcript: oc.input(transcriptInputSchema).output(transcriptPageSchema),
     clearQueue: oc
-      .input(actionRequestSchema.extend({ chatId: idSchema }))
+      .input(v.object({ ...actionRequestSchema.entries, chatId: idSchema }))
       .output(chatSnapshotSchema),
-    configure: oc.input(configRequestSchema.and(chatIdInputSchema)).output(chatSnapshotSchema),
-    rename: oc.input(renameRequestSchema.extend({ chatId: idSchema })).output(chatSnapshotSchema),
-    compact: oc.input(compactRequestSchema.extend({ chatId: idSchema })).output(chatSnapshotSchema),
+    configure: oc
+      .input(v.intersect([configRequestSchema, chatIdInputSchema]))
+      .output(chatSnapshotSchema),
+    rename: oc
+      .input(v.object({ ...renameRequestSchema.entries, chatId: idSchema }))
+      .output(chatSnapshotSchema),
+    compact: oc
+      .input(v.object({ ...compactRequestSchema.entries, chatId: idSchema }))
+      .output(chatSnapshotSchema),
     answerDialog: oc
-      .input(dialogResponseSchema.extend({ chatId: idSchema }))
+      .input(v.object({ ...dialogResponseSchema.entries, chatId: idSchema }))
       .output(okResponseSchema),
   },
 };
 
 export type PidexApiContractClient = RouterContractClient<typeof pidexApiContract>;
 
-export type ModelInfo = z.infer<typeof modelSchema>;
-export type SessionSummary = z.infer<typeof sessionSummarySchema>;
-export type Workspace = z.infer<typeof workspaceSchema>;
-export type RecentWorkspace = z.infer<typeof recentWorkspaceSchema>;
-export type ProjectCandidate = z.infer<typeof projectCandidateSchema>;
-export type Health = z.infer<typeof healthSchema>;
-export type Bootstrap = z.infer<typeof bootstrapSchema>;
-export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
-export type TextItem = z.infer<typeof textItemSchema>;
-export type ToolItem = z.infer<typeof toolItemSchema>;
-export type NoticeItem = z.infer<typeof noticeItemSchema>;
-export type ExtensionDialog = z.infer<typeof extensionDialogSchema>;
-export type ChatSnapshot = z.infer<typeof chatSnapshotSchema>;
-export type ContextUsage = z.infer<typeof contextUsageSchema>;
-export type ActionOutcome = z.infer<typeof actionOutcomeSchema>;
-export type RunOutcome = z.infer<typeof runOutcomeSchema>;
-export type ToolOutputChunk = z.infer<typeof toolOutputChunkSchema>;
-export type TranscriptPage = z.infer<typeof transcriptPageSchema>;
-export type ServerEvent = z.infer<typeof serverEventSchema>;
-export type WsClientMessage = z.infer<typeof wsClientMessageSchema>;
+export type ModelInfo = v.InferOutput<typeof modelSchema>;
+export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
+export type Workspace = v.InferOutput<typeof workspaceSchema>;
+export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;
+export type ProjectCandidate = v.InferOutput<typeof projectCandidateSchema>;
+export type Health = v.InferOutput<typeof healthSchema>;
+export type Bootstrap = v.InferOutput<typeof bootstrapSchema>;
+export type TranscriptItem = v.InferOutput<typeof transcriptItemSchema>;
+export type TextItem = v.InferOutput<typeof textItemSchema>;
+export type ToolItem = v.InferOutput<typeof toolItemSchema>;
+export type NoticeItem = v.InferOutput<typeof noticeItemSchema>;
+export type ExtensionDialog = v.InferOutput<typeof extensionDialogSchema>;
+export type ChatSnapshot = v.InferOutput<typeof chatSnapshotSchema>;
+export type ContextUsage = v.InferOutput<typeof contextUsageSchema>;
+export type ActionOutcome = v.InferOutput<typeof actionOutcomeSchema>;
+export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
+export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
+export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
+export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
+export type WsClientMessage = v.InferOutput<typeof wsClientMessageSchema>;
+
+function boundedString(maximum: number) {
+  return v.pipe(v.string(), v.maxLength(maximum));
+}
+
+function nonnegativeInteger() {
+  return v.pipe(v.number(), v.safeInteger(), v.minValue(0));
+}
+
+function positiveInteger() {
+  return v.pipe(v.number(), v.safeInteger(), v.minValue(1));
+}
+
+function nonnegativeNumber() {
+  return v.pipe(finiteNumber(), v.minValue(0));
+}
+
+function finiteNumber() {
+  return v.pipe(v.number(), v.finite());
+}
