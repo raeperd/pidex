@@ -106,13 +106,15 @@
             : "Choose a project to start"}
         >
           {#if context.shell.workspace}
-            What should we work on in <button
-              class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
-              type="button"
-              onclick={context.projectActions.openProjectPicker}
-              aria-haspopup="dialog"
-              title="Change project">{context.shell.workspace.name}</button
-            >?
+            What should we work on in <span class="inline-block"
+              ><button
+                class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+                type="button"
+                onclick={context.projectActions.openProjectPicker}
+                aria-haspopup="dialog"
+                title="Change project">{context.shell.workspace.name}</button
+              >?</span
+            >
           {:else}
             <button
               class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
