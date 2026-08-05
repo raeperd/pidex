@@ -86,8 +86,8 @@ const answer = 42;
   const transcriptBody = page.getByRole("log").locator(":scope > div");
   const userPrompt = page.getByRole("log").getByText("Inspect this repository", { exact: true });
   const assistantBody = page.locator(".markdown").filter({ hasText: "Rendered result" });
-  await expect(transcriptBody).toHaveCSS("max-width", "768px");
-  await expect(transcriptBody).toHaveCSS("font-family", /JetBrains Mono/);
+  await expect(transcriptBody).toHaveCSS("max-width", "576px");
+  await expect(transcriptBody).toHaveCSS("font-family", /DM Sans/);
   await expect(userPrompt).toHaveCSS("border-radius", "24px");
   await expect(userPrompt).toHaveCSS("font-family", /DM Sans/);
   await expect
@@ -101,10 +101,11 @@ const answer = 42;
       }),
     )
     .toBe(true);
-  await expect(assistantBody).toHaveCSS("font-family", /JetBrains Mono/);
-  await expect(assistantBody).toHaveCSS("font-size", "12.5px");
-  await expect(page.getByRole("heading", { name: "Rendered result" })).toHaveCSS(
-    "color",
+  await expect(assistantBody).toHaveCSS("font-family", /DM Sans/);
+  await expect(assistantBody).toHaveCSS("font-size", "14px");
+  const assistantHeading = page.getByRole("heading", { name: "Rendered result" });
+  await expect(assistantHeading).toHaveCSS("font-size", "21.7px");
+  expect(await assistantHeading.evaluate((element) => getComputedStyle(element).color)).not.toBe(
     "rgb(183, 121, 31)",
   );
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
