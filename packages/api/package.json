@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@orpc/contract": "2.0.0-beta.21",
-    "zod": "4.1.12"
+    "valibot": "1.4.2"
   },
   "devDependencies": {
     "typescript": "catalog:"

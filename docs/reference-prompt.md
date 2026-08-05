@@ -49,7 +49,7 @@ PATH AND STATE RULES
 
 FIXED STACK
 
-Use Node.js 24 LTS when available; hard-require at least the version declared by the matched Pi package (current Pi requires Node >=22.19.0). Do not use Node 20. Use npm with a committed lockfile, strict TypeScript and native ESM, Express 5, Zod for runtime validation, React + Vite, native EventSource/Server-Sent Events, `react-markdown` + `remark-gfm`, Vitest, Supertest, and Playwright Chromium.
+Use Node.js 24 LTS when available; hard-require at least the version declared by the matched Pi package (current Pi requires Node >=22.19.0). Do not use Node 20. Use npm with a committed lockfile, strict TypeScript and native ESM, Express 5, Valibot for runtime validation, React + Vite, native EventSource/Server-Sent Events, `react-markdown` + `remark-gfm`, Vitest, Supertest, and Playwright Chromium.
 
 Do not enable raw HTML in Markdown and do not use `dangerouslySetInnerHTML`; without raw HTML there is no HTML string for DOMPurify to sanitize. If the installed renderer forces an HTML-string path, sanitize it with DOMPurify before insertion, but prefer the AST-to-React path above. Apply an explicit URL policy: allow only safe `http:`, `https:`, and `mailto:` links; reject executable/unknown schemes; disable remote images by default.
 
@@ -124,7 +124,7 @@ Discover extension commands, prompt templates, and skills through Pi and expose 
 
 SERVER AND STREAMING CONTRACT
 
-Expose the typed, Zod-validated contract through native oRPC under `/api/rpc`:
+Expose the typed, Valibot-validated contract through native oRPC under `/api/rpc`:
 
 - `system.health` and `system.bootstrap` for host readiness and app status.
 - `workspaces.open`, `workspaces.sessions`, and `workspaces.trust`.
