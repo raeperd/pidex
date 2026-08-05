@@ -99,7 +99,7 @@ test("scales mobile task and composer targets while preserving responsive densit
 
   await page.goto("/");
   const starterModel = page.getByTestId("starter-composer").getByLabel("Model");
-  await expect(starterModel).toHaveCSS("font-size", "11px");
+  await expect(starterModel).toHaveCSS("font-size", "12px");
   await expect(starterModel).toHaveCSS("white-space", "nowrap");
   await expect(starterModel.locator("..")).toHaveCSS("overflow", "hidden");
   if (mobile) await expect(starterModel).toHaveCSS("width", "144px");
@@ -114,7 +114,7 @@ test("scales mobile task and composer targets while preserving responsive densit
 
   await expect(projectToggle).toHaveCSS("height", mobile ? "40px" : "36px");
   await expect(taskRow).toHaveCSS("height", mobile ? "40px" : "36px");
-  await expect(taskRow.locator("time")).toHaveCSS("font-size", "10.5px");
+  await expect(taskRow.locator("time")).toHaveCSS("font-size", "11px");
   await expect
     .poll(() =>
       taskRow.evaluate((row) => {
@@ -145,7 +145,7 @@ test("scales mobile task and composer targets while preserving responsive densit
 
   const model = page.getByLabel("Model");
   const send = page.getByRole("button", { name: "Send" });
-  await expect(model).toHaveCSS("font-size", "11px");
+  await expect(model).toHaveCSS("font-size", "12px");
   await expect(model).toHaveCSS("white-space", "nowrap");
   await expect(model.locator("..")).toHaveCSS("overflow", "hidden");
   if (mobile) await expect(model).toHaveCSS("width", "144px");
