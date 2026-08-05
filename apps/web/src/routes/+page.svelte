@@ -99,7 +99,7 @@
         class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
       >
         <h1
-          class="m-0 text-center text-[clamp(25px,3vw,36px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[25px]"
+          class="m-0 text-center text-display font-semibold tracking-tight text-foreground max-[560px]:text-title"
           id="starter-heading"
           aria-label={context.shell.workspace
             ? `What should we work on in ${context.shell.workspace.name}?`
@@ -127,7 +127,7 @@
           data-testid="chat-composer"
         >
           <textarea
-            class="block min-h-22 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+            class="block min-h-18 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-[color-mix(in_srgb,var(--faint)_72%,transparent)] max-[560px]:min-h-16 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
             value={starter.draft}
             oninput={(event) => draftInput(event.currentTarget)}
             onkeydown={keydown}
