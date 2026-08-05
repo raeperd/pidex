@@ -17,7 +17,7 @@ layer(NodeServices.layer)("desktop server bootstrap channel", (test) => {
         const script = [
           'const fs = require("node:fs")',
           'const fd3 = fs.readFileSync(3, "utf8")',
-          "process.stdout.write(JSON.stringify({ argv: process.argv, environmentContains: Object.values(process.env).includes(fd3), fd3 }))",
+          'process.stdout.write(JSON.stringify({ argv: process.argv, environmentContains: Object.values(process.env).includes(fd3), fd3, supervised: process.env.PIDEX_DESKTOP_SUPERVISED === "1" }))',
         ].join(";");
         const handle = yield* makeAuthenticatedServerCommand(
           process.execPath,
@@ -48,6 +48,7 @@ layer(NodeServices.layer)("desktop server bootstrap channel", (test) => {
         assert.deepStrictEqual(result.argv.includes(secret), false);
         assert.isFalse(result.environmentContains);
         assert.strictEqual(result.fd3, secret);
+        assert.isTrue(result.supervised);
       }),
     ),
   );
@@ -103,6 +104,7 @@ function isBootstrapProbe(value: unknown): value is {
   readonly argv: string[];
   readonly environmentContains: boolean;
   readonly fd3: string;
+  readonly supervised: boolean;
 } {
   return (
     typeof value === "object" &&
@@ -113,6 +115,8 @@ function isBootstrapProbe(value: unknown): value is {
     "environmentContains" in value &&
     typeof value.environmentContains === "boolean" &&
     "fd3" in value &&
-    typeof value.fd3 === "string"
+    typeof value.fd3 === "string" &&
+    "supervised" in value &&
+    typeof value.supervised === "boolean"
   );
 }

@@ -17,9 +17,10 @@ export function makeAuthenticatedServerCommand(
   const environment = { ...options.env };
   delete environment.PIDEX_ALLOW_ENV_BOOTSTRAP;
   delete environment.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL;
+  delete environment.PIDEX_DESKTOP_SUPERVISED;
   return ChildProcess.make(executable, args, {
     ...options,
-    env: environment,
+    env: { ...environment, PIDEX_DESKTOP_SUPERVISED: "1" },
     extendEnv: false,
     additionalFds: {
       fd3: {
