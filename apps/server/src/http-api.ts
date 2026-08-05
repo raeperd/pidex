@@ -6,6 +6,7 @@ import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex
 import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
+import type { AuthenticatedSession } from "./auth.js";
 import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
 import { requestDigest, type MetadataService } from "./metadata.js";
 import {
@@ -17,25 +18,74 @@ import {
 import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 
 interface HttpApiDependencies {
-  csrf: string;
   roots: string[];
 }
 
+type RpcAccess = "public" | "authenticated" | "desktop";
+
+export const rpcAuthorization: Readonly<Record<string, RpcAccess>> = {
+  "system.health": "public",
+  "system.bootstrap": "authenticated",
+  "workspaces.open": "desktop",
+  "workspaces.createWorktree": "desktop",
+  "workspaces.removeWorktree": "desktop",
+  "workspaces.reorder": "desktop",
+  "workspaces.sessions": "authenticated",
+  "workspaces.trust": "desktop",
+  "chats.create": "authenticated",
+  "chats.resume": "authenticated",
+  "chats.get": "authenticated",
+  "chats.dispose": "authenticated",
+  "chats.sendMessage": "authenticated",
+  "chats.abort": "authenticated",
+  "chats.acknowledgeInterrupted": "authenticated",
+  "chats.toolOutput": "authenticated",
+  "chats.transcript": "authenticated",
+  "chats.clearQueue": "authenticated",
+  "chats.configure": "desktop",
+  "chats.rename": "desktop",
+  "chats.compact": "authenticated",
+  "chats.answerDialog": "authenticated",
+};
+
 export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function* ({
-  csrf,
   roots,
 }: HttpApiDependencies) {
   const managedWorktreeRoot = yield* managedWorktreesRoot();
   const workspaceRoots = [...roots, managedWorktreeRoot];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
+  const requireAuthorization = base.middleware(async ({ context, next, path }) => {
+    const access = rpcAuthorization[path.join(".")];
+    if (!access)
+      throw new ORPCError("internal_error", { message: "RPC authorization policy is missing" });
+    if (access === "public") return next();
+    const session = authenticatedSession(context);
+    if (access === "desktop" && session.kind !== "desktop")
+      throw new ORPCError("forbidden", { message: "Desktop authorization is required" });
+    return next();
+  });
   const requireCsrf = base.middleware(async ({ context, next }) => {
-    if (context.req.headers["x-pidex-csrf"] !== csrf)
+    const session = authenticatedSession(context);
+    if (context.req.headers["x-pidex-csrf"] !== session.csrfToken)
       throw new ORPCError("csrf", { message: "Invalid CSRF token" });
     return next();
   });
-  const implementation = base.use(protocolErrors);
+  const requireActionPrincipal = base.middleware(async ({ context, next }, input) => {
+    const session = authenticatedSession(context);
+    if (
+      typeof input === "object" &&
+      input !== null &&
+      "clientId" in input &&
+      input.clientId !== session.clientId
+    )
+      throw new ORPCError("client_mismatch", {
+        message: "Action client ID does not match the authenticated session",
+      });
+    return next();
+  });
+  const implementation = base.use(protocolErrors).use(requireAuthorization);
   const workspaces = implementation.workspaces.use(requireCsrf);
-  const chats = implementation.chats.use(requireCsrf);
+  const chats = implementation.chats.use(requireCsrf).use(requireActionPrincipal);
 
   return implementation.router({
     system: {
@@ -43,13 +93,15 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         ok: true,
         protocolVersion: PROTOCOL_VERSION,
       })),
-      bootstrap: implementation.system.bootstrap.effect(function* () {
+      bootstrap: implementation.system.bootstrap.effect(function* ({ context }) {
+        const session = authenticatedSession(context);
         const metadata = yield* Metadata;
         const recentWorkspaces = yield* recentWorkspaceRecords(metadata, managedWorktreeRoot);
         const projectCandidates = yield* discoverProjectCandidates(roots);
         return {
           protocolVersion: PROTOCOL_VERSION,
-          csrfToken: csrf,
+          clientId: session.clientId,
+          csrfToken: session.csrfToken,
           piVersion: "0.80.10",
           recentWorkspaces,
           projectCandidates,
@@ -373,6 +425,13 @@ const protocolErrors = os.middleware(async ({ next }) => {
 
 interface RpcApiContext extends WithEffectContext<ApplicationServices> {
   req: IncomingMessage;
+  session: AuthenticatedSession | undefined;
+}
+
+function authenticatedSession(context: RpcApiContext) {
+  if (!context.session)
+    throw new ORPCError("unauthenticated", { message: "Authentication required" });
+  return context.session;
 }
 
 function workspaceId(metadata: MetadataService, canonical: string, remember: boolean | undefined) {

@@ -3,7 +3,7 @@ import * as v from "valibot";
 
 export { safeParse } from "valibot";
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = v.pipe(
   v.string(),
@@ -85,8 +85,16 @@ export const healthSchema = v.object({
   ok: v.literal(true),
   protocolVersion: v.literal(PROTOCOL_VERSION),
 });
+export const authSecretSchema = v.object({
+  secret: v.pipe(v.string(), v.minLength(32), v.maxLength(256), v.regex(/^[A-Za-z0-9_-]+$/)),
+});
+export const authGrantSchema = v.object({
+  ...authSecretSchema.entries,
+  expiresAt: nonnegativeInteger(),
+});
 export const bootstrapSchema = v.object({
   protocolVersion: v.literal(PROTOCOL_VERSION),
+  clientId: idSchema,
   csrfToken: v.pipe(v.string(), v.minLength(32)),
   piVersion: boundedString(100),
   recentWorkspaces: v.pipe(v.array(recentWorkspaceSchema), v.maxLength(MAX_RECENT_WORKSPACES)),

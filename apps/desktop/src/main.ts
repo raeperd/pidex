@@ -1,12 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { healthSchema, safeParse, type PidexApiContractClient } from "@pidex/api";
+import { randomBytes } from "node:crypto";
+import { authGrantSchema, healthSchema, safeParse, type PidexApiContractClient } from "@pidex/api";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import path from "node:path";
 import { Deferred, Effect, Ref, Stream } from "effect";
-import { ChildProcess } from "effect/unstable/process";
-import { desktopServerError, superviseServer, waitForServer } from "./server-lifecycle.js";
+import {
+  desktopServerError,
+  issueAuthGrantForTrustedSender,
+  makeAuthenticatedServerCommand,
+  superviseServer,
+  waitForServer,
+} from "./server-lifecycle.js";
 
 const main = Effect.scoped(
   Effect.gen(function* () {
@@ -19,19 +25,24 @@ const main = Effect.scoped(
 
     const stateDirectory =
       process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
+    const desktopBootstrapCredential = process.env.PIDEX_WEB_URL
+      ? (process.env.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL ?? randomBytes(32).toString("base64url"))
+      : randomBytes(32).toString("base64url");
+    const targetUrl = process.env.PIDEX_WEB_URL ?? localUrl;
+    const openWindow = () => createWindow(targetUrl);
     const quit = yield* Deferred.make<void>();
-    yield* registerIpcHandler();
-    yield* registerAppLifecycle(quit);
+    yield* registerIpcHandler(new URL(targetUrl).origin, targetUrl, desktopBootstrapCredential);
+    yield* registerAppLifecycle(quit, openWindow);
 
     if (!process.env.PIDEX_WEB_URL) {
       const logs = yield* Ref.make<ReadonlyArray<string>>([]);
-      yield* superviseServer(spawnServer(stateDirectory, logs)).pipe(
+      yield* superviseServer(spawnServer(stateDirectory, desktopBootstrapCredential, logs)).pipe(
         Effect.forkScoped({ startImmediately: true }),
       );
       yield* waitForServer(checkServerHealth, Ref.get(logs));
     }
 
-    yield* createWindow();
+    yield* openWindow();
     yield* Deferred.await(quit);
   }),
 ).pipe(
@@ -44,30 +55,53 @@ const main = Effect.scoped(
 
 NodeRuntime.runMain(main, { disableErrorReporting: true });
 
-function registerIpcHandler() {
+function registerIpcHandler(
+  trustedOrigin: string,
+  targetUrl: string,
+  desktopBootstrapCredential: string,
+) {
   return Effect.acquireRelease(
     Effect.sync(() => {
       ipcMain.handle("pidex:pick-project", async (event) => {
         const owner = BrowserWindow.fromWebContents(event.sender);
-        if (!owner) return null;
+        if (!owner || !isTrustedSender(event, trustedOrigin)) return null;
         const result = await dialog.showOpenDialog(owner, {
           title: "Open a project in Pidex",
           properties: ["openDirectory", "createDirectory"],
         });
         return result.canceled ? null : (result.filePaths[0] ?? null);
       });
+      ipcMain.handle("pidex:take-auth-grant", (event) => {
+        const owner = BrowserWindow.fromWebContents(event.sender);
+        return issueAuthGrantForTrustedSender(
+          Boolean(owner && isTrustedSender(event, trustedOrigin)),
+          () => Effect.runPromise(requestDesktopGrant(targetUrl, desktopBootstrapCredential)),
+        );
+      });
     }),
-    () => Effect.sync(() => ipcMain.removeHandler("pidex:pick-project")),
+    () =>
+      Effect.sync(() => {
+        ipcMain.removeHandler("pidex:pick-project");
+        ipcMain.removeHandler("pidex:take-auth-grant");
+      }),
   );
 }
 
-function registerAppLifecycle(quit: Deferred.Deferred<void>) {
+function isTrustedSender(event: Electron.IpcMainInvokeEvent, trustedOrigin: string) {
+  const frame = event.senderFrame;
+  return Boolean(frame && URL.parse(frame.url)?.origin === trustedOrigin);
+}
+
+function registerAppLifecycle(
+  quit: Deferred.Deferred<void>,
+  openWindow: () => Effect.Effect<void, ReturnType<typeof desktopServerError>>,
+) {
   return Effect.acquireRelease(
     Effect.sync(() => {
       const onActivate = () => {
         if (BrowserWindow.getAllWindows().length === 0)
           Effect.runFork(
-            createWindow().pipe(
+            openWindow().pipe(
               Effect.catch((error) =>
                 Effect.sync(() => console.error(`Pidex cannot create a window: ${error.message}`)),
               ),
@@ -96,8 +130,7 @@ function quitWhenWindowsClose() {
   if (process.platform !== "darwin") app.quit();
 }
 
-const createWindow = Effect.fn("desktop.window.create")(function* () {
-  const targetUrl = process.env.PIDEX_WEB_URL ?? localUrl;
+const createWindow = Effect.fn("desktop.window.create")(function* (targetUrl: string) {
   const window = yield* Effect.try({
     try: () => {
       const trustedOrigin = new URL(targetUrl).origin;
@@ -140,15 +173,17 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
 
 const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   stateDirectory: string,
+  desktopBootstrapCredential: string,
   logs: Ref.Ref<ReadonlyArray<string>>,
 ) {
   const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
   const serverDirectory = app.isPackaged
     ? path.join(process.resourcesPath, "server")
     : path.join(repositoryRoot, "apps/server");
-  const command = ChildProcess.make(
+  const command = makeAuthenticatedServerCommand(
     process.execPath,
     [path.join(serverDirectory, "dist/main.js")],
+    desktopBootstrapCredential,
     {
       cwd: app.isPackaged ? process.resourcesPath : repositoryRoot,
       env: {
@@ -182,6 +217,40 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
       desktopServerError("server.process", "The Pidex server process failed", cause),
     ),
   );
+});
+
+const requestDesktopGrant = Effect.fn("desktop.auth.createGrant")(function* (
+  targetUrl: string,
+  desktopBootstrapCredential: string,
+) {
+  const response = yield* Effect.tryPromise({
+    try: () =>
+      fetch(`${targetUrl}/api/auth/desktop-grant`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${desktopBootstrapCredential}` },
+      }),
+    catch: (cause) =>
+      desktopServerError("auth.desktopGrant", "Pidex could not request a window grant", cause),
+  });
+  if (!response.ok)
+    return yield* Effect.fail(
+      desktopServerError(
+        "auth.desktopGrant",
+        `Pidex rejected a window grant with HTTP ${response.status}`,
+        response.status,
+      ),
+    );
+  const body: unknown = yield* Effect.tryPromise({
+    try: () => response.json(),
+    catch: (cause) =>
+      desktopServerError("auth.desktopGrant", "Pidex returned an invalid window grant", cause),
+  });
+  const result = safeParse(authGrantSchema, body);
+  if (!result.success)
+    return yield* Effect.fail(
+      desktopServerError("auth.desktopGrant", "Pidex returned an invalid window grant", body),
+    );
+  return result.output.secret;
 });
 
 function remember(logs: Ref.Ref<ReadonlyArray<string>>, line: string) {

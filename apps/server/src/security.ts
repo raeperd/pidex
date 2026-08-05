@@ -76,8 +76,6 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
 
 export const validateRequest = Effect.fn("security.validateRequest")(function* (
   req: IncomingMessage,
-  mutation: boolean,
-  csrf: string,
 ) {
   const rawHost = req.headers.host;
   if (!rawHost)
@@ -114,10 +112,6 @@ export const validateRequest = Effect.fn("security.validateRequest")(function* (
         HttpError.make({ status: 403, code: "bad_origin", message: "Origin is not allowed" }),
       );
   }
-  if (mutation && req.headers["x-pidex-csrf"] !== csrf)
-    return yield* Effect.fail(
-      HttpError.make({ status: 403, code: "csrf", message: "Invalid CSRF token" }),
-    );
 });
 
 export function isDescendant(root: string, candidate: string): boolean {

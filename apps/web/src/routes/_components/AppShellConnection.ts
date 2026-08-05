@@ -3,6 +3,7 @@ import { PROTOCOL_VERSION, safeParse, serverEventSchema, type ServerEvent } from
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
 interface ChatConnectionHandlers {
+  getWebSocketTicket: () => Promise<string>;
   onEvent: (event: ServerEvent) => void;
   onInvalidChat: () => void;
   onStateChange: (state: ConnectionState) => void;
@@ -13,18 +14,20 @@ export function makeChatConnection(handlers: ChatConnectionHandlers) {
   let lastEventId = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let socket: WebSocket | undefined;
+  let connectionAttempt = 0;
 
   function connect(chatId: string) {
     activeChatId = chatId;
     lastEventId = 0;
-    open();
+    void open();
   }
 
   function reconnect() {
-    if (activeChatId) open();
+    if (activeChatId) void open();
   }
 
   function disconnect() {
+    connectionAttempt += 1;
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
     const activeSocket = socket;
@@ -39,15 +42,29 @@ export function makeChatConnection(handlers: ChatConnectionHandlers) {
     disconnect();
   }
 
-  function open() {
+  async function open() {
     const chatId = activeChatId;
     if (!chatId) return;
+    const attempt = ++connectionAttempt;
 
     clearTimeout(reconnectTimer);
     handlers.onStateChange("reconnecting");
 
+    let ticket: string;
+    try {
+      ticket = await handlers.getWebSocketTicket();
+    } catch {
+      if (attempt !== connectionAttempt || activeChatId !== chatId) return;
+      if (!navigator.onLine) return handlers.onStateChange("disconnected");
+      reconnectTimer = setTimeout(() => void open(), 800);
+      return;
+    }
+    if (attempt !== connectionAttempt || activeChatId !== chatId) return;
+
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const nextSocket = new WebSocket(`${scheme}://${location.host}/api/ws`);
+    const nextSocket = new WebSocket(
+      `${scheme}://${location.host}/api/ws?ticket=${encodeURIComponent(ticket)}`,
+    );
     const previous = socket;
     socket = nextSocket;
     previous?.close();
@@ -84,7 +101,7 @@ export function makeChatConnection(handlers: ChatConnectionHandlers) {
         return;
       }
       handlers.onStateChange("reconnecting");
-      reconnectTimer = setTimeout(open, 800);
+      reconnectTimer = setTimeout(() => void open(), 800);
     });
   }
 

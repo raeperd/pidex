@@ -18,6 +18,7 @@ it.effect("composes the Effect-native Metadata and Pi services", () =>
       Effect.acquireUseRelease(
         Effect.sync(() =>
           makeApplicationRuntime({
+            desktopBootstrapCredential: "desktop-bootstrap-test-credential",
             metadataStateDir: path.join(root, "state"),
             pi: {
               agentDir: path.join(root, "agent"),

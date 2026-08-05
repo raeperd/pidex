@@ -15,17 +15,20 @@ describe("ChatConnection", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("ignores malformed server frames without disrupting the active connection", () => {
+  it("gets a one-time ticket before opening a live connection", async () => {
     const events = vi.fn();
     const states: ConnectionState[] = [];
     const connection = makeChatConnection({
+      getWebSocketTicket: vi.fn().mockResolvedValue("ticket_12345"),
       onEvent: events,
       onInvalidChat: vi.fn(),
       onStateChange: (state) => states.push(state),
     });
 
     connection.connect("chat_12345");
+    await Promise.resolve();
     const socket = fakeWebSockets[0]!;
+    expect(socket.url).toBe("ws://localhost:4783/api/ws?ticket=ticket_12345");
     socket.dispatch("open", {});
 
     expect(() => socket.dispatch("message", { data: "{" })).not.toThrow();
@@ -33,17 +36,20 @@ describe("ChatConnection", () => {
     expect(states).toEqual(["reconnecting", "connected"]);
   });
 
-  it("does not let a replaced socket report itself as connected", () => {
+  it("does not let a replaced socket report itself as connected", async () => {
     const states: ConnectionState[] = [];
     const connection = makeChatConnection({
+      getWebSocketTicket: vi.fn().mockResolvedValue("ticket_12345"),
       onEvent: vi.fn(),
       onInvalidChat: vi.fn(),
       onStateChange: (state) => states.push(state),
     });
 
     connection.connect("chat_first");
+    await Promise.resolve();
     const first = fakeWebSockets[0]!;
     connection.connect("chat_second");
+    await Promise.resolve();
     const second = fakeWebSockets[1]!;
 
     first.dispatch("open", {});

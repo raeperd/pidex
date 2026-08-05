@@ -102,6 +102,7 @@
   const snapshotCache = makeTaskSnapshotCache();
   const taskViews = createTaskViewControllerRegistry();
   const chatConnection = makeChatConnection({
+    getWebSocketTicket: api.websocketTicket,
     onEvent: applyEvent,
     onInvalidChat: () => void recoverInvalidChat(),
     onStateChange: (state) => (connection = state),

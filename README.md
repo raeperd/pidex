@@ -40,18 +40,7 @@ pidex records a prompt before sending it to Pi, so reconnecting cannot accidenta
 
 ## Open pidex from another device
 
-You can use Tailscale Serve to reach pidex privately from another device on your Tailnet.
-
-Start pidex, then run:
-
-```sh
-tailscale serve --bg http://127.0.0.1:4783
-tailscale serve status
-```
-
-Use the private HTTPS URL shown by Tailscale. Both devices must be on the intended Tailnet, and the computer running pidex must stay awake and connected. Restrict access with Tailscale ACLs or grants. Do not enable Funnel.
-
-pidex does not configure or verify Tailscale for you. If pidex uses another port, update the Serve command to match it.
+Remote browser access is not enabled yet. The host now requires an authenticated desktop session even on loopback; pairing and revocable mobile credentials will be added before Tailscale Serve is supported.
 
 ## Privacy and safety
 
@@ -92,7 +81,7 @@ pnpm test           # Run deterministic tests; no paid model calls
 pnpm test:e2e       # Run Playwright tests in Chromium
 pnpm build          # Build all packages
 pnpm package:desktop # Build an unsigned macOS app in apps/desktop/release
-pnpm start          # Run the built browser app and server
+pnpm start          # Run the built standalone host on loopback
 pnpm start:desktop  # Run the built desktop app
 ```
 

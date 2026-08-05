@@ -8,10 +8,11 @@ import { NodeRuntime } from "@effect/platform-node";
 import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
-import { safeParse, wsClientMessageSchema } from "@pidex/api";
+import { authSecretSchema, safeParse, wsClientMessageSchema } from "@pidex/api";
 import { Context, Effect } from "effect";
 import { WebSocketServer, type RawData } from "ws";
-import { Chats, makeApplicationRuntime } from "./app-runtime.js";
+import { Auth, Chats, makeApplicationRuntime } from "./app-runtime.js";
+import type { AuthenticatedSession } from "./auth.js";
 import { applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
 import {
@@ -22,8 +23,12 @@ import {
   validateRequest,
 } from "./security.js";
 
-export async function createPidexServer() {
-  const application = await createPidexApplication();
+export interface PidexServerOptions {
+  readonly desktopBootstrapCredential: string;
+}
+
+export async function createPidexServer(options: PidexServerOptions) {
+  const application = await createPidexApplication(options);
   try {
     const server = createServer((req, res) => void application.handleRequest(req, res));
     server.on("upgrade", (req, socket, head) => {
@@ -43,25 +48,25 @@ export async function createPidexServer() {
   }
 }
 
-export async function createPidexApplication() {
-  const runtime = makeApplicationRuntime();
+export async function createPidexApplication(options: PidexServerOptions) {
+  const runtime = makeApplicationRuntime(options);
   try {
     const effectContext = await runtime.context();
+    const auth = Context.get(effectContext, Auth);
     const manager = Context.get(effectContext, Chats);
-    const csrf = await runtime.runPromise(
-      attemptOperation("security.csrf", () => randomBytes(32).toString("base64url")),
-    );
     const roots = await runtime.runPromise(allowedRoots());
     const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
     const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
-    const apiRouter = await runtime.runPromise(createRpcApiRouter({ csrf, roots }));
+    const apiRouter = await runtime.runPromise(createRpcApiRouter({ roots }));
     const apiHandler = new RPCHandler(apiRouter, {
       errorStatusMap: {
         ...COMMON_ERROR_STATUS_MAP,
         action_conflict: 409,
+        client_mismatch: 403,
         csrf: 403,
         dialog_mismatch: 409,
         dialog_value_invalid: 400,
+        forbidden: 403,
         internal_error: 500,
         interrupted_run: 409,
         model_unavailable: 400,
@@ -88,13 +93,101 @@ export async function createPidexApplication() {
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       securityHeaders(res, webScriptHashes);
       try {
-        await runtime.runPromise(validateRequest(req, false, csrf));
+        await runtime.runPromise(validateRequest(req));
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
+        let session: AuthenticatedSession | undefined;
+        if (route === "/api/auth/desktop-grant") {
+          if (req.method !== "POST")
+            throw HttpError.make({
+              status: 405,
+              code: "method_not_allowed",
+              message: "Method not allowed",
+            });
+          const authorization = req.headers.authorization;
+          const bootstrapCredential = authorization?.startsWith("Bearer ")
+            ? authorization.slice("Bearer ".length)
+            : "";
+          const grant = await runtime
+            .runPromise(auth.createDesktopGrant(bootstrapCredential))
+            .catch(() => {
+              throw unauthenticated();
+            });
+          json(res, 201, grant);
+          return;
+        }
+        if (route === "/api/auth/desktop-session") {
+          if (req.method !== "POST")
+            throw HttpError.make({
+              status: 405,
+              code: "method_not_allowed",
+              message: "Method not allowed",
+            });
+          const body = await readJsonBody(req);
+          const parsed = safeParse(authSecretSchema, body);
+          if (!parsed.success)
+            throw HttpError.make({
+              status: 400,
+              code: "validation",
+              message: "A grant secret is required",
+            });
+          const desktopSession = await runtime
+            .runPromise(auth.exchangeDesktopGrant(parsed.output.secret))
+            .catch(() => {
+              throw unauthenticated();
+            });
+          res.statusCode = 204;
+          res.setHeader(
+            "Set-Cookie",
+            `pidex_session=${desktopSession.credential}; HttpOnly; SameSite=Strict; Path=/`,
+          );
+          res.end();
+          return;
+        }
+        if (route === "/api/auth/websocket-ticket") {
+          if (req.method !== "POST")
+            throw HttpError.make({
+              status: 405,
+              code: "method_not_allowed",
+              message: "Method not allowed",
+            });
+          const credential = sessionCredential(req);
+          if (!credential) throw unauthenticated();
+          const authenticated = await runtime
+            .runPromise(auth.authenticateSession(credential))
+            .catch(() => {
+              throw unauthenticated();
+            });
+          if (req.headers["x-pidex-csrf"] !== authenticated.csrfToken)
+            throw HttpError.make({
+              status: 403,
+              code: "csrf",
+              message: "Invalid CSRF token",
+            });
+          const ticket = await runtime.runPromise(auth.createWebSocketTicket(credential));
+          json(res, 201, ticket);
+          return;
+        }
+        if (route.startsWith("/api/rpc/") && route !== "/api/rpc/system/health") {
+          const credential = sessionCredential(req);
+          if (!credential)
+            throw HttpError.make({
+              status: 401,
+              code: "unauthenticated",
+              message: "Authentication required",
+            });
+          session = await runtime.runPromise(auth.authenticateSession(credential)).catch(() => {
+            throw HttpError.make({
+              status: 401,
+              code: "unauthenticated",
+              message: "Authentication required",
+            });
+          });
+        }
         const { matched } = await runtime.runPromise(
           attemptOperation("orpc.handle", () =>
             apiHandler.handle(req, res, {
               prefix: "/api/rpc",
-              context: { req, "effect/context": effectContext },
+              context: { req, session, "effect/context": effectContext },
             }),
           ),
         );
@@ -118,12 +211,20 @@ export async function createPidexApplication() {
     };
     const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
     const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
+      const requestUrl = new URL(req.url ?? "/", "http://localhost");
+      if (requestUrl.pathname !== "/api/ws") return false;
       try {
-        runtime.runSync(validateRequest(req, false, csrf));
-        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+        runtime.runSync(validateRequest(req));
       } catch {
         socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return true;
+      }
+      try {
+        runtime.runSync(auth.consumeWebSocketTicket(requestUrl.searchParams.get("ticket") ?? ""));
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      } catch {
+        socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
       }
       return true;
@@ -240,6 +341,48 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+function sessionCredential(req: IncomingMessage) {
+  const cookies = req.headers.cookie?.split(";") ?? [];
+  for (const cookie of cookies) {
+    const [name, ...value] = cookie.trim().split("=");
+    if (name === "pidex_session") return value.join("=");
+  }
+  return undefined;
+}
+
+function unauthenticated() {
+  return HttpError.make({
+    status: 401,
+    code: "unauthenticated",
+    message: "Authentication required",
+  });
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 8 * 1024)
+      throw HttpError.make({
+        status: 413,
+        code: "payload_too_large",
+        message: "Request body is too large",
+      });
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw HttpError.make({
+      status: 400,
+      code: "validation",
+      message: "Request body must be valid JSON",
+    });
+  }
+}
+
 function rejectUpgrade(socket: Duplex) {
   socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
   socket.destroy();
@@ -251,8 +394,12 @@ const main = Effect.scoped(
       try: () => parsePort(),
       catch: (cause) => applicationError("server.port", cause),
     });
+    const desktopBootstrapCredential = yield* Effect.try({
+      try: () => readDesktopBootstrapCredential(),
+      catch: (cause) => applicationError("auth.desktopBootstrap.read", cause),
+    });
     const app = yield* Effect.acquireRelease(
-      attemptOperation("server.create", createPidexServer),
+      attemptOperation("server.create", () => createPidexServer({ desktopBootstrapCredential })),
       (server) =>
         Effect.promise(() =>
           server.close().catch((error) => {
@@ -288,6 +435,19 @@ function listen(server: ReturnType<typeof createServer>, port: number) {
         server.listen(port, "127.0.0.1");
       }),
   );
+}
+
+function readDesktopBootstrapCredential() {
+  if (process.env.PIDEX_ALLOW_ENV_BOOTSTRAP === "1") {
+    const injected = process.env.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL;
+    if (!injected || injected.length < 32)
+      throw new Error("Injected desktop bootstrap credential is missing");
+    return injected;
+  }
+  if (process.env.PIDEX_DESKTOP_SUPERVISED !== "1") return randomBytes(32).toString("base64url");
+  const credential = readFileSync(3, "utf8").trim();
+  if (credential.length < 32) throw new Error("Desktop bootstrap credential is missing");
+  return credential;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
