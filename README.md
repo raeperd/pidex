@@ -81,7 +81,7 @@ pnpm test           # Run deterministic tests; no paid model calls
 pnpm test:e2e       # Run Playwright tests in Chromium
 pnpm build          # Build all packages
 pnpm package:desktop # Build an unsigned macOS app in apps/desktop/release
-pnpm start          # Run the built host under a supervisor that provides auth on FD3
+pnpm start          # Run the built standalone host on loopback
 pnpm start:desktop  # Run the built desktop app
 ```
 

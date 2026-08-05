@@ -1,8 +1,9 @@
 import { NodeServices } from "@effect/platform-node";
-import { assert, it, layer } from "@effect/vitest";
+import { assert, expect, it, layer } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Ref, Stream } from "effect";
 import {
   desktopServerError,
+  issueAuthGrantForTrustedSender,
   makeAuthenticatedServerCommand,
   superviseServer,
   waitForServer,
@@ -50,6 +51,16 @@ layer(NodeServices.layer)("desktop server bootstrap channel", (test) => {
       }),
     ),
   );
+});
+
+it("issues a fresh auth grant for every trusted renderer request", async () => {
+  let issued = 0;
+  const issueGrant = async () => `grant-${++issued}`;
+
+  await expect(issueAuthGrantForTrustedSender(false, issueGrant)).resolves.toBeNull();
+  await expect(issueAuthGrantForTrustedSender(true, issueGrant)).resolves.toBe("grant-1");
+  await expect(issueAuthGrantForTrustedSender(true, issueGrant)).resolves.toBe("grant-2");
+  expect(issued).toBe(2);
 });
 
 it.effect("releases the server process when supervision is interrupted", () =>

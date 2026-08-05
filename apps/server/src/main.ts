@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -444,9 +444,20 @@ function readDesktopBootstrapCredential() {
       throw new Error("Injected desktop bootstrap credential is missing");
     return injected;
   }
-  const credential = readFileSync(3, "utf8").trim();
+  let credential: string;
+  try {
+    credential = readFileSync(3, "utf8").trim();
+  } catch (cause) {
+    if (isUnavailableBootstrapDescriptor(cause)) return randomBytes(32).toString("base64url");
+    throw cause;
+  }
   if (credential.length < 32) throw new Error("Desktop bootstrap credential is missing");
   return credential;
+}
+
+function isUnavailableBootstrapDescriptor(cause: unknown) {
+  if (!(cause instanceof Error) || !("code" in cause)) return false;
+  return cause.code === "EBADF" || cause.code === "ENXIO";
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)

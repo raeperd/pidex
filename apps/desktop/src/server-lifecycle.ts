@@ -30,6 +30,13 @@ export function makeAuthenticatedServerCommand(
   });
 }
 
+export async function issueAuthGrantForTrustedSender(
+  trusted: boolean,
+  issueGrant: () => Promise<string>,
+) {
+  return trusted ? issueGrant() : null;
+}
+
 export const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
   runServer: Effect.Effect<void, DesktopServerError, Scope.Scope | R>,
 ) {

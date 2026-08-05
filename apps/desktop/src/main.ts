@@ -8,6 +8,7 @@ import path from "node:path";
 import { Deferred, Effect, Ref, Stream } from "effect";
 import {
   desktopServerError,
+  issueAuthGrantForTrustedSender,
   makeAuthenticatedServerCommand,
   superviseServer,
   waitForServer,
@@ -27,11 +28,10 @@ const main = Effect.scoped(
     const desktopBootstrapCredential = process.env.PIDEX_WEB_URL
       ? (process.env.PIDEX_DESKTOP_BOOTSTRAP_CREDENTIAL ?? randomBytes(32).toString("base64url"))
       : randomBytes(32).toString("base64url");
-    const windowGrants = new Map<number, string>();
     const targetUrl = process.env.PIDEX_WEB_URL ?? localUrl;
-    const openWindow = () => createWindow(targetUrl, desktopBootstrapCredential, windowGrants);
+    const openWindow = () => createWindow(targetUrl);
     const quit = yield* Deferred.make<void>();
-    yield* registerIpcHandler(new URL(targetUrl).origin, windowGrants);
+    yield* registerIpcHandler(new URL(targetUrl).origin, targetUrl, desktopBootstrapCredential);
     yield* registerAppLifecycle(quit, openWindow);
 
     if (!process.env.PIDEX_WEB_URL) {
@@ -55,7 +55,11 @@ const main = Effect.scoped(
 
 NodeRuntime.runMain(main, { disableErrorReporting: true });
 
-function registerIpcHandler(trustedOrigin: string, windowGrants: Map<number, string>) {
+function registerIpcHandler(
+  trustedOrigin: string,
+  targetUrl: string,
+  desktopBootstrapCredential: string,
+) {
   return Effect.acquireRelease(
     Effect.sync(() => {
       ipcMain.handle("pidex:pick-project", async (event) => {
@@ -69,10 +73,10 @@ function registerIpcHandler(trustedOrigin: string, windowGrants: Map<number, str
       });
       ipcMain.handle("pidex:take-auth-grant", (event) => {
         const owner = BrowserWindow.fromWebContents(event.sender);
-        if (!owner || !isTrustedSender(event, trustedOrigin)) return null;
-        const grant = windowGrants.get(event.sender.id);
-        windowGrants.delete(event.sender.id);
-        return grant ?? null;
+        return issueAuthGrantForTrustedSender(
+          Boolean(owner && isTrustedSender(event, trustedOrigin)),
+          () => Effect.runPromise(requestDesktopGrant(targetUrl, desktopBootstrapCredential)),
+        );
       });
     }),
     () =>
@@ -126,12 +130,7 @@ function quitWhenWindowsClose() {
   if (process.platform !== "darwin") app.quit();
 }
 
-const createWindow = Effect.fn("desktop.window.create")(function* (
-  targetUrl: string,
-  desktopBootstrapCredential: string,
-  windowGrants: Map<number, string>,
-) {
-  const grant = yield* requestDesktopGrant(targetUrl, desktopBootstrapCredential);
+const createWindow = Effect.fn("desktop.window.create")(function* (targetUrl: string) {
   const window = yield* Effect.try({
     try: () => {
       const trustedOrigin = new URL(targetUrl).origin;
@@ -160,8 +159,6 @@ const createWindow = Effect.fn("desktop.window.create")(function* (
       created.webContents.on("will-navigate", (event, url) => {
         if (URL.parse(url)?.origin !== trustedOrigin) event.preventDefault();
       });
-      windowGrants.set(created.webContents.id, grant);
-      created.webContents.once("destroyed", () => windowGrants.delete(created.webContents.id));
       return created;
     },
     catch: (cause) =>
