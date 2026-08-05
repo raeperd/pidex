@@ -186,7 +186,7 @@
 
   <div
     class={[
-      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-[11px] leading-[1.4] text-muted shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
+      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-control text-muted shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
       expanded
         ? "pointer-events-auto opacity-100 [translate:var(--context-popover-shift,0)_0] delay-150"
         : "pointer-events-none opacity-0 [translate:var(--context-popover-shift,0)_0.25rem] delay-0",
@@ -200,13 +200,13 @@
     <div class="flex items-center justify-between gap-3">
       <strong class="font-semibold text-muted">Context Window</strong>
       {#if percentageLabel}
-        <span class="font-mono text-[10px] whitespace-nowrap tabular-nums"
+        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
           >{percentageLabel} · {formatTokens(usage.tokens)}/{formatTokens(
             usage.contextWindow,
           )}</span
         >
       {:else}
-        <span class="font-mono text-[10px] whitespace-nowrap tabular-nums"
+        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
           >{formatTokens(usage.tokens)}/{formatTokens(usage.contextWindow)}</span
         >
       {/if}
@@ -229,7 +229,7 @@
     </div>
     <div class="flex items-center justify-between gap-3">
       <span class="text-faint">Total processed</span><strong
-        class="font-mono text-[10px] font-semibold whitespace-nowrap text-muted tabular-nums"
+        class="font-mono text-meta font-semibold whitespace-nowrap text-muted tabular-nums"
         >{formatTokens(usage.totalProcessedTokens)}</strong
       >
     </div>
