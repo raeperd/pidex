@@ -122,7 +122,7 @@ test("resizes, restores, and resets after mouse or keyboard collapse", async ({
 
   const sidebar = page.getByRole("complementary", { name: "Tasks" });
   const resizeHandle = page.getByRole("slider", { name: "Resize sidebar" });
-  await expect(sidebar).toHaveCSS("width", "320px");
+  await expect(sidebar).toHaveCSS("width", "272px");
   await expect(sidebar.locator("..")).toHaveCSS("transition-property", "grid-template-columns");
   await expect(sidebar.locator("..")).toHaveCSS("transition-duration", "0.2s");
   const handleBounds = await resizeHandle.boundingBox();
@@ -139,9 +139,9 @@ test("resizes, restores, and resets after mouse or keyboard collapse", async ({
   );
   await page.mouse.up();
 
-  await expect(sidebar).toHaveCSS("width", "400px");
+  await expect(sidebar).toHaveCSS("width", "352px");
   await page.reload();
-  await expect(sidebar).toHaveCSS("width", "400px");
+  await expect(sidebar).toHaveCSS("width", "352px");
 
   const restoredHandleBounds = await resizeHandle.boundingBox();
   if (!restoredHandleBounds) throw new Error("The restored resize handle is not visible");
@@ -157,7 +157,7 @@ test("resizes, restores, and resets after mouse or keyboard collapse", async ({
   const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
   await expect(expandSidebar).toBeFocused();
   await expandSidebar.click();
-  await expect(sidebar).toHaveCSS("width", "320px");
+  await expect(sidebar).toHaveCSS("width", "272px");
 
   await resizeHandle.press("Home");
   await expect(sidebar).toHaveCSS("width", "120px");
@@ -165,7 +165,7 @@ test("resizes, restores, and resets after mouse or keyboard collapse", async ({
   await expectSidebarCollapsed(sidebar);
   await expect(expandSidebar).toBeFocused();
   await expandSidebar.click();
-  await expect(sidebar).toHaveCSS("width", "320px");
+  await expect(sidebar).toHaveCSS("width", "272px");
 });
 
 test("resizes the composer after an animated sidebar change", async ({

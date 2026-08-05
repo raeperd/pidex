@@ -33,7 +33,7 @@
 
   const TASK_PREVIEW_COUNT = 6;
   const SIDEBAR_WIDTH_STORAGE_KEY = "pidex:sidebar-width";
-  const DEFAULT_SIDEBAR_WIDTH = 320;
+  const DEFAULT_SIDEBAR_WIDTH = 272;
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
