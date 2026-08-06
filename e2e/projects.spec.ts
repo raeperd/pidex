@@ -74,12 +74,18 @@ test("groups worktree tasks under their source project", async ({ page, request 
   const sourcePath = String(source.result.path);
   const worktreeWorkspaceId = "grouped_worktree_e2e";
   const worktreePath = `${process.cwd()}/.pidex-grouped-worktree`;
-  const sourceProject = { id: sourceWorkspaceId, path: sourcePath, worktree: false };
+  const sourceProject = {
+    id: sourceWorkspaceId,
+    path: sourcePath,
+    worktree: false,
+    worktreeSupport: "supported",
+  };
   const worktreeProject = {
     id: worktreeWorkspaceId,
     path: worktreePath,
     sourceWorkspaceId,
     worktree: true,
+    worktreeSupport: "supported",
   };
   let recentWorkspaces: Record<string, unknown>[] = [sourceProject, worktreeProject];
   const openedPaths: string[] = [];
@@ -257,9 +263,9 @@ test("manually reorders projects and preserves their order after reload", async 
 test("moves against the next visible project while filtering", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
   const projects = [
-    { id: "workspace_a", path: "/tmp/visible-a" },
-    { id: "workspace_b", path: "/tmp/hidden-b" },
-    { id: "workspace_c", path: "/tmp/visible-c" },
+    { id: "workspace_a", path: "/tmp/visible-a", worktreeSupport: "supported" },
+    { id: "workspace_b", path: "/tmp/hidden-b", worktreeSupport: "supported" },
+    { id: "workspace_c", path: "/tmp/visible-c", worktreeSupport: "supported" },
   ];
   let reorderedIds: string[] = [];
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
@@ -308,12 +314,12 @@ test("moves against the next visible project while filtering", async ({ page, re
 test("refreshes stale project membership after a reorder conflict", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
   const initial = [
-    { id: "workspace_a", path: "/tmp/project-a" },
-    { id: "workspace_b", path: "/tmp/project-b" },
+    { id: "workspace_a", path: "/tmp/project-a", worktreeSupport: "supported" },
+    { id: "workspace_b", path: "/tmp/project-b", worktreeSupport: "supported" },
   ];
   const canonical = [
-    { id: "workspace_b", path: "/tmp/project-b" },
-    { id: "workspace_c", path: "/tmp/project-c" },
+    { id: "workspace_b", path: "/tmp/project-b", worktreeSupport: "supported" },
+    { id: "workspace_c", path: "/tmp/project-c", worktreeSupport: "supported" },
   ];
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
@@ -410,8 +416,13 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
     path: `${process.cwd()}/apps/project-${String(index).padStart(3, "0")}`,
+    worktreeSupport: "supported",
   }));
-  const added = { id: "workspace_new", path: `${process.cwd()}/packages` };
+  const added = {
+    id: "workspace_new",
+    path: `${process.cwd()}/packages`,
+    worktreeSupport: "supported",
+  };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     const recentWorkspaces = bootstrapCalls++ < 2 ? existing : [...existing.slice(1), added];
@@ -470,9 +481,21 @@ test("reconciles concurrent project additions after opening a new project", asyn
     { path: `${process.cwd()}/apps`, remember: false },
     bootstrap.result.csrfToken,
   );
-  const initial = { id: "workspace_initial", path: "/tmp/project-initial" };
-  const concurrent = { id: "workspace_concurrent", path: "/tmp/project-concurrent" };
-  const added = { id: "workspace_added", path: "/tmp/project-added" };
+  const initial = {
+    id: "workspace_initial",
+    path: "/tmp/project-initial",
+    worktreeSupport: "supported",
+  };
+  const concurrent = {
+    id: "workspace_concurrent",
+    path: "/tmp/project-concurrent",
+    worktreeSupport: "supported",
+  };
+  const added = {
+    id: "workspace_added",
+    path: "/tmp/project-added",
+    worktreeSupport: "supported",
+  };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await route.fulfill({
@@ -526,8 +549,16 @@ test("refreshes membership when reopening a remotely evicted project", async ({
     { path: `${process.cwd()}/apps`, remember: false },
     bootstrap.result.csrfToken,
   );
-  const stale = { id: "workspace_stale", path: "/tmp/project-stale" };
-  const kept = { id: "workspace_kept", path: "/tmp/project-kept" };
+  const stale = {
+    id: "workspace_stale",
+    path: "/tmp/project-stale",
+    worktreeSupport: "supported",
+  };
+  const kept = {
+    id: "workspace_kept",
+    path: "/tmp/project-kept",
+    worktreeSupport: "supported",
+  };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await route.fulfill({
@@ -576,10 +607,16 @@ test("keeps a successful project open within the history limit when refresh fail
     { path: `${process.cwd()}/apps`, remember: false },
     bootstrap.result.csrfToken,
   );
-  const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
+  const added = {
+    id: "workspace_added",
+    name: "project-added",
+    path: "/tmp/project-added",
+    worktreeSupport: "supported",
+  };
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
     path: `/tmp/project-${String(index).padStart(3, "0")}`,
+    worktreeSupport: "supported",
   }));
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
@@ -646,6 +683,7 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
       id: `workspace_${suffix}`,
       name: `project-${suffix}`,
       path: `${process.cwd()}/apps/project-${suffix}`,
+      worktreeSupport: "supported",
     };
   });
   let bootstrapCalls = 0;
@@ -696,7 +734,12 @@ test("releases Add all controls when history reconciliation fails", async ({ pag
     { path: `${process.cwd()}/apps`, remember: false },
     bootstrap.result.csrfToken,
   );
-  const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
+  const added = {
+    id: "workspace_added",
+    name: "project-added",
+    path: "/tmp/project-added",
+    worktreeSupport: "supported",
+  };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     if (bootstrapCalls++ > 0) {
