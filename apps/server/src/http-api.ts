@@ -11,7 +11,9 @@ import { requestDigest, type MetadataService } from "./metadata.js";
 import {
   createProjectWorktree,
   discoverProjectCandidates,
+  initializeProjectGit,
   managedWorktreesRoot,
+  projectWorktreeSupport,
   removeProjectWorktree,
 } from "./project-catalog.js";
 import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
@@ -78,6 +80,12 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         }
         const id = yield* workspaceId(metadata, canonical, input.remember);
         return yield* manager.openWorkspace(id, canonical);
+      }),
+      initializeGit: workspaces.initializeGit.effect(function* (_, input) {
+        const manager = yield* Chats;
+        const workspace = yield* manager.workspace(input.workspaceId);
+        yield* initializeProjectGit(workspace.path);
+        return yield* manager.openWorkspace(workspace.id, workspace.path);
       }),
       createWorktree: workspaces.createWorktree.effect(function* (_, input) {
         const metadata = yield* Metadata;
@@ -389,14 +397,21 @@ function workspaceId(metadata: MetadataService, canonical: string, remember: boo
 }
 
 function recentWorkspaceRecords(metadata: MetadataService, managedWorktreeRoot: string) {
-  return metadata.recent().pipe(
-    Effect.map((records) =>
-      records.map((record) => ({
-        ...record,
-        worktree: isDescendant(managedWorktreeRoot, record.path),
-      })),
-    ),
-  );
+  return Effect.gen(function* () {
+    const records = yield* metadata.recent();
+    return yield* Effect.forEach(
+      records,
+      (record) =>
+        projectWorktreeSupport(record.path).pipe(
+          Effect.map((worktreeSupport) => ({
+            ...record,
+            worktree: isDescendant(managedWorktreeRoot, record.path),
+            worktreeSupport,
+          })),
+        ),
+      { concurrency: "unbounded" },
+    );
+  });
 }
 
 function requireIdle(isIdle: boolean, message: string) {

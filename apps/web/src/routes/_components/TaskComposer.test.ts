@@ -120,6 +120,15 @@ describe("slashCommandSuggestions", () => {
     );
   });
 
+  it("shows a shared local folder and explicit Git initialization for non-Git projects", () => {
+    const body = renderComposer("", false, true, "unsupported");
+
+    expect(body).toContain("Shared local folder");
+    expect(body).toContain('aria-label="Initialize Git"');
+    expect(body).not.toContain('aria-label="Start in Work locally"');
+    expect(body).not.toContain("New worktree");
+  });
+
   it("hides immutable workspace controls for an existing task", () => {
     const body = renderComposer("", false, false);
 
@@ -145,7 +154,12 @@ describe("slashCommandSuggestions", () => {
   });
 });
 
-function renderComposer(draft: string, active: boolean, startModeEditable = true) {
+function renderComposer(
+  draft: string,
+  active: boolean,
+  startModeEditable = true,
+  worktreeSupport: "supported" | "unsupported" = "supported",
+) {
   return render(TaskComposer, {
     props: {
       active,
@@ -166,6 +180,7 @@ function renderComposer(draft: string, active: boolean, startModeEditable = true
       creatingTask: false,
       draft,
       followUpCount: 0,
+      initializeGit: async () => {},
       models: [
         {
           id: "openai/gpt-5.6-sol",
@@ -186,6 +201,7 @@ function renderComposer(draft: string, active: boolean, startModeEditable = true
       startModeEditable,
       steeringCount: 0,
       stop: async () => {},
+      worktreeSupport,
     },
   }).body;
 }

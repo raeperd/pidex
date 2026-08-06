@@ -147,9 +147,11 @@
               {#if context.task.startModeEditable || starter.submitting}
                 <StartModeSelector
                   editable={context.task.startModeEditable}
+                  initializeGit={context.projectActions.initializeGit}
                   mode={context.task.startMode}
                   pending={starter.submitting}
                   select={context.taskActions.setStartMode}
+                  worktreeSupport={context.task.worktreeSupport}
                 />
                 <span
                   class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0"

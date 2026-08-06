@@ -3,7 +3,7 @@ import * as v from "valibot";
 
 export { safeParse } from "valibot";
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 export const MAX_RECENT_WORKSPACES = 100;
 export const idSchema = v.pipe(
   v.string(),
@@ -49,6 +49,7 @@ export const modelSchema = v.object({
   name: boundedString(200),
   reasoning: v.boolean(),
 });
+export const worktreeSupportSchema = v.picklist(["supported", "unsupported"]);
 export const sessionSummarySchema = v.object({
   id: idSchema,
   name: v.optional(boundedString(300)),
@@ -61,6 +62,7 @@ export const workspaceSchema = v.object({
   id: idSchema,
   path: boundedString(4096),
   name: boundedString(300),
+  worktreeSupport: worktreeSupportSchema,
   trusted: v.nullable(v.boolean()),
   protectedResourcesSkipped: v.boolean(),
   resourceDiagnostics: v.pipe(
@@ -74,6 +76,7 @@ export const workspaceSchema = v.object({
 export const recentWorkspaceSchema = v.object({
   id: idSchema,
   path: boundedString(4096),
+  worktreeSupport: worktreeSupportSchema,
   sourceWorkspaceId: v.optional(idSchema),
   worktree: v.optional(v.boolean()),
 });
@@ -333,6 +336,7 @@ export const pidexApiContract = {
   },
   workspaces: {
     open: oc.input(openWorkspaceSchema).output(workspaceSchema),
+    initializeGit: oc.input(workspaceIdInputSchema).output(workspaceSchema),
     createWorktree: oc.input(workspaceIdInputSchema).output(workspaceSchema),
     removeWorktree: oc.input(workspaceIdInputSchema).output(okResponseSchema),
     reorder: oc.input(reorderWorkspacesSchema).output(recentWorkspacesResponseSchema),
@@ -380,6 +384,7 @@ export type PidexApiContractClient = RouterContractClient<typeof pidexApiContrac
 export type ModelInfo = v.InferOutput<typeof modelSchema>;
 export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
 export type Workspace = v.InferOutput<typeof workspaceSchema>;
+export type WorktreeSupport = v.InferOutput<typeof worktreeSupportSchema>;
 export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;
 export type ProjectCandidate = v.InferOutput<typeof projectCandidateSchema>;
 export type Health = v.InferOutput<typeof healthSchema>;

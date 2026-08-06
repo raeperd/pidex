@@ -156,6 +156,7 @@
       !workspaceIsWorktree(snapshot?.workspaceId ?? workspace?.id ?? ""),
     ),
   );
+  let worktreeSupport = $derived(workspace?.worktreeSupport ?? "unsupported");
   const projectName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
   function sourceWorkspaceId(project: RecentWorkspace) {
     if (project.sourceWorkspaceId) return project.sourceWorkspaceId;
@@ -296,6 +297,9 @@
       get startModeEditable() {
         return startModeEditable;
       },
+      get worktreeSupport() {
+        return worktreeSupport;
+      },
       get toolElapsedNow() {
         return toolElapsedNow;
       },
@@ -319,11 +323,13 @@
       start: startTask,
       setDraft: (value) => (draft = value),
       setStartMode: (value) => {
-        if (startModeEditable) startMode = value;
+        if (startModeEditable && (value === "local" || worktreeSupport === "supported"))
+          startMode = value;
       },
       stop,
     },
     projectActions: {
+      initializeGit,
       openProjectPicker,
       retryConnection,
     },
@@ -387,6 +393,7 @@
       const entry = {
         id: loaded.id,
         path: loaded.path,
+        worktreeSupport: loaded.worktreeSupport,
         ...(current?.worktree === undefined ? {} : { worktree: current.worktree }),
         ...(current?.sourceWorkspaceId ? { sourceWorkspaceId: current.sourceWorkspaceId } : {}),
       };
@@ -626,6 +633,21 @@
       error = cause instanceof Error ? cause.message : "Project trust could not be saved";
     }
   }
+  async function initializeGit() {
+    const target = workspace;
+    if (!target || target.worktreeSupport === "supported") return;
+    try {
+      error = "";
+      const loaded = await api.initializeGit(target.id);
+      if (workspace?.id !== target.id) return;
+      workspace = loaded;
+      rememberWorkspace(loaded, false);
+      bootstrap = await api.bootstrap();
+      startMode = "local";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "Git could not be initialized";
+    }
+  }
   async function toggleProject(project: RecentWorkspace) {
     if (projectExpanded(project.id)) {
       expandedProjectIds = expandedProjectIds.filter((id) => id !== project.id);
@@ -674,6 +696,7 @@
       const createInWorktree =
         Boolean(starterPrompt) &&
         startMode === "worktree" &&
+        rememberedTarget.worktreeSupport === "supported" &&
         !workspaceIsWorktree(rememberedTarget.id);
       const taskWorkspace = createInWorktree
         ? (worktree = await api.createWorktree(rememberedTarget.id))
@@ -748,7 +771,14 @@
     if (target) await newTask(target);
   }
   async function prepareWorktreeTask(initialDraft: string) {
-    if (!workspace || !snapshot || chatLoading || projectOrderSaving) return false;
+    if (
+      !workspace ||
+      workspace.worktreeSupport !== "supported" ||
+      !snapshot ||
+      chatLoading ||
+      projectOrderSaving
+    )
+      return false;
     const source = workspace;
     const previousSnapshot = snapshot;
     const sequence = ++routeSequence;
@@ -1033,6 +1063,7 @@
     const text = submittedDraft.trim();
     if (
       startMode === "worktree" &&
+      workspace?.worktreeSupport === "supported" &&
       taskHasNoTranscript &&
       !workspaceIsWorktree(snapshot.workspaceId) &&
       !(await prepareWorktreeTask(submittedDraft))

@@ -120,7 +120,7 @@
 </script>
 
 <script lang="ts">
-  import type { ChatSnapshot, ContextUsage } from "@pidex/api";
+  import type { ChatSnapshot, ContextUsage, WorktreeSupport } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { ConnectionState } from "./AppShellConnection";
@@ -147,6 +147,7 @@
     creatingTask,
     draft = $bindable(),
     followUpCount,
+    initializeGit,
     models,
     persistDraft,
     projectName,
@@ -160,6 +161,7 @@
     startModeEditable,
     steeringCount,
     stop,
+    worktreeSupport,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
@@ -173,6 +175,7 @@
     creatingTask: boolean;
     draft: string;
     followUpCount: number;
+    initializeGit: () => Promise<void>;
     models: Workspace["models"];
     persistDraft: () => void;
     projectName: string;
@@ -186,6 +189,7 @@
     startModeEditable: boolean;
     steeringCount: number;
     stop: () => Promise<void>;
+    worktreeSupport: WorktreeSupport;
   } = $props();
 
   let promptInput: HTMLTextAreaElement | undefined;
@@ -369,9 +373,11 @@
         <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
         <StartModeSelector
           editable={startModeEditable && !active}
+          {initializeGit}
           mode={startMode}
           pending={creatingTask}
           select={setStartMode}
+          {worktreeSupport}
         />
       </div>
     {/if}
