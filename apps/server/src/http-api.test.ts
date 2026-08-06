@@ -63,6 +63,7 @@ describe.sequential("HTTP API endpoints", () => {
   const originalEnvironment = preserveEnvironment([
     "PIDEX_PROJECT_ROOTS",
     "PIDEX_STATE_DIR",
+    "PIDEX_WORKTREES_DIR",
     "PI_CODING_AGENT_DIR",
     "PI_CODING_AGENT_SESSION_DIR",
     "WORKSPACE_ROOTS",
@@ -105,6 +106,7 @@ describe.sequential("HTTP API endpoints", () => {
 
     process.env.PIDEX_PROJECT_ROOTS = tempRoot;
     process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
+    process.env.PIDEX_WORKTREES_DIR = path.join(tempRoot, "worktrees");
     process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
     process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
@@ -257,7 +259,7 @@ describe.sequential("HTTP API endpoints", () => {
       trusted: true,
       protectedResourcesSkipped: false,
     });
-    expect(created.path).toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
+    expect(created.path).toContain(`${path.join(tempRoot, "worktrees")}${path.sep}`);
     expect(branch).toMatch(/^pidex\/[0-9a-f]{8}$/);
     await expect(publicApi.system.bootstrap({})).resolves.toMatchObject({
       recentWorkspaces: expect.arrayContaining([
@@ -342,7 +344,7 @@ describe.sequential("HTTP API endpoints", () => {
       encoding: "utf8",
     });
     expect(branchesAfter).toBe(branchesBefore);
-    expect(worktrees).not.toContain(`${path.sep}state${path.sep}worktrees${path.sep}`);
+    expect(worktrees).not.toContain(`${path.join(tempRoot, "worktrees")}${path.sep}`);
   });
 
   it("rejects unrecorded directories under the managed worktree root", async () => {

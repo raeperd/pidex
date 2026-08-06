@@ -112,9 +112,16 @@ export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(functi
 });
 
 export const managedWorktreesRoot = Effect.fn("projects.managedWorktreesRoot")(function* () {
-  const stateDirectory = process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
-  const resolvedStateDirectory = yield* optionalPromise(() => realpath(stateDirectory));
-  return path.join(resolvedStateDirectory ?? path.resolve(stateDirectory), "worktrees");
+  const worktreesDirectory =
+    process.env.PIDEX_WORKTREES_DIR ?? path.join(os.homedir(), ".pidex", "worktrees");
+  yield* Effect.tryPromise({
+    try: () => mkdir(worktreesDirectory, { recursive: true, mode: 0o700 }),
+    catch: (cause) => applicationError("worktree.directory.create", cause),
+  });
+  return yield* Effect.tryPromise({
+    try: () => realpath(worktreesDirectory),
+    catch: (cause) => applicationError("worktree.directory.resolve", cause),
+  });
 });
 
 export const discoverProjectCandidates = Effect.fn("projects.discoverCandidates")(function* (
