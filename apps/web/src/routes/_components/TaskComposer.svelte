@@ -127,6 +127,7 @@
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
+  import StartModeSelector from "./StartModeSelector.svelte";
 
   const composerSelectLabelClass =
     "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
@@ -188,8 +189,6 @@
   } = $props();
 
   let promptInput: HTMLTextAreaElement | undefined;
-  let startMenuOpen = $state(false);
-  let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
   let idleSubmissionDisabled = $derived(
     !draft.trim() ||
       !models.length ||
@@ -305,30 +304,7 @@
       void submitDraft();
     }
   }
-
-  function dismissStartMenu(event: MouseEvent) {
-    if (
-      startMenuOpen &&
-      event.target instanceof Element &&
-      !event.target.closest("[data-start-menu]")
-    )
-      startMenuOpen = false;
-  }
-
-  function startMenuKeydown(event: KeyboardEvent) {
-    if (startMenuOpen && event.key === "Escape") {
-      startMenuOpen = false;
-      promptInput?.focus();
-    }
-  }
-
-  function chooseStartMode(mode: TaskStartMode) {
-    setStartMode(mode);
-    startMenuOpen = false;
-  }
 </script>
-
-<svelte:window onclick={dismissStartMenu} onkeydown={startMenuKeydown} />
 
 <footer
   class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
@@ -391,52 +367,12 @@
           >
         </span>
         <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
-        <div class="relative flex-none" data-start-menu>
-          <button
-            class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-control font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
-            onclick={() => (startMenuOpen = !startMenuOpen)}
-            disabled={!startModeEditable || active || creatingTask}
-            aria-label={`Start in ${startModeLabel}`}
-            aria-haspopup="menu"
-            aria-expanded={startMenuOpen}
-            title={startModeEditable
-              ? "Choose where to start this task"
-              : `Started in ${startModeLabel}`}
-          >
-            <Icon name={startMode === "worktree" ? "folder-git" : "folder"} size={13} />
-            {creatingTask ? "Creating worktree…" : startModeLabel}
-            {#if startModeEditable}<Icon name="arrow-down" size={11} />{/if}
-          </button>
-          {#if startMenuOpen}
-            <div
-              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
-              role="menu"
-              aria-label="Start in"
-            >
-              <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
-              <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
-                role="menuitemradio"
-                aria-checked={startMode === "local"}
-                onclick={() => chooseStartMode("local")}
-              >
-                <Icon name="folder" size={14} />
-                <span class="flex-1">Work locally</span>
-                {#if startMode === "local"}<Icon name="check" size={13} />{/if}
-              </button>
-              <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
-                role="menuitemradio"
-                aria-checked={startMode === "worktree"}
-                onclick={() => chooseStartMode("worktree")}
-              >
-                <Icon name="folder-git" size={14} />
-                <span class="flex-1">New worktree</span>
-                {#if startMode === "worktree"}<Icon name="check" size={13} />{/if}
-              </button>
-            </div>
-          {/if}
-        </div>
+        <StartModeSelector
+          editable={startModeEditable && !active}
+          mode={startMode}
+          pending={creatingTask}
+          select={setStartMode}
+        />
       </div>
     {/if}
     <textarea

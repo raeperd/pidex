@@ -306,7 +306,10 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
 });
 
-test("defers worktree creation until the first prompt is sent", async ({ page, request }) => {
+test("creates a worktree from the project starter when the first prompt is sent", async ({
+  page,
+  request,
+}) => {
   const workspaceName = basename(process.cwd());
   let sourceWorkspace: Record<string, unknown> | undefined;
   let localSnapshot: Record<string, unknown> | undefined;
@@ -408,13 +411,21 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       await route.abort("failed");
       return;
     }
-    if (!localSnapshot) throw new Error("Expected the local task to exist");
     const suffix = worktreeChatCreations === 2 ? "" : `_${worktreeChatCreations}`;
     worktreeSnapshot = {
-      ...localSnapshot,
       chatId: `worktree_chat_e2e${suffix}`,
       taskId: `worktree_task_e2e${suffix}`,
       workspaceId: "worktree_workspace_e2e",
+      revision: 0,
+      runStatus: "idle",
+      model: "e2e/model",
+      thinkingLevel: "high",
+      items: [],
+      transcriptStart: 0,
+      transcriptTotal: 0,
+      steeringQueue: [],
+      followUpQueue: [],
+      stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
     };
     await route.fulfill({
       status: 200,
@@ -458,10 +469,8 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
 
   await rememberWorkspace(request, process.cwd());
   await page.goto("/");
-  await openTasks(page);
-  await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
 
-  const composer = page.getByTestId("chat-composer");
+  const composer = page.getByTestId("starter-composer");
   const startSelector = composer.getByRole("button", { name: "Start in Work locally" });
   await expect(startSelector).toBeVisible();
   await startSelector.click();
@@ -470,20 +479,20 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   await startMenu.getByRole("menuitemradio", { name: "New worktree" }).click();
   await expect(composer.getByRole("button", { name: "Start in New worktree" })).toBeVisible();
   expect(worktreeCreations).toBe(0);
-  expect(chatCreations).toBe(1);
+  expect(chatCreations).toBe(0);
 
   await page.getByLabel("Prompt").fill("Implement the selected task");
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect.poll(() => worktreeCreations).toBe(1);
-  await expect.poll(() => chatCreations).toBe(2);
+  await expect.poll(() => chatCreations).toBe(1);
   await expect.poll(() => removedWorktrees).toEqual(["worktree_workspace_e2e"]);
   await expect.poll(() => sentPrompts).toHaveLength(0);
 
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect.poll(() => worktreeCreations).toBe(2);
-  await expect.poll(() => chatCreations).toBe(3);
+  await expect.poll(() => chatCreations).toBe(2);
   await expect.poll(() => sentPrompts).toHaveLength(1);
   expect(sentPrompts[0]).toEqual(
     expect.objectContaining({
@@ -492,13 +501,13 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
     }),
   );
   await expect(page).toHaveURL(/\/tasks\/worktree_task_e2e$/);
-  await expect.poll(() => disposedChats).toContain("local_chat_e2e");
+  expect(disposedChats).toEqual([]);
   await page.goBack();
   await expect(page).toHaveURL("/");
 
   await openTasks(page);
   await page.getByRole("button", { name: `New task in ${workspaceName}` }).click();
-  await expect(page).toHaveURL(/\/tasks\/local_task_e2e_2$/);
+  await expect(page).toHaveURL(/\/tasks\/local_task_e2e$/);
   const cancelledComposer = page.getByTestId("chat-composer");
   await cancelledComposer.getByRole("button", { name: "Start in Work locally" }).click();
   await page

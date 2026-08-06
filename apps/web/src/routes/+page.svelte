@@ -3,6 +3,7 @@
   import { getAppShellContext } from "./_components/AppShellContext.svelte";
   import type { TaskConfigurationPatch } from "./_components/AppShellContext.svelte";
   import Icon from "./_components/Icon.svelte";
+  import StartModeSelector from "./_components/StartModeSelector.svelte";
 
   const composerSelectLabelClass =
     "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
@@ -142,52 +143,68 @@
           <div
             class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-10.5 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
           >
-            <div
-              class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-            >
-              <label class={composerSelectLabelClass}>
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:w-36 max-[560px]:max-w-36 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-56",
-                  ]}
-                  aria-label="Model"
-                  value={selectedModel}
-                  onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-                  disabled={!context.shell.workspace?.models.length || starter.submitting}
-                >
-                  {#each context.shell.workspace?.models ?? [] as model (model.id)}<option
-                      value={model.id}>{model.name}</option
-                    >{/each}
-                </select>
-              </label>
-              <span class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0" aria-hidden="true"
-              ></span>
-              <label class={composerSelectLabelClass}>
+            <div class="flex min-w-0 flex-1 items-center gap-1 max-[560px]:gap-0">
+              {#if context.task.startModeEditable || starter.submitting}
+                <StartModeSelector
+                  editable={context.task.startModeEditable}
+                  mode={context.task.startMode}
+                  pending={starter.submitting}
+                  select={context.taskActions.setStartMode}
+                />
                 <span
-                  class="grid w-4 flex-none place-items-center text-current max-[560px]:hidden"
-                  aria-hidden="true"><Icon name="activity" size={14} /></span
-                >
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:max-w-27 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-36",
-                  ]}
-                  aria-label="Thinking level"
-                  value={starter.thinkingLevel}
-                  onchange={(event) =>
-                    stageConfiguration({
-                      thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                    })}
-                  disabled={!context.shell.workspace || starter.submitting}
-                >
-                  <option value="off">Off</option><option value="minimal">Minimal</option><option
-                    value="low">Low</option
-                  ><option value="medium">Medium</option><option value="high">High</option><option
-                    value="xhigh">Extra high</option
-                  ><option value="max">Max</option>
-                </select>
-              </label>
+                  class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0"
+                  aria-hidden="true"
+                ></span>
+              {/if}
+              <div
+                class="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
+              >
+                <label class={composerSelectLabelClass}>
+                  <select
+                    class={[
+                      composerSelectClass,
+                      "max-[560px]:w-36 max-[560px]:max-w-36 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-56",
+                    ]}
+                    aria-label="Model"
+                    value={selectedModel}
+                    onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
+                    disabled={!context.shell.workspace?.models.length || starter.submitting}
+                  >
+                    {#each context.shell.workspace?.models ?? [] as model (model.id)}<option
+                        value={model.id}>{model.name}</option
+                      >{/each}
+                  </select>
+                </label>
+                <span
+                  class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0"
+                  aria-hidden="true"
+                ></span>
+                <label class={composerSelectLabelClass}>
+                  <span
+                    class="grid w-4 flex-none place-items-center text-current max-[560px]:hidden"
+                    aria-hidden="true"><Icon name="activity" size={14} /></span
+                  >
+                  <select
+                    class={[
+                      composerSelectClass,
+                      "max-[560px]:max-w-27 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-36",
+                    ]}
+                    aria-label="Thinking level"
+                    value={starter.thinkingLevel}
+                    onchange={(event) =>
+                      stageConfiguration({
+                        thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
+                      })}
+                    disabled={!context.shell.workspace || starter.submitting}
+                  >
+                    <option value="off">Off</option><option value="minimal">Minimal</option><option
+                      value="low">Low</option
+                    ><option value="medium">Medium</option><option value="high">High</option><option
+                      value="xhigh">Extra high</option
+                    ><option value="max">Max</option>
+                  </select>
+                </label>
+              </div>
             </div>
             <button
               class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
