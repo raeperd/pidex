@@ -15,6 +15,14 @@ export const projectWorktreeSupport = Effect.fn("projects.worktreeSupport")(func
   projectPath: string,
 ) {
   return yield* inspectRepository(projectPath).pipe(
+    Effect.andThen(() =>
+      runGit(
+        projectPath,
+        ["rev-parse", "--verify", "HEAD"],
+        "project_has_no_head",
+        "Project does not have a committed Git revision",
+      ),
+    ),
     Effect.match({
       onFailure: (): WorktreeSupport => "unsupported",
       onSuccess: (): WorktreeSupport => "supported",
