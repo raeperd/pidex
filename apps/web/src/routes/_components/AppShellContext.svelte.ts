@@ -1,5 +1,5 @@
 import { createContext } from "svelte";
-import type { Bootstrap, ChatSnapshot, ToolItem, Workspace } from "@pidex/api";
+import type { Bootstrap, ChatSnapshot, ToolItem, Workspace, WorktreeSupport } from "@pidex/api";
 import type { ConnectionState } from "./AppShellConnection";
 
 export type TaskStartMode = "local" | "worktree";
@@ -56,6 +56,7 @@ export interface AppShellContext {
     readonly snapshot: ChatSnapshot | undefined;
     readonly startMode: TaskStartMode;
     readonly startModeEditable: boolean;
+    readonly worktreeSupport: WorktreeSupport;
     readonly toolElapsedNow: number;
     readonly toolOutputs: Readonly<Record<string, TaskToolOutput>>;
     readonly toolTimings: Readonly<Record<string, TaskToolTiming>>;
@@ -76,6 +77,7 @@ export interface AppShellContext {
     stop(): Promise<void>;
   };
   readonly projectActions: {
+    initializeGit(): Promise<void>;
     openProjectPicker(): void;
     retryConnection(): Promise<void>;
   };

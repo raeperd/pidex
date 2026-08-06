@@ -51,6 +51,7 @@
     contextUsage={context.task.snapshot.contextUsage}
     creatingTask={context.task.creatingTask}
     followUpCount={context.task.snapshot.followUpQueue.length}
+    initializeGit={context.projectActions.initializeGit}
     models={context.shell.workspace?.models ?? []}
     persistDraft={context.taskActions.persistDraft}
     projectName={context.shell.workspace?.name ?? "Project"}
@@ -64,6 +65,7 @@
     startModeEditable={context.task.startModeEditable}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
+    worktreeSupport={context.task.worktreeSupport}
   />
 {:else}
   <section

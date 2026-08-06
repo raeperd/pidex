@@ -57,7 +57,9 @@ test("scales mobile task and composer targets while preserving responsive densit
       json: {
         json: {
           ...bootstrap.result,
-          recentWorkspaces: [{ id: opened.result.id, path: workspacePath }],
+          recentWorkspaces: [
+            { id: opened.result.id, path: workspacePath, worktreeSupport: "supported" },
+          ],
           projectCandidates: [],
         },
       },

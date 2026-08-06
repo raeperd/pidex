@@ -42,6 +42,10 @@ export function makePidexApiClient() {
     return client.workspaces.open({ path, remember });
   }
 
+  function initializeGit(workspaceId: string): Promise<Workspace> {
+    return client.workspaces.initializeGit({ workspaceId });
+  }
+
   function createWorktree(workspaceId: string): Promise<Workspace> {
     return client.workspaces.createWorktree({ workspaceId });
   }
@@ -199,6 +203,7 @@ export function makePidexApiClient() {
     createActionId,
     bootstrap,
     openWorkspace,
+    initializeGit,
     createWorktree,
     removeWorktree,
     reorderWorkspaces,

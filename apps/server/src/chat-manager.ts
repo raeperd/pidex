@@ -24,6 +24,7 @@ import type {
 import { applicationError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
 import type { PiSdkServiceApi } from "./pi-sdk.js";
+import { projectWorktreeSupport } from "./project-catalog.js";
 import { safeError } from "./security.js";
 
 interface WorkspaceRecord {
@@ -94,6 +95,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function openWorkspace(id: string, canonicalPath: string) {
     return Effect.gen(function* () {
       const info = yield* pi.inspectWorkspace(canonicalPath);
+      const worktreeSupport = yield* projectWorktreeSupport(canonicalPath);
       const record = { id, path: canonicalPath, info };
       workspaces.set(id, record);
       const sessions = yield* Effect.forEach(info.sessions, (session) =>
@@ -103,6 +105,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         id,
         path: canonicalPath,
         name: canonicalPath.split(/[\\/]/).filter(Boolean).at(-1) ?? canonicalPath,
+        worktreeSupport,
         trusted: info.trusted,
         protectedResourcesSkipped: info.protectedResourcesSkipped,
         resourceDiagnostics: info.resourceDiagnostics,

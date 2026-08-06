@@ -4,12 +4,42 @@ import { mkdir, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { ProjectCandidate } from "@pidex/api";
+import type { ProjectCandidate, WorktreeSupport } from "@pidex/api";
 import { Effect } from "effect";
 import { applicationError, HttpError } from "./errors.js";
 import { isDescendant } from "./security.js";
 
 const execFileAsync = promisify(execFile);
+
+export const projectWorktreeSupport = Effect.fn("projects.worktreeSupport")(function* (
+  projectPath: string,
+) {
+  return yield* inspectRepository(projectPath).pipe(
+    Effect.andThen(() =>
+      runGit(
+        projectPath,
+        ["rev-parse", "--verify", "HEAD"],
+        "project_has_no_head",
+        "Project does not have a committed Git revision",
+      ),
+    ),
+    Effect.match({
+      onFailure: (): WorktreeSupport => "unsupported",
+      onSuccess: (): WorktreeSupport => "supported",
+    }),
+  );
+});
+
+export const initializeProjectGit = Effect.fn("projects.initializeGit")(function* (
+  projectPath: string,
+) {
+  yield* runGit(
+    projectPath,
+    ["init"],
+    "git_initialize_failed",
+    "Git could not initialize this project",
+  );
+});
 
 export const createProjectWorktree = Effect.fn("projects.createWorktree")(function* (
   sourceProjectPath: string,

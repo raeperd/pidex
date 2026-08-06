@@ -27,6 +27,7 @@ const coveredEndpoints = [
   "system.health",
   "system.bootstrap",
   "workspaces.open",
+  "workspaces.initializeGit",
   "workspaces.createWorktree",
   "workspaces.removeWorktree",
   "workspaces.reorder",
@@ -103,6 +104,7 @@ describe.sequential("HTTP API endpoints", () => {
       { cwd: repositoryPath },
     );
     workspacePath = await realpath(workspacePath);
+    nonGitWorkspacePath = await realpath(nonGitWorkspacePath);
 
     process.env.PIDEX_PROJECT_ROOTS = tempRoot;
     process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
@@ -122,6 +124,8 @@ describe.sequential("HTTP API endpoints", () => {
     const bootstrap = await publicApi.system.bootstrap({});
     api = createClient(rpcUrl, bootstrap.csrfToken);
     workspaceId = (await api.workspaces.open({ path: workspacePath, remember: false })).id;
+    nonGitWorkspaceId = (await api.workspaces.open({ path: nonGitWorkspacePath, remember: false }))
+      .id;
     chatId = (await api.chats.create({ workspaceId })).chatId;
   }, 30_000);
 
@@ -219,7 +223,36 @@ describe.sequential("HTTP API endpoints", () => {
       path: workspacePath,
       name: "workspace",
       protectedResourcesSkipped: true,
+      worktreeSupport: "supported",
     });
+  });
+
+  it("opens non-Git directories for shared local tasks", async () => {
+    const opened = await api.workspaces.open({ path: nonGitWorkspacePath, remember: true });
+    nonGitWorkspaceId = opened.id;
+
+    expect(opened).toMatchObject({
+      path: nonGitWorkspacePath,
+      worktreeSupport: "unsupported",
+    });
+    const first = await api.chats.create({ workspaceId: opened.id });
+    const second = await api.chats.create({ workspaceId: opened.id });
+    expect(first.workspaceId).toBe(opened.id);
+    expect(second.workspaceId).toBe(opened.id);
+    await api.chats.dispose({ chatId: first.chatId });
+    await api.chats.dispose({ chatId: second.chatId });
+    await expect(access(path.join(nonGitWorkspacePath, ".git"))).rejects.toThrow();
+
+    const bootstrap = await publicApi.system.bootstrap({});
+    expect(bootstrap.recentWorkspaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: opened.id,
+          path: opened.path,
+          worktreeSupport: "unsupported",
+        }),
+      ]),
+    );
   });
 
   it("workspaces.reorder", async () => {
@@ -258,6 +291,7 @@ describe.sequential("HTTP API endpoints", () => {
       path: expect.any(String),
       trusted: true,
       protectedResourcesSkipped: false,
+      worktreeSupport: "supported",
     });
     expect(created.path).toContain(`${path.join(tempRoot, "worktrees")}${path.sep}`);
     expect(branch).toMatch(/^pidex\/[0-9a-f]{8}$/);
@@ -268,6 +302,7 @@ describe.sequential("HTTP API endpoints", () => {
           path: created.path,
           sourceWorkspaceId: workspaceId,
           worktree: true,
+          worktreeSupport: "supported",
         },
       ]),
     });
@@ -315,6 +350,71 @@ describe.sequential("HTTP API endpoints", () => {
       "project_not_git",
       400,
     );
+  });
+
+  it("initializes Git explicitly and unlocks worktrees after the first commit", async () => {
+    const initialized = await api.workspaces.initializeGit({ workspaceId: nonGitWorkspaceId });
+
+    expect(initialized).toMatchObject({
+      id: nonGitWorkspaceId,
+      path: nonGitWorkspacePath,
+      worktreeSupport: "unsupported",
+    });
+    await expect(
+      execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+        cwd: nonGitWorkspacePath,
+        encoding: "utf8",
+      }),
+    ).resolves.toMatchObject({ stdout: "true\n" });
+    const bootstrap = await publicApi.system.bootstrap({});
+    expect(bootstrap.recentWorkspaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: nonGitWorkspaceId,
+          path: nonGitWorkspacePath,
+          worktreeSupport: "unsupported",
+        }),
+      ]),
+    );
+    await expectRpcError(
+      api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
+      "worktree_create_failed",
+      400,
+    );
+
+    await writeFile(path.join(nonGitWorkspacePath, "README.md"), "# Initialized project\n");
+    await execFileAsync("git", ["add", "."], { cwd: nonGitWorkspacePath });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Pidex Test",
+        "-c",
+        "user.email=pidex@example.invalid",
+        "commit",
+        "-m",
+        "Initial commit",
+      ],
+      { cwd: nonGitWorkspacePath },
+    );
+
+    const reopened = await api.workspaces.open({ path: nonGitWorkspacePath, remember: true });
+    expect(reopened.worktreeSupport).toBe("supported");
+    const refreshed = await publicApi.system.bootstrap({});
+    expect(refreshed.recentWorkspaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: nonGitWorkspaceId,
+          path: nonGitWorkspacePath,
+          worktreeSupport: "supported",
+        }),
+      ]),
+    );
+    const worktree = await api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId });
+    expect(worktree.worktreeSupport).toBe("supported");
+    await expect(api.workspaces.removeWorktree({ workspaceId: worktree.id })).resolves.toEqual({
+      ok: true,
+    });
   });
 
   it("rolls back a worktree when the project is absent from HEAD", async () => {
