@@ -71,7 +71,9 @@ test("scales mobile task and composer targets while preserving responsive densit
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await fulfillJson(route, {
       ...bootstrap.result,
-      recentWorkspaces: [{ id: opened.result.id, path: workspacePath }],
+      recentWorkspaces: [
+        { id: opened.result.id, path: workspacePath, worktreeSupport: "supported" },
+      ],
       projectCandidates: [],
     });
   });
