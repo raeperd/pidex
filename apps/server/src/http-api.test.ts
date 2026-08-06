@@ -345,13 +345,13 @@ describe.sequential("HTTP API endpoints", () => {
     );
   });
 
-  it("initializes Git only when explicitly requested and re-detects worktree support", async () => {
+  it("initializes Git explicitly and unlocks worktrees after the first commit", async () => {
     const initialized = await api.workspaces.initializeGit({ workspaceId: nonGitWorkspaceId });
 
     expect(initialized).toMatchObject({
       id: nonGitWorkspaceId,
       path: nonGitWorkspacePath,
-      worktreeSupport: "supported",
+      worktreeSupport: "unsupported",
     });
     await expect(
       execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
@@ -365,10 +365,49 @@ describe.sequential("HTTP API endpoints", () => {
         expect.objectContaining({
           id: nonGitWorkspaceId,
           path: nonGitWorkspacePath,
+          worktreeSupport: "unsupported",
+        }),
+      ]),
+    );
+    await expectRpcError(
+      api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId }),
+      "worktree_create_failed",
+      400,
+    );
+
+    await writeFile(path.join(nonGitWorkspacePath, "README.md"), "# Initialized project\n");
+    await execFileAsync("git", ["add", "."], { cwd: nonGitWorkspacePath });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Pidex Test",
+        "-c",
+        "user.email=pidex@example.invalid",
+        "commit",
+        "-m",
+        "Initial commit",
+      ],
+      { cwd: nonGitWorkspacePath },
+    );
+
+    const reopened = await api.workspaces.open({ path: nonGitWorkspacePath, remember: true });
+    expect(reopened.worktreeSupport).toBe("supported");
+    const refreshed = await publicApi.system.bootstrap({});
+    expect(refreshed.recentWorkspaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: nonGitWorkspaceId,
+          path: nonGitWorkspacePath,
           worktreeSupport: "supported",
         }),
       ]),
     );
+    const worktree = await api.workspaces.createWorktree({ workspaceId: nonGitWorkspaceId });
+    expect(worktree.worktreeSupport).toBe("supported");
+    await expect(api.workspaces.removeWorktree({ workspaceId: worktree.id })).resolves.toEqual({
+      ok: true,
+    });
   });
 
   it("rolls back a worktree when the project is absent from HEAD", async () => {
