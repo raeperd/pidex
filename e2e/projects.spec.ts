@@ -7,6 +7,7 @@ import {
   rememberWorkspace,
   routeInput,
   rpcRequest,
+  workspaceName,
 } from "./support";
 
 test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
@@ -224,11 +225,23 @@ test("keeps a departed task's sidebar status correct when session-list responses
     await fulfillJson(route, { sessions: sessionsWithTaskAStatus("idle") });
   });
 
-  await page.goto(`/tasks/${String(taskA.taskId)}`);
+  // Navigate via "/" and UI clicks (like every sibling test in this file), not a direct
+  // goto("/tasks/...") -- the latter races the app's own onMount project-restore against
+  // activateRoute's handling of the direct task route and can land on the wrong project.
+  await page.goto("/");
   await openTasks(page);
   const taskARow = page.getByRole("button", { name: /Race task A/ });
   const taskBRow = page.getByRole("button", { name: /Race task B/ });
+  // The project may already be auto-restored and expanded (it's the workspace this whole
+  // e2e run operates in, so it's very likely the most-recently-remembered one) -- only expand
+  // it if it isn't already, since toggling an already-expanded project collapses it instead.
+  if (!(await taskBRow.isVisible()))
+    await page
+      .getByRole("button", { name: `Expand ${workspaceName}` })
+      .evaluate((button: HTMLButtonElement) => button.click());
   await expect(taskBRow).toBeVisible();
+  await taskARow.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(taskA.taskId)}`);
 
   // Navigate away from A (issues the slow call #1 for A's workspace), then bounce back and
   // away again fast enough that calls #2 and #3 are both issued -- and resolved -- before
