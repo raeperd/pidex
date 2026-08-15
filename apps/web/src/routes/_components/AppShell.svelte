@@ -1380,7 +1380,7 @@
 <svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
 
 <svelte:head>
-  <title>Pidex</title>
+  <title>{active ? "● " : ""}{currentTitle}</title>
   <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 
