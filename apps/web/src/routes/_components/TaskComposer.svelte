@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { Workspace } from "@pidex/api";
+  import type { ChatSnapshot, Workspace } from "@pidex/api";
 
   export const composerSurfaceClass =
     "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
@@ -112,6 +112,36 @@
     return instructions ? { instructions } : {};
   }
 
+  export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
+    switch (status) {
+      case "running":
+        return "Working";
+      case "stopping":
+        return "Stopping";
+      case "compacting":
+        return "Compacting context";
+      default:
+        return "Idle";
+    }
+  }
+
+  export function queueSummary(steeringCount: number, followUpCount: number): string {
+    const parts: string[] = [];
+    if (steeringCount > 0) parts.push(`${steeringCount} steering`);
+    if (followUpCount > 0) parts.push(`${followUpCount} follow-up`);
+    return parts.length > 0 ? `${parts.join(" · ")} queued` : "";
+  }
+
+  export function formatRunElapsed(elapsedMs: number): string {
+    const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }
+
   export async function submitComposerDraft(
     draft: string,
     actions: {
@@ -130,7 +160,7 @@
 </script>
 
 <script lang="ts">
-  import type { ChatSnapshot, ContextUsage } from "@pidex/api";
+  import type { ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { ConnectionState } from "./AppShellConnection";
@@ -214,6 +244,25 @@
     commandSuggestions.find((command) => command.name === selectedCommandName) ??
       commandSuggestions[0],
   );
+  let runStartedAt = $state<number>();
+  let runNow = $state(Date.now());
+  let statusLabel = $derived(runStatusLabel(runStatus));
+  let elapsedLabel = $derived(
+    runStartedAt === undefined ? undefined : formatRunElapsed(runNow - runStartedAt),
+  );
+  let queueLabel = $derived(queueSummary(steeringCount, followUpCount));
+
+  /** Times the run in the client, the way `recordToolTiming` times tools: no start timestamp is on the wire. */
+  $effect(() => {
+    if (active) runStartedAt = Date.now();
+    else runStartedAt = undefined;
+  });
+
+  $effect(() => {
+    if (!active) return;
+    const interval = window.setInterval(() => (runNow = Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  });
 
   export function focus() {
     promptInput?.focus();
@@ -325,20 +374,23 @@
 <footer
   class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
 >
-  {#if active}
-    <div
-      class="mx-auto flex w-full max-w-transcript items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
+  <div
+    class={[
+      "mx-auto flex w-full max-w-transcript min-h-6 items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint",
+      !active && "invisible",
+    ]}
+  >
+    <span class="flex items-center gap-1.5"
+      ><span class="size-1.5 animate-pulse rounded-full bg-primary"
+      ></span>{statusLabel}{#if elapsedLabel}
+        for <span class="font-mono tabular-nums">{elapsedLabel}</span>{/if}{#if queueLabel}
+        · {queueLabel}{/if}</span
     >
-      <span class="flex items-center gap-1.5"
-        ><span class="size-1.5 animate-pulse rounded-full bg-primary"></span>{runStatus} · {steeringCount}
-        steer · {followUpCount} follow-up</span
-      >
-      {#if steeringCount + followUpCount > 0}<button
-          class="border-0 bg-transparent p-0 text-meta text-primary-text"
-          onclick={clearQueue}>Clear queues</button
-        >{/if}
-    </div>
-  {/if}
+    {#if steeringCount + followUpCount > 0}<button
+        class="border-0 bg-transparent p-0 text-meta text-primary-text"
+        onclick={clearQueue}>Clear queues</button
+      >{/if}
+  </div>
   <div class={composerSurfaceClass} data-testid="chat-composer">
     {#if commandSuggestions.length > 0}
       <div

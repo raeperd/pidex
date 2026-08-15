@@ -3,10 +3,75 @@ import { describe, expect, it, vi } from "vitest";
 import TaskComposer, {
   completeSlashCommand,
   composerCommands,
+  formatRunElapsed,
   nextSlashCommand,
+  queueSummary,
+  runStatusLabel,
   slashCommandSuggestions,
   submitComposerDraft,
 } from "./TaskComposer.svelte";
+
+describe("runStatusLabel", () => {
+  it("labels running as Working", () => {
+    expect(runStatusLabel("running")).toBe("Working");
+  });
+
+  it("labels stopping as Stopping", () => {
+    expect(runStatusLabel("stopping")).toBe("Stopping");
+  });
+
+  it("labels compacting as Compacting context", () => {
+    expect(runStatusLabel("compacting")).toBe("Compacting context");
+  });
+
+  it("returns a sensible label for idle even though the row never renders it", () => {
+    expect(runStatusLabel("idle")).toBe("Idle");
+  });
+
+  it("returns a sensible label for error even though the row never renders it", () => {
+    expect(runStatusLabel("error")).toBe("Idle");
+  });
+});
+
+describe("queueSummary", () => {
+  it("spells out both queues", () => {
+    expect(queueSummary(2, 1)).toBe("2 steering · 1 follow-up queued");
+  });
+
+  it("spells out only the steering queue", () => {
+    expect(queueSummary(1, 0)).toBe("1 steering queued");
+  });
+
+  it("spells out only the follow-up queue", () => {
+    expect(queueSummary(0, 1)).toBe("1 follow-up queued");
+  });
+
+  it("renders nothing for empty queues", () => {
+    expect(queueSummary(0, 0)).toBe("");
+  });
+});
+
+describe("formatRunElapsed", () => {
+  it("formats zero as 0s", () => {
+    expect(formatRunElapsed(0)).toBe("0s");
+  });
+
+  it("formats sub-minute durations in seconds", () => {
+    expect(formatRunElapsed(42_000)).toBe("42s");
+  });
+
+  it("formats minute-plus-second durations", () => {
+    expect(formatRunElapsed(83_000)).toBe("1m 23s");
+  });
+
+  it("formats hour-plus-minute durations", () => {
+    expect(formatRunElapsed(3_720_000)).toBe("1h 2m");
+  });
+
+  it("clamps negative input to 0s", () => {
+    expect(formatRunElapsed(-500)).toBe("0s");
+  });
+});
 
 describe("composerCommands", () => {
   it("combines native commands with commands discovered from Pi", () => {
@@ -132,6 +197,25 @@ describe("slashCommandSuggestions", () => {
 
     expect(body).not.toContain('data-testid="composer-stats"');
     expect(body).not.toContain("Session cost");
+  });
+
+  it("shows the human status label instead of the raw run-status enum while active", () => {
+    const body = renderComposer("", true);
+
+    expect(body).toContain("Working");
+    expect(body).not.toContain("running");
+  });
+
+  it("reserves the status row's height and hides its content when inactive", () => {
+    const body = renderComposer("", false);
+
+    expect(body).toContain("invisible");
+  });
+
+  it("shows the status row's content when active", () => {
+    const body = renderComposer("", true);
+
+    expect(body).not.toContain("invisible");
   });
 
   it("completes a selected command in the composer", () => {
