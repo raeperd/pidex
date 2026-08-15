@@ -66,6 +66,7 @@
     startModeEditable={context.task.startModeEditable}
     steeringCount={context.task.snapshot.steeringQueue.length}
     stop={context.taskActions.stop}
+    taskId={context.task.snapshot.taskId}
   />
 {:else}
   <section

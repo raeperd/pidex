@@ -1,3 +1,17 @@
+<script lang="ts" module>
+  import type { ConnectionState } from "./AppShellConnection";
+
+  /** `"disconnected"` (offline) is gated the same as `"reconnecting"` — a uniform delay, no special case. */
+  function connectionBanner(
+    connection: ConnectionState,
+    hasEverConnected: boolean,
+    delayElapsed: boolean,
+  ): "connecting" | "reconnecting" | undefined {
+    if (connection === "connected" || !delayElapsed) return undefined;
+    return hasEverConnected ? "reconnecting" : "connecting";
+  }
+</script>
+
 <script lang="ts">
   import { onMount, tick, untrack, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
@@ -19,8 +33,7 @@
     makePidexApiClient,
     type PidexApiClient,
   } from "./AppShellApiClient";
-  import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
-  import { connectionBanner } from "./AppShellConnectionBanner";
+  import { makeChatConnection } from "./AppShellConnection";
   import {
     createTaskViewControllerRegistry,
     provideAppShellContext,

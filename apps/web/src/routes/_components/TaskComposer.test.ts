@@ -270,6 +270,7 @@ function renderComposer(draft: string, active: boolean, startModeEditable = true
       startModeEditable,
       steeringCount: 0,
       stop: async () => {},
+      taskId: "task-1",
     },
   }).body;
 }

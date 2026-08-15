@@ -195,6 +195,7 @@
     startModeEditable,
     steeringCount,
     stop,
+    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
@@ -221,6 +222,8 @@
     startModeEditable: boolean;
     steeringCount: number;
     stop: () => Promise<void>;
+    /** Identifies the task whose run is being timed, so switching between two already-active tasks restarts the elapsed clock. */
+    taskId: string;
   } = $props();
 
   let promptInput: HTMLTextAreaElement | undefined;
@@ -252,8 +255,13 @@
   );
   let queueLabel = $derived(queueSummary(steeringCount, followUpCount));
 
-  /** Times the run in the client, the way `recordToolTiming` times tools: no start timestamp is on the wire. */
+  /**
+   * Times the run in the client, the way `recordToolTiming` times tools: no start timestamp is on
+   * the wire. Also depends on `taskId` so navigating directly between two already-active tasks
+   * restarts the clock instead of carrying over the previous task's start time.
+   */
   $effect(() => {
+    void taskId;
     if (active) runStartedAt = Date.now();
     else runStartedAt = undefined;
   });
