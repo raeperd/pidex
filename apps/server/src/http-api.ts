@@ -328,7 +328,9 @@ function workspaceId(metadata: MetadataService, canonical: string, remember: boo
     if (remember === false) {
       const existing = yield* metadata.workspaceId(canonical);
       if (existing) return existing;
-      return yield* Effect.sync(() => randomBytes(16).toString("hex"));
+      return yield* attemptOperation("workspace.ephemeralId", () =>
+        randomBytes(16).toString("hex"),
+      );
     }
     return yield* metadata.rememberWorkspace(canonical);
   });
