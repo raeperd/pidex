@@ -624,6 +624,22 @@
       projectOrderSaving = false;
     }
   }
+  /**
+   * Per-path request counter guarding `api.openWorkspace()`, the same shape as
+   * `sessionRefreshSequence` below but keyed by project path (known before the fetch even for
+   * a project opened for the first time, unlike its id). Concurrent opens of the same project
+   * -- app-start restoration racing a manual re-open, two projects' worktree-loading chains
+   * both touching the same source -- can have their responses arrive out of order; without
+   * this, an earlier-issued fetch resolving after a later one silently reverts fresher data
+   * once it's written back via `rememberWorkspace()`.
+   */
+  let workspaceFetchSequence: Record<string, number> = {};
+  async function openWorkspaceFresh(path: string, remember: boolean) {
+    const sequence = (workspaceFetchSequence[path] ?? 0) + 1;
+    workspaceFetchSequence = { ...workspaceFetchSequence, [path]: sequence };
+    const loaded = await api.openWorkspace(path, remember);
+    return workspaceFetchSequence[path] === sequence ? loaded : undefined;
+  }
   async function openProject(
     path = projectPath,
     options: {
@@ -644,7 +660,8 @@
       error = "";
       if (activate) projectLoading = true;
       projectLoadingId = knownId;
-      const loaded = await api.openWorkspace(path, remember);
+      const loaded = await openWorkspaceFresh(path, remember);
+      if (!loaded) return undefined; // superseded by a newer open of the same project
       if (remember && (options.reconcileHistory ?? true)) {
         try {
           bootstrap = await api.bootstrap();
@@ -1030,10 +1047,15 @@
     const cached = workspaceFor(workspaceId);
     if (cached) {
       if (recent) await loadSourceWorkspace(recent);
-      return cached;
+      // Re-read rather than returning the snapshot captured above: `loadSourceWorkspace`
+      // awaits, and a concurrent refresh can land a fresher cache entry during that gap. The
+      // caller (activateRoute) writes this back via rememberWorkspace(), so returning the
+      // stale snapshot here would silently revert that fresher data.
+      return workspaceFor(workspaceId) ?? cached;
     }
     if (!recent) return undefined;
-    const loaded = await api.openWorkspace(recent.path, true);
+    const loaded = await openWorkspaceFresh(recent.path, true);
+    if (!loaded) return workspaceFor(workspaceId); // superseded; a newer open owns the cache now
     rememberWorkspace(loaded);
     await loadSourceWorkspace(recent);
     return loaded;
