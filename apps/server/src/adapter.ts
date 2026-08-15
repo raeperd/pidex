@@ -54,7 +54,7 @@ export interface AdapterSession {
   steer(text: string): Promise<void>;
   followUp(text: string): Promise<void>;
   abort(): Promise<void>;
-  clearQueue(kind?: "steering" | "follow-up" | "all"): void;
+  clearQueue(): void;
   configure(input: {
     model?: string;
     thinkingLevel?: AdapterSession["thinkingLevel"];
@@ -91,7 +91,7 @@ export interface EffectAdapterSession {
   steer(text: string): Effect.Effect<void, AdapterSessionError>;
   followUp(text: string): Effect.Effect<void, AdapterSessionError>;
   abort(): Effect.Effect<void, AdapterSessionError>;
-  clearQueue(kind?: "steering" | "follow-up" | "all"): Effect.Effect<void, AdapterSessionError>;
+  clearQueue(): Effect.Effect<void, AdapterSessionError>;
   configure(input: {
     model?: string;
     thinkingLevel?: AdapterSession["thinkingLevel"];
@@ -124,9 +124,9 @@ function toEffectAdapterSession(session: AdapterSession): EffectAdapterSession {
     steer: (text) => attemptPromise("session.steer", () => session.steer(text)),
     followUp: (text) => attemptPromise("session.followUp", () => session.followUp(text)),
     abort: () => attemptPromise("session.abort", () => session.abort()),
-    clearQueue: (kind) =>
+    clearQueue: () =>
       attemptSync("session.clearQueue", () => {
-        session.clearQueue(kind);
+        session.clearQueue();
       }),
     configure: (input) => attemptPromise("session.configure", () => session.configure(input)),
     rename: (name) =>

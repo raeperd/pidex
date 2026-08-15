@@ -8,7 +8,6 @@
   --color-sidebar-active: var(--sidebar-active);
   --color-card: var(--card);
   --color-secondary: var(--secondary);
-  --color-secondary-hover: var(--secondary-hover);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-border: var(--border);
@@ -16,7 +15,6 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
-  --color-success: var(--success);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --font-sans:
@@ -56,7 +54,6 @@
   --sidebar-active: #fff;
   --card: #fff;
   --secondary: #f1f1f2;
-  --secondary-hover: #e9e9eb;
   --muted: #71717a;
   --faint: #a1a1aa;
   --border: #e4e4e7;
@@ -64,14 +61,10 @@
   --primary: #6a9fcc;
   --primary-hover: #5b90bb;
   --primary-foreground: #09090b;
-  --success: #16a36a;
   --danger: #dc4c4c;
   --warning: #b7791f;
   --shadow: 0 18px 45px rgb(24 24 27 / 8%), 0 2px 6px rgb(24 24 27 / 4%);
   --mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, monospace;
-  --tool-pending: #e8e8f0;
-  --tool-success: #e8f0e8;
-  --tool-error: #f0e8e8;
   --tool-argument: #2f7f76;
 }
 
@@ -377,7 +370,6 @@ summary::-webkit-details-marker {
     --sidebar-active: #1a1a1d;
     --card: #111113;
     --secondary: #1a1a1d;
-    --secondary-hover: #232327;
     --muted: #a1a1aa;
     --faint: #7f7f89;
     --border: rgb(255 255 255 / 7%);
@@ -385,9 +377,6 @@ summary::-webkit-details-marker {
     --primary: #6a9fcc;
     --primary-hover: #78add8;
     --shadow: 0 18px 55px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 2%);
-    --tool-pending: #282832;
-    --tool-success: #283228;
-    --tool-error: #3c2828;
     --tool-argument: #8abeb7;
   }
 

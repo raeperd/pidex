@@ -95,7 +95,6 @@ export const bootstrapSchema = v.object({
 });
 export const sessionsResponseSchema = v.object({ sessions: v.array(sessionSummarySchema) });
 export const okResponseSchema = v.object({ ok: v.literal(true) });
-export const acceptedResponseSchema = v.object({ accepted: v.literal(true) });
 export const textItemSchema = v.object({
   type: v.picklist(["user", "assistant"]),
   id: boundedString(200),
@@ -248,7 +247,6 @@ export const recentWorkspacesResponseSchema = v.object({
   recentWorkspaces: v.pipe(v.array(recentWorkspaceSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
 });
 export const trustWorkspaceSchema = v.object({ trusted: v.boolean() });
-export const createChatSchema = v.object({ workspaceId: idSchema });
 export const resumeChatSchema = v.object({ taskId: idSchema });
 export const actionRequestSchema = v.object({
   clientId: idSchema,
@@ -267,11 +265,6 @@ export const messageRequestSchema = v.object({
   runId: v.optional(idSchema),
 });
 export const abortRequestSchema = v.object({ ...actionRequestSchema.entries, runId: idSchema });
-export const acknowledgeInterruptedRequestSchema = v.pick(actionRequestSchema, [
-  "clientId",
-  "actionId",
-  "expectedRevision",
-]);
 export const configRequestSchema = v.pipe(
   v.object({
     ...actionRequestSchema.entries,
@@ -342,7 +335,7 @@ export const pidexApiContract = {
       .output(workspaceSchema),
   },
   chats: {
-    create: oc.input(createChatSchema).output(chatSnapshotSchema),
+    create: oc.input(workspaceIdInputSchema).output(chatSnapshotSchema),
     resume: oc.input(resumeChatSchema).output(chatSnapshotSchema),
     get: oc.input(chatIdInputSchema).output(chatSnapshotSchema),
     dispose: oc.input(chatIdInputSchema).output(okResponseSchema),
@@ -353,7 +346,7 @@ export const pidexApiContract = {
       .input(v.object({ ...abortRequestSchema.entries, chatId: idSchema }))
       .output(actionOutcomeSchema),
     acknowledgeInterrupted: oc
-      .input(v.object({ ...acknowledgeInterruptedRequestSchema.entries, chatId: idSchema }))
+      .input(v.object({ ...actionRequestSchema.entries, chatId: idSchema }))
       .output(actionOutcomeSchema),
     toolOutput: oc.input(toolOutputInputSchema).output(toolOutputChunkSchema),
     transcript: oc.input(transcriptInputSchema).output(transcriptPageSchema),
@@ -382,13 +375,11 @@ export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
 export type Workspace = v.InferOutput<typeof workspaceSchema>;
 export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;
 export type ProjectCandidate = v.InferOutput<typeof projectCandidateSchema>;
-export type Health = v.InferOutput<typeof healthSchema>;
 export type Bootstrap = v.InferOutput<typeof bootstrapSchema>;
 export type TranscriptItem = v.InferOutput<typeof transcriptItemSchema>;
 export type TextItem = v.InferOutput<typeof textItemSchema>;
 export type SkillItem = v.InferOutput<typeof skillItemSchema>;
 export type ToolItem = v.InferOutput<typeof toolItemSchema>;
-export type NoticeItem = v.InferOutput<typeof noticeItemSchema>;
 export type ExtensionDialog = v.InferOutput<typeof extensionDialogSchema>;
 export type ChatSnapshot = v.InferOutput<typeof chatSnapshotSchema>;
 export type ContextUsage = v.InferOutput<typeof contextUsageSchema>;
@@ -397,7 +388,6 @@ export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
 export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
 export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
 export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
-export type WsClientMessage = v.InferOutput<typeof wsClientMessageSchema>;
 
 function boundedString(maximum: number) {
   return v.pipe(v.string(), v.maxLength(maximum));

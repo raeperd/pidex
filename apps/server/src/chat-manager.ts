@@ -595,7 +595,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   }
 
   return {
-    pi,
     openWorkspace,
     workspace: getWorkspace,
     markWorkspaceDisposable,
@@ -606,7 +605,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     resume,
     chat: getChat,
     snapshot,
-    sendSnapshot,
     connect,
     startPrompt,
     deliverDuringRun,

@@ -114,9 +114,6 @@ importers:
       ws:
         specifier: 8.18.3
         version: 8.18.3
-      zod:
-        specifier: 4.1.12
-        version: 4.1.12
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0-beta.101
@@ -159,7 +156,7 @@ importers:
         version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
       '@pidex/api':
         specifier: workspace:*
-        version: link:../../packages/api
+        version: file:packages/api(@opentelemetry/api@1.9.0)(@typescript/typescript6@6.0.2)
       entities:
         specifier: 8.0.0
         version: 8.0.0
@@ -1277,6 +1274,9 @@ packages:
     resolution: {integrity: sha512-ODOov0sGMJMf3jPonOkgGqPknTsu+DdQ7kD++gz8aI+aFMOMHFbWAA2taqXXVTdP+OTOQR/znGvSpmkeI0WTYQ==}
     engines: {node: '>=14.18.0'}
 
+  '@pidex/api@file:packages/api':
+    resolution: {directory: packages/api, type: directory}
+
   '@playwright/test@1.56.1':
     resolution: {integrity: sha512-vSMYtL/zOcFpvJCW71Q/OEGQb7KYBPAdKh35WNSkaZA75JlAO8ED8UN6GUNTm3drWomcbcqRPFqQbLae8yBTdg==}
     engines: {node: '>=18'}
@@ -1860,6 +1860,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -4861,6 +4862,14 @@ snapshots:
       tslib: 2.8.1
       webcrypto-core: 1.9.2
 
+  '@pidex/api@file:packages/api(@opentelemetry/api@1.9.0)(@typescript/typescript6@6.0.2)':
+    dependencies:
+      '@orpc/contract': 2.0.0-beta.21(@opentelemetry/api@1.9.0)
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - typescript
+
   '@playwright/test@1.56.1':
     dependencies:
       playwright: 1.56.1
@@ -7146,6 +7155,10 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   uuid@14.0.1: {}
+
+  valibot@1.4.2(@typescript/typescript6@6.0.2):
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
 
   valibot@1.4.2(typescript@7.0.2):
     optionalDependencies:

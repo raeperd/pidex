@@ -8,8 +8,8 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Effect } from "effect";
 import { afterAll, afterEach, assert, describe, expect, it, layer, vi } from "@effect/vitest";
+import { ActionProtocolError } from "./errors.js";
 import {
-  ActionProtocolError,
   Metadata,
   MetadataError,
   makeMetadataStore,

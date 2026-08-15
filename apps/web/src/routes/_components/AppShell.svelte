@@ -173,8 +173,7 @@
       (entry) => !sourceWorkspaceId(entry) && projectName(entry.path) === name,
     );
     if (duplicates.length < 2) return name;
-    const isWorktree = project.worktree || /[\\/]\.codex[\\/]worktrees[\\/]/.test(project.path);
-    return isWorktree ? `${name} · worktree` : `${name} · local`;
+    return project.worktree ? `${name} · worktree` : `${name} · local`;
   }
   function workspaceIsWorktree(workspaceId: string) {
     return bootstrap?.recentWorkspaces.some(

@@ -11,8 +11,6 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Context, Effect, Layer, Schema } from "effect";
 import { ActionProtocolError } from "./errors.js";
 
-export { ActionProtocolError } from "./errors.js";
-
 export interface ActionInput {
   actionId: string;
   clientId: string;
