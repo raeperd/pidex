@@ -5,6 +5,7 @@
     ArrowUp,
     Check,
     ChevronRight,
+    CircleAlert,
     Copy,
     FileText,
     Folder,
@@ -28,6 +29,7 @@
 
   type IconName =
     | "activity"
+    | "alert"
     | "arrow-down"
     | "check"
     | "chevron"
@@ -53,6 +55,7 @@
 
   const icons: Record<IconName, LucideIcon> = {
     activity: Activity,
+    alert: CircleAlert,
     "arrow-down": ArrowDown,
     check: Check,
     chevron: ChevronRight,
