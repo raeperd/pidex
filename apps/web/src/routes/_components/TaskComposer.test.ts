@@ -183,10 +183,23 @@ describe("composerAffordances", () => {
     });
   });
 
-  it("prioritizes a pending compaction over an active run", () => {
+  it("still explains a pending compaction via the placeholder while a run is active", () => {
     expect(composerAffordances(affordanceState({ compactPending: true, active: true }))).toEqual({
       placeholder: "Compacting session context…",
-      sendLabel: "Compacting context",
+      sendLabel: "Stop",
+    });
+  });
+
+  it("keeps the stop button labeled Stop instead of borrowing a disabled-reason message", () => {
+    // The stop button is only ever disabled by a lost connection (see its
+    // `disabled={connection !== "connected"}` binding in the markup), so none of the send-side
+    // disabled reasons -- even one as prominent as requiresAcknowledgement -- should relabel it;
+    // an enabled, clickable control keeps its plain action name.
+    expect(
+      composerAffordances(affordanceState({ requiresAcknowledgement: true, active: true })),
+    ).toEqual({
+      placeholder: "Acknowledge the interrupted run above to continue",
+      sendLabel: "Stop",
     });
   });
 

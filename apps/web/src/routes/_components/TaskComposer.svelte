@@ -111,27 +111,35 @@
 
   /**
    * Cascades the composer's disabled-state reason into the textarea placeholder and the
-   * send/stop button's aria-label + title. First match wins; the order encodes why each
-   * reason outranks the ones below it:
+   * send/stop button's aria-label + title.
    *
-   * 1. disconnected/reconnecting — a connection failure invalidates everything downstream
-   *    (you cannot acknowledge, configure, or send while disconnected), so it wins even
-   *    while the stop button is showing (the stop button is itself disabled by the same
-   *    connection check).
-   * 2. requiresAcknowledgement — blocks every submission path and needs a user action, so
+   * The two outputs deliberately use different priority orders, because they label different
+   * things. `placeholder` is plain informational text about the whole composer, so it always
+   * surfaces the highest-priority reason, including while a run is `active`. `sendLabel` names
+   * the *currently rendered control* -- the send button while idle, the stop button while
+   * `active` -- so it must reflect what actually disables THAT control: the send button is
+   * blocked by any of the reasons below, but the stop button is only ever blocked by a lost
+   * connection (see its `disabled={connection !== "connected"}` binding). Labelling an enabled,
+   * clickable stop button with a disabled-reason message like "Compacting context" would be
+   * misleading, so once a run is `active` (and connected), its label is always the plain action
+   * name "Stop", regardless of any other reason still being true underneath it.
+   *
+   * `reason` below is checked in this order (first match wins), independent of `active`:
+   *
+   * 1. requiresAcknowledgement — blocks every submission path and needs a user action, so
    *    it outranks the passive setup states below it.
-   * 3. no models — sending can never work regardless of any transient pending state.
-   * 4. creatingTask — the task's worktree does not exist yet; nothing else can be true
+   * 2. no models — sending can never work regardless of any transient pending state.
+   * 3. creatingTask — the task's worktree does not exist yet; nothing else can be true
    *    until it is.
-   * 5. configurationPending — a model/thinking-level change is being saved; a transient
+   * 4. configurationPending — a model/thinking-level change is being saved; a transient
    *    wait that can only happen once the task exists.
-   * 6. compactPending — a context compaction is in flight; can coexist with `active`, and
-   *    wins over it since it is the more specific, more recent reason.
-   * 7. active — not an error at all; drafting the next message is allowed, so it only
-   *    applies once nothing above blocks.
-   * 8. default idle — healthy composer, ready to send (or empty draft, which intentionally
-   *    gets no special-cased message: a disabled-but-labeled-"Send" button for an empty
-   *    draft is expected UX).
+   * 5. compactPending — a context compaction is in flight.
+   *
+   * `connection` is checked before all of the above (a connection failure invalidates
+   * everything downstream: you cannot acknowledge, configure, or send while disconnected, and
+   * it is the one reason that also disables the stop button), and `active`/default idle apply
+   * once nothing above blocks (an empty draft intentionally gets no special-cased message: a
+   * disabled-but-labeled-"Send" button for an empty draft is expected UX).
    */
   export function composerAffordances(state: {
     active: boolean;
@@ -148,6 +156,21 @@
         sendLabel: "Environment disconnected",
       };
     }
+    const reason = composerBlockedReason(state);
+    if (state.active) {
+      return { placeholder: reason?.placeholder ?? "Draft your next message…", sendLabel: "Stop" };
+    }
+    if (reason) return reason;
+    return { placeholder: "Ask Pi to work on this project…", sendLabel: "Send" };
+  }
+
+  function composerBlockedReason(state: {
+    compactPending: boolean;
+    configurationPending: boolean;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } | undefined {
     if (state.requiresAcknowledgement) {
       const reason = "Acknowledge the interrupted run above to continue";
       return { placeholder: reason, sendLabel: reason };
@@ -165,10 +188,7 @@
     if (state.compactPending) {
       return { placeholder: "Compacting session context…", sendLabel: "Compacting context" };
     }
-    if (state.active) {
-      return { placeholder: "Draft your next message…", sendLabel: "Stop" };
-    }
-    return { placeholder: "Ask Pi to work on this project…", sendLabel: "Send" };
+    return undefined;
   }
 
   export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {

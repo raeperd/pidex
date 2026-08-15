@@ -416,10 +416,12 @@ test("preserves edits made while slash compaction is pending", async ({
     status: "compacting",
     revision: Number(snapshot.current?.revision),
   });
-  // The compact request is still in flight (blocked on `compactionPending`), so the composer's
-  // disabled-reason cascade labels the stop button with the pending-compaction reason instead of
-  // the default "Stop" -- see TaskComposer.svelte's `composerAffordances`.
-  await expect(page.getByRole("button", { name: "Compacting context" })).toBeVisible();
+  // The compact request is still in flight (blocked on `compactionPending`) while the run is
+  // active, so the stop button is rendered -- but it is only ever disabled by a lost connection,
+  // so its label stays the plain action name "Stop" rather than borrowing the pending-compaction
+  // reason (that reason still drives the placeholder) -- see TaskComposer.svelte's
+  // `composerAffordances`.
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
   if (testInfo.project.name !== "mobile") {
