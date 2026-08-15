@@ -1893,7 +1893,7 @@
               ></span
             >
             <span
-              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
+              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary-text" : "text-muted"}`}
               >{projectAdded(candidate) ? "Open" : "Add"}</span
             >
           </button>
