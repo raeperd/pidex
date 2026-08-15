@@ -24,12 +24,12 @@ export interface TaskToolTiming {
   endedAt?: number;
 }
 
-interface TaskComposerController {
+export interface TaskComposerController {
   focus(): void;
   resize(): void;
 }
 
-interface TaskTranscriptController {
+export interface TaskTranscriptController {
   scrollIfNearBottom(): void;
   scrollLatest(): void;
 }
