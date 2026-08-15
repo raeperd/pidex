@@ -390,6 +390,20 @@ describe.sequential("HTTP API endpoints", () => {
     expect(session?.status).toBe("idle");
   });
 
+  it("workspaces.sessions includes a live chat Pi hasn't persisted to disk yet", async () => {
+    // A chat with no assistant reply yet has no session file on disk (see the seeding note
+    // above), so it is absent from `pi.inspectWorkspace().sessions`. The server must still
+    // surface it from the live ChatRecord, or a brand-new task has no sidebar row for its
+    // entire first run.
+    const created = await api.chats.create({ workspaceId });
+
+    const result = await api.workspaces.sessions({ workspaceId });
+
+    const session = result.sessions.find((entry) => entry.id === created.taskId);
+    expect(session).toMatchObject({ status: "idle", messageCount: 0 });
+    await api.chats.dispose({ chatId: created.chatId });
+  });
+
   it("workspaces.trust", async () => {
     const untrusted = await api.workspaces.trust({ workspaceId, trusted: false });
     expect(untrusted.trusted).toBe(false);

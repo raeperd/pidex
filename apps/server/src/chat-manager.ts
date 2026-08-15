@@ -6,6 +6,7 @@ import type {
   RunOutcome,
   ServerEvent,
   SessionSummary,
+  TextItem,
   ToolOutputChunk,
   TranscriptItem,
   TranscriptPage,
@@ -97,9 +98,17 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       const info = yield* pi.inspectWorkspace(canonicalPath);
       const record = { id, path: canonicalPath, info };
       workspaces.set(id, record);
-      const sessions = yield* Effect.forEach(info.sessions, (session) =>
-        publicSession(id, session),
-      );
+      const listedKeys = new Set(info.sessions.map((session) => nativeSessionKey(session)));
+      const listed = yield* Effect.forEach(info.sessions, (session) => publicSession(id, session));
+      // Pi does not persist a session to disk until it holds an assistant reply, so a chat
+      // that just started (or is still on its first turn) has no entry in `info.sessions`
+      // yet — `inspectWorkspace` only ever sees what's on disk. Union in a summary
+      // synthesized from the live ChatRecord for any chat in this workspace that isn't
+      // listed yet, so a brand-new task has sidebar presence immediately instead of only
+      // once the model has replied.
+      const liveOnly = [...chats.values()]
+        .filter((chat) => chat.workspaceId === id && !listedKeys.has(chat.sessionKey))
+        .map(liveOnlySession);
       return {
         id,
         path: canonicalPath,
@@ -108,7 +117,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         protectedResourcesSkipped: info.protectedResourcesSkipped,
         resourceDiagnostics: info.resourceDiagnostics,
         models: info.models,
-        sessions,
+        sessions: [...liveOnly, ...listed],
         commands: info.commands,
       } satisfies Workspace;
     });
@@ -640,6 +649,27 @@ export function resolveSessionStatus(
   )
     return "error";
   return "idle";
+}
+
+/**
+ * Builds a SessionSummary for a live chat that Pi hasn't written to disk yet (no assistant
+ * reply landed, so `SessionManager.list()` doesn't know about it), from only what the
+ * in-memory ChatRecord actually knows — no invented timestamps beyond "now", no invented
+ * message content.
+ */
+function liveOnlySession(chat: ChatRecord): SessionSummary {
+  const firstUserItem = chat.items.find((item): item is TextItem => item.type === "user");
+  const now = new Date().toISOString();
+  return {
+    id: chat.taskId,
+    ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
+    firstMessage: (firstUserItem?.text ?? "").slice(0, 500),
+    createdAt: now,
+    modifiedAt: now,
+    messageCount: chat.items.filter((item) => item.type === "user" || item.type === "assistant")
+      .length,
+    status: resolveSessionStatus(chat.runStatus, undefined),
+  } satisfies SessionSummary;
 }
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
