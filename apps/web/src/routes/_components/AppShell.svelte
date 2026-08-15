@@ -1834,7 +1834,7 @@
       </div>
     </div>
     <label
-      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary/55 focus-within:text-muted"
+      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary focus-within:text-muted"
     >
       <Icon name="search" size={15} />
       <input
@@ -1952,7 +1952,7 @@
       >Task name</label
     >
     <input
-      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
       id="session-name"
       bind:value={renameValue}
       autocomplete="off"
@@ -2008,7 +2008,7 @@
       </div>
       {#if snapshot.extensionDialog.kind === "select"}
         <select
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
@@ -2025,13 +2025,13 @@
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
         <textarea
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           rows="8"></textarea>
       {:else}
         <input
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}
