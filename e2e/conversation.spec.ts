@@ -1,10 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
   captureCreatedChat,
   createTask,
+  e2eModel,
   emitServerEvent,
+  fulfillAccepted,
   fulfillJson,
   installFakeWebSocket,
+  patchRpcResponse,
+  routeInput,
   rpcRequest,
   startNewTask,
   waitForFakeWebSocket,
@@ -16,14 +20,7 @@ test("renders assistant markdown as safe interactive components", async ({
   request,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await installFakeWebSocket(page);
-  const snapshot = await captureCreatedChat(page);
-
-  await startNewTask(page, request);
-  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot.current?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
     type: "message",
     eventId: 1,
@@ -147,14 +144,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   page,
   request,
 }) => {
-  await installFakeWebSocket(page);
-  const snapshot = await captureCreatedChat(page);
-
-  await startNewTask(page, request);
-  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot.current?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   const toolItem = {
     type: "tool",
     id: "tool_bash_e2e",
@@ -288,14 +278,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
-  await installFakeWebSocket(page);
-  const snapshot = await captureCreatedChat(page);
-
-  await startNewTask(page, request);
-  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot.current?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
     type: "message",
     eventId: 1,
@@ -363,29 +346,19 @@ test("preserves edits made while slash compaction is pending", async ({
   let compactRequests = 0;
   let queuedRequests = 0;
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...payload.json,
-          commands: Array.from({ length: 24 }, (_, index) => ({
-            name: `command-${String(index + 1).padStart(2, "0")}`,
-            description: `Workspace command ${index + 1}`,
-          })),
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) => ({
+    ...json,
+    commands: Array.from({ length: 24 }, (_, index) => ({
+      name: `command-${String(index + 1).padStart(2, "0")}`,
+      description: `Workspace command ${index + 1}`,
+    })),
+    models: [e2eModel],
+  }));
   const snapshot = await captureCreatedChat(page);
   await page.route("**/api/rpc/chats/compact", async (route) => {
     if (!snapshot.current) throw new Error("Expected a chat before compaction");
     compactRequests++;
-    compactInput = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    compactInput = routeInput(route);
     await compactionPending;
     snapshot.current = {
       ...snapshot.current,
@@ -448,10 +421,7 @@ test("preserves edits made while slash compaction is pending", async ({
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
   if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
+    await settleFrames(page);
   }
   expect(compactRequests).toBe(1);
   expect(queuedRequests).toBe(0);
@@ -489,10 +459,7 @@ test("preserves edits made while slash compaction is pending", async ({
     await prompt.fill("/compact");
     await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
     await prompt.press("Enter");
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
+    await settleFrames(page);
     expect(compactRequests).toBe(2);
   }
 });
@@ -541,48 +508,22 @@ test("isolates pending task operations while navigating between tasks", async ({
   let configurationRequested = false;
   let compactRequested = false;
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    if (payload.json.id !== workspace.id) {
-      await route.fulfill({ response });
-      return;
-    }
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...payload.json,
-          sessions,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) =>
+    json.id === workspace.id ? { ...json, sessions, models: [e2eModel] } : json,
+  );
   await page.route("**/api/rpc/workspaces/sessions", async (route) => {
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    const input = routeInput(route);
     if (input.workspaceId !== workspace.id) {
       await route.continue();
       return;
     }
     await fulfillJson(route, { sessions });
   });
-  await page.route("**/api/rpc/chats/resume", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json:
-          input.taskId === second.result.taskId
-            ? { ...payload.json, contextUsage: secondUsage }
-            : payload.json,
-      },
-    });
-  });
+  await patchRpcResponse(page, "chats/resume", (json, route) =>
+    routeInput(route).taskId === second.result.taskId
+      ? { ...json, contextUsage: secondUsage }
+      : json,
+  );
   await page.route("**/api/rpc/chats/compact", async (route) => {
     compactRequested = true;
     await compactionPending;
@@ -594,7 +535,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   });
   await page.route("**/api/rpc/chats/configure", async (route) => {
     configurationRequested = true;
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    const input = routeInput(route);
     await configurationPending;
     await fulfillJson(route, {
       ...firstTask,
@@ -643,10 +584,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   releaseCompaction();
   await compactResponse;
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
+  await settleFrames(page);
 
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
@@ -662,26 +600,10 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
   let snapshot: Record<string, unknown> = task;
   const taskId = String(snapshot.taskId);
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
-  await page.route("**/api/rpc/chats/resume", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
+  await patchRpcResponse(page, "workspaces/open", (json) => ({ ...json, models: [e2eModel] }));
+  await patchRpcResponse(page, "chats/resume", (json) => {
     snapshot = {
-      ...payload.json,
+      ...json,
       model: "e2e/model",
       thinkingLevel: "high",
       contextUsage: {
@@ -692,7 +614,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
         compactsAutomatically: true,
       },
     };
-    await route.fulfill({ response, json: { ...payload, json: snapshot } });
+    return snapshot;
   });
 
   await page.goto(`/tasks/${taskId}`);
@@ -810,25 +732,11 @@ test("persists idle configuration immediately without overwriting the draft", as
   const { promise: configurationPending, resolve: releaseConfiguration } =
     Promise.withResolvers<void>();
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) => ({ ...json, models: [e2eModel] }));
   const snapshot = await captureCreatedChat(page);
   await page.route("**/api/rpc/chats/configure", async (route) => {
     if (!snapshot.current) throw new Error("Expected a chat before configuration");
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    const input = routeInput(route);
     mutations.push({ procedure: "configure", input });
     await configurationPending;
     snapshot.current = {
@@ -841,18 +749,10 @@ test("persists idle configuration immediately without overwriting the draft", as
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {
     if (!snapshot.current) throw new Error("Expected a chat before sending");
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    const input = routeInput(route);
     mutations.push({ procedure: "send", input });
-    const revision = Number(input.expectedRevision) + 1;
-    snapshot.current = { ...snapshot.current, revision };
-    await fulfillJson(route, {
-      accepted: true,
-      actionId: input.actionId,
-      runId: "run_e2e_12345",
-      status: "accepted",
-      revision,
-      replayed: false,
-    });
+    snapshot.current = { ...snapshot.current, revision: Number(input.expectedRevision) + 1 };
+    await fulfillAccepted(route, input, "run_e2e_12345");
   });
 
   await startNewTask(page, request);
@@ -963,3 +863,19 @@ test("persists idle configuration immediately without overwriting the draft", as
     .toEqual(["configure", "send"]);
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
+
+async function startStreamingTask(page: Page, request: APIRequestContext) {
+  await installFakeWebSocket(page);
+  const snapshot = await captureCreatedChat(page);
+  await startNewTask(page, request);
+  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+  return { snapshot, chatId: String(snapshot.current?.chatId) };
+}
+
+function settleFrames(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}

@@ -3,8 +3,63 @@ import { basename } from "node:path";
 
 export const workspaceName = basename(process.cwd());
 
+export const e2eModel = { id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true };
+
 export const fulfillJson = (route: Route, payload: unknown) =>
   route.fulfill({ status: 200, contentType: "application/json", json: { json: payload } });
+
+export const routeInput = <T = Record<string, unknown>>(route: Route): T =>
+  (route.request().postDataJSON() as { json: T }).json;
+
+function patchRpcResponse(
+  page: Page,
+  procedure: string,
+  patch: (
+    json: Record<string, unknown>,
+    route: Route,
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>,
+) {
+  return page.route(`**/api/rpc/${procedure}`, async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    await route.fulfill({ response, json: { ...payload, json: await patch(payload.json, route) } });
+  });
+}
+
+function fulfillAccepted(route: Route, input: Record<string, unknown>, runId: string) {
+  return fulfillJson(route, {
+    accepted: true,
+    actionId: input.actionId,
+    runId,
+    status: "accepted",
+    revision: Number(input.expectedRevision) + 1,
+    replayed: false,
+  });
+}
+
+const makeChatSnapshot = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+  revision: 0,
+  runStatus: "idle",
+  thinkingLevel: "high",
+  items: [],
+  transcriptStart: 0,
+  transcriptTotal: 0,
+  steeringQueue: [],
+  followUpQueue: [],
+  stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
+  ...overrides,
+});
+
+function installIntegratedTitleBar(page: Page) {
+  return page.addInitScript(() => {
+    Object.defineProperty(window, "pidexDesktop", {
+      value: {
+        usesIntegratedTitleBar: true,
+        pickProject: () => Promise.resolve(null),
+      },
+    });
+  });
+}
 
 async function startNewTask(page: Page, request: APIRequestContext) {
   await rememberWorkspace(request, process.cwd());
@@ -139,8 +194,12 @@ export {
   captureCreatedChat,
   createTask,
   emitServerEvent,
+  fulfillAccepted,
   installFakeWebSocket,
+  installIntegratedTitleBar,
+  makeChatSnapshot,
   openTasks,
+  patchRpcResponse,
   rememberWorkspace,
   rpcRequest,
   startNewTask,
