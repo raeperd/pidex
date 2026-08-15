@@ -56,8 +56,14 @@
 
   let { message, ondismiss }: { message: string; ondismiss: () => void } = $props();
 
-  let hovered = $state(false);
-  let hidden = $state(false);
+  // Plain (non-rune) bookkeeping, deliberately: the attachment below reads these to decide
+  // whether to arm the timer, and an `{@attach}` reruns (cleanup + re-execute — a fresh
+  // showPopover/timer) whenever *any* reactive state it reads changes. If these were `$state`,
+  // every hover/tab-visibility flip would destroy and recreate the timer instead of pausing it,
+  // resetting the countdown. Mutating them from plain event handlers (not $effect) keeps them
+  // outside the attachment's reactive dependency tracking entirely.
+  let hovered = false;
+  let hidden = false;
   let copied = $state(false);
   let activeTimer: ToastTimer | undefined;
 

@@ -79,6 +79,11 @@
   let connection = $state<ConnectionState>("disconnected");
   let error = $state("");
   let toast = $state("");
+  // Bumped on every toast report, including a repeat of the same text: `toast = $state("")`
+  // assigning an identical string is a no-op to Svelte's reactivity, so without a distinguishing
+  // key the second occurrence of an already-showing message would neither re-present nor restart
+  // the auto-dismiss timer. `{#key toastOccurrence}` around <Toast> forces a fresh instance.
+  let toastOccurrence = $state(0);
   let bootstrapError = $state("");
   let drawerOpen = $state(false);
   let sidebarCollapsed = $state(false);
@@ -411,6 +416,7 @@
   }
   function reportToast(cause: unknown, fallback: string) {
     toast = cause instanceof Error ? cause.message : fallback;
+    toastOccurrence += 1;
   }
   async function loadBootstrap() {
     try {
@@ -1837,7 +1843,9 @@
       </div>
     {/if}
 
-    <Toast message={toast} ondismiss={() => (toast = "")} />
+    {#key toastOccurrence}
+      <Toast message={toast} ondismiss={() => (toast = "")} />
+    {/key}
 
     {@render children()}
   </main>
