@@ -5,23 +5,10 @@ export { safeParse } from "valibot";
 
 export const PROTOCOL_VERSION = 10;
 export const MAX_RECENT_WORKSPACES = 100;
-export const idSchema = v.pipe(
-  v.string(),
-  v.minLength(8),
-  v.maxLength(128),
-  v.regex(/^[A-Za-z0-9_-]+$/),
-);
-export const thinkingLevelSchema = v.picklist([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-export const runStatusSchema = v.picklist(["idle", "running", "stopping", "compacting", "error"]);
-export const actionStatusSchema = v.picklist([
+const idSchema = v.pipe(v.string(), v.minLength(8), v.maxLength(128), v.regex(/^[A-Za-z0-9_-]+$/));
+const thinkingLevelSchema = v.picklist(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const runStatusSchema = v.picklist(["idle", "running", "stopping", "compacting", "error"]);
+const actionStatusSchema = v.picklist([
   "accepted",
   "running",
   "completed",
@@ -29,7 +16,7 @@ export const actionStatusSchema = v.picklist([
   "failed",
   "interrupted",
 ]);
-export const runOutcomeSchema = v.object({
+const runOutcomeSchema = v.object({
   runId: idSchema,
   actionId: idSchema,
   status: actionStatusSchema,
@@ -43,13 +30,13 @@ export const actionOutcomeSchema = v.object({
   revision: nonnegativeInteger(),
   replayed: v.boolean(),
 });
-export const modelSchema = v.object({
+const modelSchema = v.object({
   id: boundedString(200),
   provider: boundedString(100),
   name: boundedString(200),
   reasoning: v.boolean(),
 });
-export const sessionSummarySchema = v.object({
+const sessionSummarySchema = v.object({
   id: idSchema,
   name: v.optional(boundedString(300)),
   firstMessage: boundedString(500),
@@ -57,7 +44,7 @@ export const sessionSummarySchema = v.object({
   modifiedAt: v.string(),
   messageCount: nonnegativeInteger(),
 });
-export const workspaceSchema = v.object({
+const workspaceSchema = v.object({
   id: idSchema,
   path: boundedString(4096),
   name: boundedString(300),
@@ -71,13 +58,13 @@ export const workspaceSchema = v.object({
   sessions: v.array(sessionSummarySchema),
   commands: v.array(v.object({ name: v.string(), description: v.optional(v.string()) })),
 });
-export const recentWorkspaceSchema = v.object({
+const recentWorkspaceSchema = v.object({
   id: idSchema,
   path: boundedString(4096),
   sourceWorkspaceId: v.optional(idSchema),
   worktree: v.optional(v.boolean()),
 });
-export const projectCandidateSchema = v.object({
+const projectCandidateSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(300)),
   path: boundedString(4096),
 });
@@ -85,7 +72,7 @@ export const healthSchema = v.object({
   ok: v.literal(true),
   protocolVersion: v.literal(PROTOCOL_VERSION),
 });
-export const bootstrapSchema = v.object({
+const bootstrapSchema = v.object({
   protocolVersion: v.literal(PROTOCOL_VERSION),
   csrfToken: v.pipe(v.string(), v.minLength(32)),
   piVersion: boundedString(100),
@@ -93,9 +80,9 @@ export const bootstrapSchema = v.object({
   projectCandidates: v.pipe(v.array(projectCandidateSchema), v.maxLength(200)),
   warning: boundedString(1000),
 });
-export const sessionsResponseSchema = v.object({ sessions: v.array(sessionSummarySchema) });
-export const okResponseSchema = v.object({ ok: v.literal(true) });
-export const textItemSchema = v.object({
+const sessionsResponseSchema = v.object({ sessions: v.array(sessionSummarySchema) });
+const okResponseSchema = v.object({ ok: v.literal(true) });
+const textItemSchema = v.object({
   type: v.picklist(["user", "assistant"]),
   id: boundedString(200),
   text: boundedString(1_000_000),
@@ -103,14 +90,14 @@ export const textItemSchema = v.object({
   complete: v.boolean(),
   timestamp: v.string(),
 });
-export const skillItemSchema = v.object({
+const skillItemSchema = v.object({
   type: v.literal("skill"),
   id: boundedString(200),
   name: boundedString(64),
   content: boundedString(1_000_000),
   timestamp: v.string(),
 });
-export const toolItemSchema = v.object({
+const toolItemSchema = v.object({
   type: v.literal("tool"),
   id: boundedString(200),
   name: boundedString(200),
@@ -121,19 +108,19 @@ export const toolItemSchema = v.object({
   resourceId: v.optional(idSchema),
   outputSize: v.optional(nonnegativeInteger()),
 });
-export const noticeItemSchema = v.object({
+const noticeItemSchema = v.object({
   type: v.literal("notice"),
   id: boundedString(200),
   level: v.picklist(["info", "warning", "error"]),
   text: boundedString(4000),
 });
-export const transcriptItemSchema = v.variant("type", [
+const transcriptItemSchema = v.variant("type", [
   textItemSchema,
   skillItemSchema,
   toolItemSchema,
   noticeItemSchema,
 ]);
-export const extensionDialogSchema = v.object({
+const extensionDialogSchema = v.object({
   id: idSchema,
   kind: v.picklist(["select", "confirm", "input", "editor"]),
   title: boundedString(500),
@@ -152,11 +139,11 @@ const statsSchema = v.object({
 export const contextUsageSchema = v.object({
   tokens: v.nullable(nonnegativeInteger()),
   contextWindow: positiveInteger(),
-  percent: v.nullable(nonnegativeNumber()),
+  percent: v.nullable(v.pipe(finiteNumber(), v.minValue(0))),
   totalProcessedTokens: nonnegativeInteger(),
   compactsAutomatically: v.boolean(),
 });
-export const chatSnapshotSchema = v.object({
+const chatSnapshotSchema = v.object({
   chatId: idSchema,
   workspaceId: idSchema,
   taskId: idSchema,
@@ -236,19 +223,20 @@ export const wsClientMessageSchema = v.variant("type", [
   v.object({ type: v.literal("ack"), eventId: positiveInteger() }),
   v.object({ type: v.literal("pong") }),
 ]);
-export const openWorkspaceSchema = v.object({
+const openWorkspaceSchema = v.object({
   path: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
   remember: v.optional(v.boolean()),
 });
-export const reorderWorkspacesSchema = v.object({
+const reorderWorkspacesSchema = v.object({
   workspaceIds: v.pipe(v.array(idSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
 });
-export const recentWorkspacesResponseSchema = v.object({
+const recentWorkspacesResponseSchema = v.object({
   recentWorkspaces: v.pipe(v.array(recentWorkspaceSchema), v.maxLength(MAX_RECENT_WORKSPACES)),
 });
-export const trustWorkspaceSchema = v.object({ trusted: v.boolean() });
-export const resumeChatSchema = v.object({ taskId: idSchema });
-export const actionRequestSchema = v.object({
+const trustWorkspaceSchema = v.object({ trusted: v.boolean() });
+const resumeChatSchema = v.object({ taskId: idSchema });
+const actionRequestSchema = v.object({
+  chatId: idSchema,
   clientId: idSchema,
   actionId: idSchema,
   expectedRevision: nonnegativeInteger(),
@@ -264,7 +252,7 @@ export const messageRequestSchema = v.object({
   delivery: v.picklist(["normal", "steer", "follow-up"]),
   runId: v.optional(idSchema),
 });
-export const abortRequestSchema = v.object({ ...actionRequestSchema.entries, runId: idSchema });
+const abortRequestSchema = v.object({ ...actionRequestSchema.entries, runId: idSchema });
 export const configRequestSchema = v.pipe(
   v.object({
     ...actionRequestSchema.entries,
@@ -280,16 +268,16 @@ export const renameRequestSchema = v.object({
   ...actionRequestSchema.entries,
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
 });
-export const compactRequestSchema = v.object({
+const compactRequestSchema = v.object({
   ...actionRequestSchema.entries,
   instructions: v.optional(boundedString(4000)),
 });
-export const dialogResponseSchema = v.object({
+const dialogResponseSchema = v.object({
   ...actionRequestSchema.entries,
   requestId: idSchema,
   value: v.union([boundedString(20_000), v.boolean(), v.null()]),
 });
-export const toolOutputChunkSchema = v.object({
+const toolOutputChunkSchema = v.object({
   resourceId: idSchema,
   offset: nonnegativeInteger(),
   nextOffset: nonnegativeInteger(),
@@ -298,7 +286,7 @@ export const toolOutputChunkSchema = v.object({
   complete: v.boolean(),
   sourceTruncated: v.boolean(),
 });
-export const transcriptPageSchema = v.object({
+const transcriptPageSchema = v.object({
   items: v.pipe(v.array(transcriptItemSchema), v.maxLength(100)),
   start: nonnegativeInteger(),
   total: nonnegativeInteger(),
@@ -339,32 +327,16 @@ export const pidexApiContract = {
     resume: oc.input(resumeChatSchema).output(chatSnapshotSchema),
     get: oc.input(chatIdInputSchema).output(chatSnapshotSchema),
     dispose: oc.input(chatIdInputSchema).output(okResponseSchema),
-    sendMessage: oc
-      .input(v.object({ ...messageRequestSchema.entries, chatId: idSchema }))
-      .output(actionOutcomeSchema),
-    abort: oc
-      .input(v.object({ ...abortRequestSchema.entries, chatId: idSchema }))
-      .output(actionOutcomeSchema),
-    acknowledgeInterrupted: oc
-      .input(v.object({ ...actionRequestSchema.entries, chatId: idSchema }))
-      .output(actionOutcomeSchema),
+    sendMessage: oc.input(messageRequestSchema).output(actionOutcomeSchema),
+    abort: oc.input(abortRequestSchema).output(actionOutcomeSchema),
+    acknowledgeInterrupted: oc.input(actionRequestSchema).output(actionOutcomeSchema),
     toolOutput: oc.input(toolOutputInputSchema).output(toolOutputChunkSchema),
     transcript: oc.input(transcriptInputSchema).output(transcriptPageSchema),
-    clearQueue: oc
-      .input(v.object({ ...actionRequestSchema.entries, chatId: idSchema }))
-      .output(chatSnapshotSchema),
-    configure: oc
-      .input(v.intersect([configRequestSchema, chatIdInputSchema]))
-      .output(chatSnapshotSchema),
-    rename: oc
-      .input(v.object({ ...renameRequestSchema.entries, chatId: idSchema }))
-      .output(chatSnapshotSchema),
-    compact: oc
-      .input(v.object({ ...compactRequestSchema.entries, chatId: idSchema }))
-      .output(chatSnapshotSchema),
-    answerDialog: oc
-      .input(v.object({ ...dialogResponseSchema.entries, chatId: idSchema }))
-      .output(okResponseSchema),
+    clearQueue: oc.input(actionRequestSchema).output(chatSnapshotSchema),
+    configure: oc.input(configRequestSchema).output(chatSnapshotSchema),
+    rename: oc.input(renameRequestSchema).output(chatSnapshotSchema),
+    compact: oc.input(compactRequestSchema).output(chatSnapshotSchema),
+    answerDialog: oc.input(dialogResponseSchema).output(okResponseSchema),
   },
 };
 
@@ -399,10 +371,6 @@ function nonnegativeInteger() {
 
 function positiveInteger() {
   return v.pipe(v.number(), v.safeInteger(), v.minValue(1));
-}
-
-function nonnegativeNumber() {
-  return v.pipe(finiteNumber(), v.minValue(0));
 }
 
 function finiteNumber() {
