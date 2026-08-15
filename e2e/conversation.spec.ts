@@ -302,7 +302,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   await expect(readBlock).toBeVisible();
   await expect(readContainer).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(readContainer.locator(".tool-call__range")).toHaveText(":1-800");
-  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(220, 220, 31)");
+  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(183, 121, 31)");
   await expect(readBlock).toHaveAttribute("aria-expanded", "false");
   await expect(readContainer.locator(".tool-call__output")).toHaveCount(0);
   await readBlock.click();
