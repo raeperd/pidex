@@ -1495,16 +1495,21 @@
     <div
       class={`flex items-center gap-2 pr-1 ${usesIntegratedTitleBar ? "window-drag-region h-13 min-h-13 pl-20" : "min-h-14 pt-2 pb-1.5 pl-2"}`}
     >
-      <button
-        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
-        bind:this={collapseSidebarButton}
-        aria-label="Collapse sidebar"
-        aria-controls="tasks-drawer"
-        aria-expanded="true"
-        onclick={collapseSidebar}
-      >
-        <Icon name="sidebar-collapse" />
-      </button>
+      <span class="icon-tooltip relative inline-flex max-[900px]:hidden">
+        <button
+          class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground"
+          bind:this={collapseSidebarButton}
+          aria-label="Collapse sidebar"
+          aria-controls="tasks-drawer"
+          aria-expanded="true"
+          onclick={collapseSidebar}
+        >
+          <Icon name="sidebar-collapse" />
+        </button>
+        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
+          >Collapse sidebar</span
+        >
+      </span>
       <a class="flex min-w-0 flex-1 items-center gap-2" href="/" aria-label="Pidex home">
         {#if usesIntegratedTitleBar}
           <img
@@ -1519,16 +1524,20 @@
           >LOCAL</span
         >
       </a>
-      <button
-        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
-        onclick={toggleSearch}
-        aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
-        aria-expanded={searchOpen}
-        aria-keyshortcuts="Meta+K Control+K"
-        title={searchOpen ? "Close search" : "Search (⌘K)"}
-      >
-        <Icon name={searchOpen ? "x" : "search"} />
-      </button>
+      <span class="icon-tooltip relative inline-flex">
+        <button
+          class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
+          onclick={toggleSearch}
+          aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
+          aria-expanded={searchOpen}
+          aria-keyshortcuts="Meta+K Control+K"
+        >
+          <Icon name={searchOpen ? "x" : "search"} />
+        </button>
+        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
+          >{searchOpen ? "Close search" : "Search (⌘K)"}</span
+        >
+      </span>
     </div>
 
     {#if searchOpen}
@@ -1720,7 +1729,7 @@
   >
     {#snippet expandSidebarControl(buttonClass: string)}
       <button
-        class={buttonClass}
+        class={`${buttonClass} icon-tooltip`}
         bind:this={expandSidebarButton}
         aria-label="Expand sidebar"
         aria-controls="tasks-drawer"
@@ -1728,6 +1737,9 @@
         onclick={expandSidebar}
       >
         <Icon name="sidebar-expand" size={19} />
+        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
+          >Expand sidebar</span
+        >
       </button>
     {/snippet}
     {#snippet openTasksControl(buttonClass: string)}
@@ -1760,7 +1772,7 @@
       >
         {#if sidebarCollapsed}
           {@render expandSidebarControl(
-            `inline-grid size-8.5 flex-none ${shellIconButtonClass} max-[900px]:hidden`,
+            `relative inline-grid size-8.5 flex-none ${shellIconButtonClass} max-[900px]:hidden`,
           )}
         {/if}
         {@render openTasksControl(
@@ -1774,14 +1786,18 @@
         </div>
         {#if snapshot}
           <div class="flex gap-1">
-            <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
-              onclick={openRename}
-              disabled={active}
-              aria-label="Rename"
-              title="Rename task"
-              ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
-            >
+            <span class="icon-tooltip relative inline-flex">
+              <button
+                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
+                onclick={openRename}
+                disabled={active}
+                aria-label="Rename"
+                ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
+              >
+              <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
+                >Rename task</span
+              >
+            </span>
           </div>
         {/if}
       </header>

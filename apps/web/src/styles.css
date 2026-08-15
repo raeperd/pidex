@@ -163,6 +163,43 @@
   backdrop-filter: blur(3px);
 }
 
+/* Shared icon-button tooltip. Mark the hover/focus boundary (a wrapper span,
+   or the trigger element itself) with .icon-tooltip and give it a child
+   .icon-tooltip-bubble; positioning (relative/absolute) stays on the trigger's
+   own classes so this works whether the trigger is a plain wrapper or an
+   already-positioned element. Appears on hover and keyboard focus. */
+.icon-tooltip:hover .icon-tooltip-bubble,
+.icon-tooltip:focus-within .icon-tooltip-bubble {
+  opacity: 1;
+}
+
+.icon-tooltip-bubble {
+  pointer-events: none;
+  position: absolute;
+  bottom: calc(100% + 0.375rem);
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+  border-radius: 0.375rem;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  padding: 0.25rem 0.5rem;
+  color: var(--foreground);
+  font-size: var(--text-meta);
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  box-shadow: var(--shadow-raised);
+  transition: opacity 100ms;
+}
+
+/* For triggers near the top of the window, where a tooltip above would be
+   clipped by the sidebar/header's overflow-hidden. */
+.icon-tooltip-bubble--below {
+  top: calc(100% + 0.375rem);
+  bottom: auto;
+}
+
 summary::-webkit-details-marker {
   display: none;
 }
