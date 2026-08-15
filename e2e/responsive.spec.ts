@@ -36,9 +36,21 @@ test("scales mobile task and composer targets while preserving responsive densit
     { path: workspacePath, remember: false },
     bootstrap.result.csrfToken,
   );
+  // A literal model fixture, not a copy of the machine's real detected models: this test's
+  // composer/model assertions need a model to be present (the disabled-reason cascade otherwise
+  // labels the send button "Run pi and /login to enable models" instead of "Send" -- see
+  // TaskComposer.svelte's `composerAffordances`), and relying on the real, unmocked
+  // `system/bootstrap`/`workspaces/open` responses made this test's model count depend on
+  // whether the CI runner (unlike a developer machine) has `pi` logged in with a provider.
+  const modelFixture = {
+    id: "e2e/mobile-model",
+    provider: "e2e",
+    name: longModelName,
+    reasoning: true,
+  };
   const workspaceFixture = {
     ...opened.result,
-    models: opened.result.models.map((model) => ({ ...model, name: longModelName })),
+    models: [modelFixture],
     sessions: [
       {
         id: "task_mobile_readability",
@@ -75,7 +87,7 @@ test("scales mobile task and composer targets while preserving responsive densit
         ...createdSnapshot,
         workspaceId: opened.result.id,
         taskId: "new_task_mobile_readability",
-        model: opened.result.models[0]?.id,
+        model: modelFixture.id,
       }),
     );
   });
