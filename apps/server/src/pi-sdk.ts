@@ -31,6 +31,7 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type AdapterSessionInfo,
+  type AdapterToolOutput,
   type AdapterWorkspaceInfo,
   type EffectAdapterSession,
 } from "./adapter.js";
@@ -55,24 +56,20 @@ export interface PiSdkOptions {
   readonly sessionDir?: string;
 }
 
+const isContentPart = (part: unknown): part is { type: string; text?: string; thinking?: string } =>
+  typeof part === "object" && part !== null && "type" in part;
 const textOf = (content: unknown): string => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter(
-      (part): part is { type: string; text?: string; thinking?: string } =>
-        typeof part === "object" && part !== null && "type" in part,
-    )
+    .filter(isContentPart)
     .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
     .join("");
 };
 const thinkingOf = (content: unknown): string =>
   Array.isArray(content)
     ? content
-        .filter(
-          (part): part is { type: string; thinking?: string } =>
-            typeof part === "object" && part !== null && "type" in part,
-        )
+        .filter(isContentPart)
         .map((part) => (part.type === "thinking" ? part.thinking?.trim() : undefined))
         .filter((thinking): thinking is string => Boolean(thinking))
         .join("\n\n")
@@ -82,7 +79,7 @@ const messageId = (message: { role: string; timestamp?: number }) =>
 
 function transcriptItems(entries: SessionEntry[]) {
   const items: TranscriptItem[] = [];
-  const toolOutputs = new Map<string, { id: string; text: string; sourceTruncated: boolean }>();
+  const toolOutputs = new Map<string, AdapterToolOutput>();
   const toolIndexes = new Map<string, number>();
   for (const entry of entries) {
     if (entry.type !== "message") continue;
@@ -466,8 +463,9 @@ function makePiSession(session: AgentSession) {
 }
 
 export function makePiSdk(options: PiSdkOptions = {}) {
+  const agentDir = options.agentDir ?? getAgentDir();
+
   async function services(cwd: string) {
-    const agentDir = options.agentDir ?? getAgentDir();
     const settings = SettingsManager.create(cwd, agentDir);
     const trust = trustState(cwd, agentDir, settings);
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
@@ -478,7 +476,6 @@ export function makePiSdk(options: PiSdkOptions = {}) {
     });
     await modelRuntime.refresh({ allowNetwork: false });
     return {
-      agentDir,
       settings,
       trust,
       loader,
@@ -493,7 +490,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    const { agentDir, settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
+    const { settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
     const result = await createAgentSession({
       cwd,
@@ -521,15 +518,11 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       result.session.dispose();
     }
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
-      ...loader
-        .getSkills()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
-      ...loader
-        .getPrompts()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
-      ...loader
-        .getThemes()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
+      ...[
+        ...loader.getSkills().diagnostics,
+        ...loader.getPrompts().diagnostics,
+        ...loader.getThemes().diagnostics,
+      ].map((entry) => resourceDiagnostic(entry.type, entry.message)),
       ...loader
         .getExtensions()
         .errors.map((entry) =>
@@ -569,7 +562,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   ) {
     const result = await createAgentSession({
       cwd,
-      agentDir: svc.agentDir,
+      agentDir,
       settingsManager: svc.settings,
       resourceLoader: svc.loader,
       modelRuntime: svc.modelRuntime,
@@ -596,17 +589,17 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function setWorkspaceTrust(cwd: string, trusted: boolean) {
-    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, trusted);
+    new ProjectTrustStore(agentDir).set(cwd, trusted);
   }
 
   async function inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
-    const trust = new ProjectTrustStore(options.agentDir ?? getAgentDir());
+    const trust = new ProjectTrustStore(agentDir);
     const decision = trust.get(sourceCwd);
     if (decision !== null) trust.set(cwd, decision);
   }
 
   async function clearWorkspaceTrust(cwd: string) {
-    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, null);
+    new ProjectTrustStore(agentDir).set(cwd, null);
   }
   return {
     inspectWorkspace,

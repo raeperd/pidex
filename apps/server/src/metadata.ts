@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { MAX_RECENT_WORKSPACES, type ActionOutcome, type RunOutcome } from "@pidex/api";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { createSelectSchema } from "drizzle-orm/effect-schema";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Context, Effect, Layer, Schema } from "effect";
 import { ActionProtocolError, failureMessage } from "./errors.js";
 
-export interface ActionInput {
+interface ActionInput {
   actionId: string;
   clientId: string;
   expectedRevision: number;
@@ -106,11 +106,11 @@ export function makeMetadataStore(stateDir?: string) {
   try {
     sqlite.exec(METADATA_SCHEMA_SQL);
     ensureWorkspaceSortOrder();
-    ensureWorkspaceListed();
-    ensureWorkspaceSource();
+    addWorkspaceColumn("listed", "listed INTEGER NOT NULL DEFAULT 1");
+    addWorkspaceColumn("source_workspace_id", "source_workspace_id TEXT");
     pruneWorkspaceHistory();
     sqlite.exec(WORKSPACE_ORDER_INDEX_SQL);
-    db = createMetadataDatabase(sqlite);
+    db = drizzle({ client: sqlite });
 
     // A process death cannot prove whether Pi completed after the last durable update.
     // Preserve that ambiguity and require an explicit acknowledgement before new work.
@@ -153,12 +153,11 @@ export function makeMetadataStore(stateDir?: string) {
         return existing.id;
       }
       const retained = tx
-        .select({ id: workspaces.id })
+        .select({ count: count() })
         .from(workspaces)
         .where(eq(workspaces.listed, true))
-        .limit(MAX_RECENT_WORKSPACES)
-        .all();
-      if (retained.length === MAX_RECENT_WORKSPACES) {
+        .get();
+      if ((retained?.count ?? 0) >= MAX_RECENT_WORKSPACES) {
         const oldestRow = tx
           .select()
           .from(workspaces)
@@ -289,10 +288,6 @@ export function makeMetadataStore(stateDir?: string) {
   ): { id: string; workspaceId: string; workspacePath: string; sessionKey: string } | undefined {
     const row = db.select().from(tasks).where(eq(tasks.id, id)).get();
     return row ? decodeTaskRow(row) : undefined;
-  }
-
-  function getSessionState(sessionKey: string): { revision: number; run?: RunOutcome } {
-    return readSessionState(db, sessionKey);
   }
 
   function acceptPrompt(input: ActionInput): ActionOutcome {
@@ -533,20 +528,11 @@ export function makeMetadataStore(stateDir?: string) {
     `);
   }
 
-  function ensureWorkspaceListed() {
-    if (hasWorkspaceColumn("listed")) return;
+  function addWorkspaceColumn(name: string, ddl: string) {
+    if (hasWorkspaceColumn(name)) return;
     sqlite.exec(`
       BEGIN IMMEDIATE;
-      ALTER TABLE workspaces ADD COLUMN listed INTEGER NOT NULL DEFAULT 1;
-      COMMIT;
-    `);
-  }
-
-  function ensureWorkspaceSource() {
-    if (hasWorkspaceColumn("source_workspace_id")) return;
-    sqlite.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE workspaces ADD COLUMN source_workspace_id TEXT;
+      ALTER TABLE workspaces ADD COLUMN ${ddl};
       COMMIT;
     `);
   }
@@ -600,7 +586,7 @@ export function makeMetadataStore(stateDir?: string) {
 
   return {
     workspaceId: findWorkspaceId,
-    sessionState: getSessionState,
+    sessionState: (sessionKey: string) => readSessionState(db, sessionKey),
     rememberWorkspace,
     recent,
     workspaceProjectId,
@@ -630,67 +616,29 @@ function assertCurrentRevision(currentRevision: number, expectedRevision: number
 }
 
 function makeMetadataService(store: MetadataStore): MetadataService {
+  const meta = <A extends unknown[], R>(op: string, f: (...a: A) => R) =>
+    Effect.fn(`Metadata.${op}`)((...a: A) => attemptMetadata(op, () => f(...a)));
+  const act = <A extends unknown[], R>(op: string, f: (...a: A) => R) =>
+    Effect.fn(`Metadata.${op}`)((...a: A) => attemptAction(op, () => f(...a)));
   return {
-    rememberWorkspace: Effect.fn("Metadata.rememberWorkspace")(
-      (canonicalPath: string, sourceWorkspaceId?: string) =>
-        attemptMetadata("rememberWorkspace", () =>
-          store.rememberWorkspace(canonicalPath, sourceWorkspaceId),
-        ),
+    rememberWorkspace: meta("rememberWorkspace", store.rememberWorkspace),
+    workspaceId: meta("workspaceId", store.workspaceId),
+    recent: meta("recent", store.recent),
+    workspaceProjectId: meta("workspaceProjectId", store.workspaceProjectId),
+    forgetWorkspace: meta("forgetWorkspace", store.forgetWorkspace),
+    reorderWorkspaces: meta("reorderWorkspaces", (workspaceIds: ReadonlyArray<string>) =>
+      store.reorderWorkspaces([...workspaceIds]),
     ),
-    workspaceId: Effect.fn("Metadata.workspaceId")((canonicalPath: string) =>
-      attemptMetadata("workspaceId", () => store.workspaceId(canonicalPath)),
-    ),
-    recent: Effect.fn("Metadata.recent")(() => attemptMetadata("recent", () => store.recent())),
-    workspaceProjectId: Effect.fn("Metadata.workspaceProjectId")((workspaceId: string) =>
-      attemptMetadata("workspaceProjectId", () => store.workspaceProjectId(workspaceId)),
-    ),
-    forgetWorkspace: Effect.fn("Metadata.forgetWorkspace")((workspaceId: string) =>
-      attemptMetadata("forgetWorkspace", () => store.forgetWorkspace(workspaceId)),
-    ),
-    reorderWorkspaces: Effect.fn("Metadata.reorderWorkspaces")(
-      (workspaceIds: ReadonlyArray<string>) =>
-        attemptMetadata("reorderWorkspaces", () => store.reorderWorkspaces([...workspaceIds])),
-    ),
-    rememberTask: Effect.fn("Metadata.rememberTask")(
-      (workspaceId: string, workspacePath: string, sessionKey: string) =>
-        attemptMetadata("rememberTask", () =>
-          store.rememberTask(workspaceId, workspacePath, sessionKey),
-        ),
-    ),
-    task: Effect.fn("Metadata.task")((id: string) => attemptMetadata("task", () => store.task(id))),
-    sessionState: Effect.fn("Metadata.sessionState")((sessionKey: string) =>
-      attemptMetadata("sessionState", () => store.sessionState(sessionKey)),
-    ),
-    acceptPrompt: Effect.fn("Metadata.acceptPrompt")((input: ActionInput) =>
-      attemptAction("acceptPrompt", () => store.acceptPrompt(input)),
-    ),
-    acceptStop: Effect.fn("Metadata.acceptStop")((input: ActionInput & { runId: string }) =>
-      attemptAction("acceptStop", () => store.acceptStop(input)),
-    ),
-    acceptRunMutation: Effect.fn("Metadata.acceptRunMutation")(
-      (input: ActionInput & { runId: string; kind: "steer" | "follow-up" }) =>
-        attemptAction("acceptRunMutation", () => store.acceptRunMutation(input)),
-    ),
-    acceptSessionMutation: Effect.fn("Metadata.acceptSessionMutation")(
-      (
-        input: ActionInput & {
-          kind: "clear-queue" | "compact" | "config" | "dialog" | "rename";
-        },
-      ) => attemptAction("acceptSessionMutation", () => store.acceptSessionMutation(input)),
-    ),
-    acknowledgeInterrupted: Effect.fn("Metadata.acknowledgeInterrupted")((input: ActionInput) =>
-      attemptAction("acknowledgeInterrupted", () => store.acknowledgeInterrupted(input)),
-    ),
-    markPromptStatus: Effect.fn("Metadata.markPromptStatus")(
-      (sessionKey: string, runId: string, status: ActionStatus) =>
-        attemptMetadata("markPromptStatus", () =>
-          store.markPromptStatus(sessionKey, runId, status),
-        ),
-    ),
-    markActionStatus: Effect.fn("Metadata.markActionStatus")(
-      (actionId: string, status: ActionStatus) =>
-        attemptMetadata("markActionStatus", () => store.markActionStatus(actionId, status)),
-    ),
+    rememberTask: meta("rememberTask", store.rememberTask),
+    task: meta("task", store.task),
+    sessionState: meta("sessionState", store.sessionState),
+    acceptPrompt: act("acceptPrompt", store.acceptPrompt),
+    acceptStop: act("acceptStop", store.acceptStop),
+    acceptRunMutation: act("acceptRunMutation", store.acceptRunMutation),
+    acceptSessionMutation: act("acceptSessionMutation", store.acceptSessionMutation),
+    acknowledgeInterrupted: act("acknowledgeInterrupted", store.acknowledgeInterrupted),
+    markPromptStatus: meta("markPromptStatus", store.markPromptStatus),
+    markActionStatus: meta("markActionStatus", store.markActionStatus),
   };
 }
 
@@ -713,11 +661,7 @@ function metadataError(operation: string, cause: unknown) {
   return MetadataError.make({ operation, message: failureMessage(operation, cause), cause });
 }
 
-function createMetadataDatabase(sqlite: DatabaseSync) {
-  return drizzle({ client: sqlite });
-}
-
-type MetadataDatabase = ReturnType<typeof createMetadataDatabase>;
+type MetadataDatabase = ReturnType<typeof drizzle>;
 type MetadataTransaction = Parameters<Parameters<MetadataDatabase["transaction"]>[0]>[0];
 type MetadataExecutor = MetadataDatabase | MetadataTransaction;
 
