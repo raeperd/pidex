@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { ChatSnapshot } from "@pidex/api";
   import type { ConnectionState } from "./AppShellConnection";
 
   const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat(undefined, {
@@ -15,6 +16,49 @@
     if (connection === "connected" || !delayElapsed) return undefined;
     return hasEverConnected ? "reconnecting" : "connecting";
   }
+
+  type SidebarStatus = "error" | "running" | "idle";
+
+  function statusFromLiveRunStatus(liveRunStatus: ChatSnapshot["runStatus"]): SidebarStatus {
+    if (
+      liveRunStatus === "running" ||
+      liveRunStatus === "stopping" ||
+      liveRunStatus === "compacting"
+    )
+      return "running";
+    return liveRunStatus === "error" ? "error" : "idle";
+  }
+
+  /**
+   * The live snapshot wins for the task the user has open — it reflects run_status events
+   * instantly, before the next listing refresh could ever catch up. Every other row has no
+   * live snapshot to read, so it falls back to whatever the server last reported.
+   */
+  function resolveTaskStatus(input: {
+    session: { id: string; status?: SidebarStatus };
+    liveTaskId: string | undefined;
+    liveRunStatus: ChatSnapshot["runStatus"] | undefined;
+  }): SidebarStatus {
+    if (input.liveTaskId === input.session.id && input.liveRunStatus !== undefined)
+      return statusFromLiveRunStatus(input.liveRunStatus);
+    return input.session.status ?? "idle";
+  }
+
+  /**
+   * error > running > idle: one priority table shared by every rollup consumer (the collapsed
+   * project dot, the favicon aggregate) so the worst thing happening always wins — a task that
+   * needs attention should never be masked by one that's merely still running, and a merely
+   * running task should never be masked by the many that are quietly idle. Mirrors paseo's
+   * STATUS_BUCKET_PRIORITY.
+   */
+  function rollupProjectStatus(statuses: Iterable<SidebarStatus>): SidebarStatus {
+    let sawRunning = false;
+    for (const status of statuses) {
+      if (status === "error") return "error";
+      if (status === "running") sawRunning = true;
+    }
+    return sawRunning ? "running" : "idle";
+  }
 </script>
 
 <script lang="ts">
@@ -25,7 +69,6 @@
   import {
     MAX_RECENT_WORKSPACES,
     type Bootstrap,
-    type ChatSnapshot,
     type ExtensionDialog,
     type ProjectCandidate,
     type RecentWorkspace,
@@ -48,7 +91,6 @@
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
-  import { resolveTaskStatus, rollupProjectStatus } from "./SidebarTaskStatus";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
   import Toast from "./Toast.svelte";
 
@@ -762,6 +804,30 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
+  let pollingSessionList = false;
+  /**
+   * `activateRoute`'s refresh is a one-shot snapshot of the task being left: if it settles
+   * afterward with nobody connected to its chat, that idle event is lost and the cached row
+   * stays stuck on "running" until some unrelated refresh happens to fire. While the active
+   * workspace's listing still shows a running task that isn't the one currently connected,
+   * poll modestly until none remain — bounded, guarded against overlap, and it stops itself
+   * the moment the listing catches up. A workspace-level event stream would make this
+   * unnecessary; that's out of scope here.
+   */
+  $effect(() => {
+    const activeWorkspace = workspace;
+    const openTaskId = snapshot?.taskId;
+    const hasOtherRunning = (activeWorkspace?.sessions ?? []).some(
+      (session) => session.status === "running" && session.id !== openTaskId,
+    );
+    if (!hasOtherRunning) return;
+    const timer = window.setInterval(() => {
+      if (pollingSessionList) return;
+      pollingSessionList = true;
+      void refreshSessions(activeWorkspace?.id).finally(() => (pollingSessionList = false));
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  });
   async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
     const text = submittedDraft.trim();
     if (!text) return;
