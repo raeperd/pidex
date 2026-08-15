@@ -56,9 +56,12 @@
     position: { scrollTop: number; scrollHeight: number; clientHeight: number },
   ): boolean {
     const nearBottom = position.scrollHeight - position.scrollTop - position.clientHeight < 96;
+    // A wheel event fires before the browser applies its scroll, so `position` can still read
+    // "at the bottom" for an upward step that is about to move away from it: decide upward wheel
+    // gestures by direction alone, not by this pre-scroll position.
+    if (event.kind === "wheel" && (event.deltaY ?? 0) < 0) return false;
     if (event.kind === "scroll") return following || nearBottom;
     if (nearBottom) return true;
-    if (event.kind === "wheel" && (event.deltaY ?? 0) >= 0) return following;
     return false;
   }
 </script>
@@ -99,6 +102,7 @@
   let nearBottom = $state(true);
   let following = $state(true);
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
+  const reducedMotion = new MediaQuery("prefers-reduced-motion: reduce");
   let rows = $derived(groupTranscriptItems(items));
 
   export function scrollLatest() {
@@ -124,7 +128,10 @@
 
   function jumpToLatest() {
     if (!transcript) return;
-    transcript.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
+    transcript.scrollTo({
+      top: transcript.scrollHeight,
+      behavior: reducedMotion.current ? "auto" : "smooth",
+    });
     nearBottom = true;
     following = true;
   }

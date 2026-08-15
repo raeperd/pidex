@@ -137,6 +137,12 @@ describe("resolveFollowing", () => {
     expect(resolveFollowing(true, { kind: "wheel", deltaY: -10 }, position(200))).toBe(false);
   });
 
+  it("detaches on a wheel scroll up while the pre-scroll position still reads at the bottom", () => {
+    // The wheel event fires before the browser applies its default scroll, so the position
+    // it carries can still read "at the bottom" even though the gesture is about to move away.
+    expect(resolveFollowing(true, { kind: "wheel", deltaY: -10 }, position(0))).toBe(false);
+  });
+
   it("stays following on a wheel scroll down at the bottom", () => {
     expect(resolveFollowing(true, { kind: "wheel", deltaY: 10 }, position(0))).toBe(true);
   });
