@@ -9,7 +9,7 @@ import { createSelectSchema } from "drizzle-orm/effect-schema";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Context, Effect, Layer, Schema } from "effect";
-import { ActionProtocolError } from "./errors.js";
+import { ActionProtocolError, failureMessage } from "./errors.js";
 
 export interface ActionInput {
   actionId: string;
@@ -710,11 +710,7 @@ function attemptAction<A>(operation: string, evaluate: () => A) {
 }
 
 function metadataError(operation: string, cause: unknown) {
-  return MetadataError.make({
-    operation,
-    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
-    cause,
-  });
+  return MetadataError.make({ operation, message: failureMessage(operation, cause), cause });
 }
 
 function createMetadataDatabase(sqlite: DatabaseSync) {

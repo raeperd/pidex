@@ -357,12 +357,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         chat.abortRequested = false;
         chat.runStatus = "idle";
         broadcastRun(chat);
-        const stats = yield* chat.session.getStats();
-        broadcast(chat, {
-          type: "session",
-          ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
-          stats,
-        });
+        yield* broadcastSession(chat);
       });
     return Effect.sync(() => handleImmediate(chat, event));
   }
@@ -442,12 +437,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         return yield* Effect.fail(
           applicationError("chats.startPrompt", new Error("A run is already active")),
         );
-      chat.run = {
+      const runState = (status: "running" | "failed") => ({
         runId: outcome.runId,
         actionId: outcome.actionId,
-        status: "running",
+        status,
         requiresAcknowledgement: false,
-      };
+      });
+      chat.run = runState("running");
       chat.runStatus = "running";
       yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "running");
       broadcastRun(chat);
@@ -455,12 +451,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "failed");
-            chat.run = {
-              runId: outcome.runId,
-              actionId: outcome.actionId,
-              status: "failed",
-              requiresAcknowledgement: false,
-            };
+            chat.run = runState("failed");
             chat.runStatus = "error";
             handleNotice(chat, { level: "error", text: safeError(error) });
             broadcastRun(chat);
@@ -536,12 +527,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) {
     return Effect.gen(function* () {
       yield* chat.session.configure(input);
-      const stats = yield* chat.session.getStats();
-      broadcast(chat, {
-        type: "session",
-        ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
-        stats,
-      });
+      yield* broadcastSession(chat);
       const contextUsage = chat.session.state.contextUsage;
       if (contextUsage) broadcast(chat, { type: "context_usage", usage: contextUsage });
     });
@@ -549,8 +535,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function rename(chat: ChatRecord, name: string) {
     return Effect.gen(function* () {
       yield* chat.session.rename(name);
+      yield* broadcastSession(chat, name);
+    });
+  }
+  function broadcastSession(chat: ChatRecord, name = chat.session.state.sessionName) {
+    return Effect.gen(function* () {
       const stats = yield* chat.session.getStats();
-      broadcast(chat, { type: "session", name, stats });
+      broadcast(chat, { type: "session", ...(name ? { name } : {}), stats });
     });
   }
   function compact(chat: ChatRecord, instructions?: string) {
@@ -613,7 +604,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     toolOutput,
     transcriptPage,
     performMutation,
-    clear,
+    clear: (chat: ChatRecord) => chat.session.clearQueue(),
     configure,
     rename,
     compact,
@@ -680,8 +671,4 @@ function transcriptPage(
     start--;
   }
   return { items: chat.items.slice(start, before), start, total: chat.items.length };
-}
-
-function clear(chat: ChatRecord) {
-  return chat.session.clearQueue();
 }

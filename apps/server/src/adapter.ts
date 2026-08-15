@@ -10,6 +10,7 @@ import type {
   ToolItem,
 } from "@pidex/api";
 import { Effect, Queue, Scope, Stream } from "effect";
+import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 
 export type AdapterEvent =
   | { type: "message"; item: TextItem | SkillItem }
@@ -66,12 +67,7 @@ export interface AdapterSession {
   dispose(): void;
 }
 
-interface AdapterSessionError {
-  readonly _tag: "AdapterSessionError";
-  readonly operation: string;
-  readonly message: string;
-  readonly cause: unknown;
-}
+type AdapterSessionError = TaggedOperationError<"AdapterSessionError">;
 
 export interface EffectAdapterSession {
   readonly state: Pick<
@@ -171,34 +167,7 @@ function abortForCleanup(session: AdapterSession): Effect.Effect<void> {
   return Effect.tryPromise(() => session.abort()).pipe(Effect.ignore);
 }
 
-function attemptPromise<A>(
-  operation: string,
-  evaluate: () => Promise<A>,
-): Effect.Effect<A, AdapterSessionError> {
-  return Effect.tryPromise({
-    try: evaluate,
-    catch: (cause) => adapterSessionError(operation, cause),
-  });
-}
-
-function attemptSync<A>(
-  operation: string,
-  evaluate: () => A,
-): Effect.Effect<A, AdapterSessionError> {
-  return Effect.try({
-    try: evaluate,
-    catch: (cause) => adapterSessionError(operation, cause),
-  });
-}
-
-function adapterSessionError(operation: string, cause: unknown): AdapterSessionError {
-  return {
-    _tag: "AdapterSessionError",
-    operation,
-    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
-    cause,
-  };
-}
+const { promise: attemptPromise, sync: attemptSync } = taggedAttempt("AdapterSessionError");
 
 export function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
   let text: string;
