@@ -39,9 +39,9 @@
       class="thinking-markdown mb-2 font-sans text-control italic text-faint [overflow-wrap:anywhere]"
     >
       {#if !complete}<span class="mb-2 inline-flex gap-0.5" aria-label="Thinking"
-          ><i class="size-1 animate-pulse rounded-full bg-current"></i><i
-            class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.2s]"
-          ></i><i class="size-1 animate-pulse rounded-full bg-current [animation-delay:0.4s]"
+          ><i class="size-1 animate-status-pulse rounded-full bg-current"></i><i
+            class="size-1 animate-status-pulse rounded-full bg-current [animation-delay:0.2s]"
+          ></i><i class="size-1 animate-status-pulse rounded-full bg-current [animation-delay:0.4s]"
           ></i></span
         >{/if}
       <AgentMessageBody nodes={thinkingNodes} streaming={!complete} {theme} />

@@ -1688,7 +1688,7 @@
                         {#if current && active}<span
                             class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
                             ><i
-                              class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
+                              class="size-1.5 animate-status-pulse rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
                           >{:else}<time
                             class="flex-none font-mono text-meta leading-none text-faint tabular-nums"

@@ -478,7 +478,7 @@
     ]}
   >
     <span class="flex items-center gap-1.5"
-      ><span class="size-1.5 animate-pulse rounded-full bg-primary"
+      ><span class="size-1.5 animate-status-pulse rounded-full bg-primary"
       ></span>{statusLabel}{#if elapsedLabel}{" "}for
         <span class="font-mono tabular-nums">{elapsedLabel}</span>{/if}{#if queueLabel}{" "}· {queueLabel}{/if}</span
     >

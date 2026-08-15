@@ -42,6 +42,26 @@
   --shadow-raised: 0 4px 16px rgb(0 0 0 / 14%);
   --shadow-popover: 0 18px 48px rgb(0 0 0 / 24%);
   --shadow-modal: 0 24px 90px rgb(0 0 0 / 28%);
+  /* Duty-cycled status indicator: a stepped ramp with a long hold, so the
+     compositor updates a handful of discrete frames per cycle instead of
+     every vsync. Used by "in progress" dots instead of the free-running
+     Tailwind animate-pulse. */
+  --animate-status-pulse: status-pulse 2s infinite;
+  @keyframes status-pulse {
+    0%,
+    40% {
+      opacity: 1;
+      animation-timing-function: steps(6);
+    }
+    50%,
+    90% {
+      opacity: 0.5;
+      animation-timing-function: steps(6);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
 }
 
 :root {
