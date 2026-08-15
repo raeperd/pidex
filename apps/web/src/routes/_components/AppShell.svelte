@@ -1762,7 +1762,7 @@
           ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
           while disconnected.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
+          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
           onclick={retryConnection}
           disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
@@ -1777,7 +1777,7 @@
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
+          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
           onclick={acknowledgeInterrupted}>Acknowledge</button
         >
       </div>
@@ -1792,7 +1792,7 @@
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
         >{#if window.pidexDesktop}<button
-            class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
+            class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
             onclick={approveProjectTrust}>Review & trust</button
           >{/if}
       </div>
