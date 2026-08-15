@@ -791,12 +791,24 @@
           remember: false,
         });
   }
+  /**
+   * Per-workspace request counter so that when several refreshes for the same workspace are
+   * in flight at once (a run-status transition, a navigation, a poll tick can all fire close
+   * together), only the response to the most recently ISSUED request gets applied. Network
+   * responses can complete out of order: without this guard, an earlier request issued while
+   * a task was still running could resolve after a later one that correctly observed it had
+   * gone idle, silently reverting the fresher result. Mirrors `routeSequence` below.
+   */
+  let sessionRefreshSequence: Record<string, number> = {};
   async function refreshSessions(workspaceId = workspace?.id) {
     if (!workspaceId) return;
+    const sequence = (sessionRefreshSequence[workspaceId] ?? 0) + 1;
+    sessionRefreshSequence = { ...sessionRefreshSequence, [workspaceId]: sequence };
     try {
       const current = workspaceFor(workspaceId);
       if (!current) return;
       const sessions = await api.listSessions(workspaceId);
+      if (sessionRefreshSequence[workspaceId] !== sequence) return;
       const loaded = { ...current, sessions };
       workspaceCache = { ...workspaceCache, [workspaceId]: loaded };
       if (workspace?.id === workspaceId) workspace = loaded;
@@ -960,11 +972,9 @@
     chatConnection.close();
     // The chat's WebSocket for the task we're leaving just closed, so if its run settles
     // while we're gone, its idle run_status event never arrives and refreshSessions never
-    // fires for it. Per-chat events alone can't keep the list live; refresh that task's
-    // workspace now as a cheap mitigation. (A workspace-level event stream would be the
-    // proper fix but is out of scope here.) Gated on `snapshot` so this only fires when
-    // actually navigating away from an open task, not on every route activation.
-    if (snapshot) void refreshSessions(snapshot.workspaceId);
+    // fires for it. Captured now (before `snapshot` gets reassigned below) so the mitigation
+    // refresh below targets the task actually being left.
+    const departingWorkspaceId = snapshot?.workspaceId;
 
     if (!taskId) {
       snapshot = undefined;
@@ -972,6 +982,7 @@
       startMode = "local";
       routeLoading = false;
       chatLoading = false;
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
       return;
     }
 
@@ -1004,6 +1015,14 @@
         routeLoading = false;
         chatLoading = false;
       }
+      // Fired last, after this navigation's own cache writes (adoptWorkspace/rememberWorkspace)
+      // have already landed: rememberWorkspace() can write back a workspace snapshot fetched
+      // before this refresh's response arrived (its "already cached, no need to refetch" fast
+      // path in workspaceById()), and firing this refresh any earlier let that later write
+      // silently revert the fresher status this refresh just fetched. Per-chat events alone
+      // can't keep the list live; this is a cheap mitigation, not the proper fix (a
+      // workspace-level event stream), which is out of scope here.
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
     }
   }
   async function workspaceById(workspaceId: string) {
