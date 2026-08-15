@@ -1,12 +1,78 @@
+import type { ComponentProps } from "svelte";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import TaskComposer, {
   completeSlashCommand,
   composerCommands,
+  formatRunElapsed,
   nextSlashCommand,
+  queueSummary,
+  runStatusLabel,
   slashCommandSuggestions,
   submitComposerDraft,
 } from "./TaskComposer.svelte";
+
+describe("runStatusLabel", () => {
+  it("labels running as Working", () => {
+    expect(runStatusLabel("running")).toBe("Working");
+  });
+
+  it("labels stopping as Stopping", () => {
+    expect(runStatusLabel("stopping")).toBe("Stopping");
+  });
+
+  it("labels compacting as Compacting context", () => {
+    expect(runStatusLabel("compacting")).toBe("Compacting context");
+  });
+
+  it("returns a sensible label for idle even though the row never renders it", () => {
+    expect(runStatusLabel("idle")).toBe("Idle");
+  });
+
+  it("returns a sensible label for error even though the row never renders it", () => {
+    expect(runStatusLabel("error")).toBe("Idle");
+  });
+});
+
+describe("queueSummary", () => {
+  it("spells out both queues", () => {
+    expect(queueSummary(2, 1)).toBe("2 steering · 1 follow-up queued");
+  });
+
+  it("spells out only the steering queue", () => {
+    expect(queueSummary(1, 0)).toBe("1 steering queued");
+  });
+
+  it("spells out only the follow-up queue", () => {
+    expect(queueSummary(0, 1)).toBe("1 follow-up queued");
+  });
+
+  it("renders nothing for empty queues", () => {
+    expect(queueSummary(0, 0)).toBe("");
+  });
+});
+
+describe("formatRunElapsed", () => {
+  it("formats zero as 0s", () => {
+    expect(formatRunElapsed(0)).toBe("0s");
+  });
+
+  it("formats sub-minute durations in seconds", () => {
+    expect(formatRunElapsed(42_000)).toBe("42s");
+  });
+
+  it("formats minute-plus-second durations", () => {
+    expect(formatRunElapsed(83_000)).toBe("1m 23s");
+  });
+
+  it("formats hour-plus-minute durations", () => {
+    expect(formatRunElapsed(3_720_000)).toBe("1h 2m");
+  });
+
+  it("clamps negative input to 0s", () => {
+    expect(formatRunElapsed(-500)).toBe("0s");
+  });
+});
 
 describe("composerCommands", () => {
   it("combines native commands with commands discovered from Pi", () => {
@@ -134,6 +200,42 @@ describe("slashCommandSuggestions", () => {
     expect(body).not.toContain("Session cost");
   });
 
+  it("shows the human status label instead of the raw run-status enum while active", () => {
+    const body = renderComposer("", true);
+
+    expect(body).toContain("Working");
+    expect(body).not.toContain("running");
+  });
+
+  it("renders a space between the status label and the queue summary, not a glued word", () => {
+    // `elapsedLabel` is driven by a client-only `$effect` timer that svelte/server's `render`
+    // never executes, so it can't be exercised at this seam; `queueLabel` is a pure `$derived`
+    // of props and hits the same `{#if …}{" "}…{/if}` block-boundary-whitespace pattern, so it
+    // stands in for the identical class of bug (Svelte trims whitespace immediately inside a
+    // block boundary, gluing adjacent text together without an explicit `{" "}`). Svelte's SSR
+    // output interleaves invisible hydration-boundary comments between text nodes, so compare
+    // against the comment-stripped text a browser would actually display.
+    const body = render(TaskComposer, {
+      props: { ...composerProps("", true), steeringCount: 2, followUpCount: 1 },
+    }).body;
+    const visibleText = body.replace(/<!--[\s\S]*?-->/g, "");
+
+    expect(visibleText).toContain("Working · 2 steering · 1 follow-up queued");
+    expect(visibleText).not.toContain("Working·");
+  });
+
+  it("reserves the status row's height and hides its content when inactive", () => {
+    const body = renderComposer("", false);
+
+    expect(body).toContain("invisible");
+  });
+
+  it("shows the status row's content when active", () => {
+    const body = renderComposer("", true);
+
+    expect(body).not.toContain("invisible");
+  });
+
   it("completes a selected command in the composer", () => {
     expect(completeSlashCommand({ name: "compact" })).toBe("/compact ");
   });
@@ -145,47 +247,54 @@ describe("slashCommandSuggestions", () => {
   });
 });
 
-function renderComposer(draft: string, active: boolean, startModeEditable = true) {
-  return render(TaskComposer, {
-    props: {
-      active,
-      clearQueue: async () => {},
-      commands: [],
-      compact: async () => true,
-      compactPending: false,
-      configure: async () => true,
-      configurationPending: false,
-      connection: "connected",
-      contextUsage: {
-        tokens: 68_000,
-        contextWindow: 272_000,
-        percent: 25,
-        totalProcessedTokens: 3_350,
-        compactsAutomatically: true,
-      },
-      creatingTask: false,
-      draft,
-      followUpCount: 0,
-      models: [
-        {
-          id: "openai/gpt-5.6-sol",
-          provider: "openai",
-          name: "GPT-5.6 Sol",
-          reasoning: true,
-        },
-      ],
-      persistDraft: () => {},
-      projectName: "pidex",
-      requiresAcknowledgement: false,
-      runStatus: active ? "running" : "idle",
-      selectedModel: "openai/gpt-5.6-sol",
-      selectedThinkingLevel: "high",
-      send: async () => {},
-      setStartMode: () => {},
-      startMode: "local",
-      startModeEditable,
-      steeringCount: 0,
-      stop: async () => {},
+function composerProps(
+  draft: string,
+  active: boolean,
+  startModeEditable = true,
+): ComponentProps<typeof TaskComposer> {
+  return {
+    active,
+    clearQueue: async () => {},
+    commands: [],
+    compact: async () => true,
+    compactPending: false,
+    configure: async () => true,
+    configurationPending: false,
+    connection: "connected",
+    contextUsage: {
+      tokens: 68_000,
+      contextWindow: 272_000,
+      percent: 25,
+      totalProcessedTokens: 3_350,
+      compactsAutomatically: true,
     },
-  }).body;
+    creatingTask: false,
+    draft,
+    followUpCount: 0,
+    models: [
+      {
+        id: "openai/gpt-5.6-sol",
+        provider: "openai",
+        name: "GPT-5.6 Sol",
+        reasoning: true,
+      },
+    ],
+    persistDraft: () => {},
+    projectName: "pidex",
+    requiresAcknowledgement: false,
+    runStatus: active ? "running" : "idle",
+    selectedModel: "openai/gpt-5.6-sol",
+    selectedThinkingLevel: "high",
+    send: async () => {},
+    setStartMode: () => {},
+    startMode: "local",
+    startModeEditable,
+    steeringCount: 0,
+    stop: async () => {},
+    taskId: "task-1",
+  };
+}
+
+function renderComposer(draft: string, active: boolean, startModeEditable = true) {
+  return render(TaskComposer, { props: composerProps(draft, active, startModeEditable) }).body;
 }
