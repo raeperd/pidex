@@ -44,6 +44,7 @@
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
+  import Toast from "./Toast.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const SIDEBAR_WIDTH_STORAGE_KEY = "pidex:sidebar-width";
@@ -77,6 +78,7 @@
   let searchOpen = $state(false);
   let connection = $state<ConnectionState>("disconnected");
   let error = $state("");
+  let toast = $state("");
   let bootstrapError = $state("");
   let drawerOpen = $state(false);
   let sidebarCollapsed = $state(false);
@@ -407,6 +409,9 @@
   function reportError(cause: unknown, fallback: string) {
     error = cause instanceof Error ? cause.message : fallback;
   }
+  function reportToast(cause: unknown, fallback: string) {
+    toast = cause instanceof Error ? cause.message : fallback;
+  }
   async function loadBootstrap() {
     try {
       bootstrapError = "";
@@ -530,7 +535,7 @@
       } catch {
         bootstrap = { ...bootstrap, recentWorkspaces: previous };
       }
-      reportError(cause, "Project order could not be saved");
+      reportToast(cause, "Project order could not be saved");
     } finally {
       projectOrderSaving = false;
     }
@@ -589,7 +594,7 @@
       }
       return loaded;
     } catch (cause) {
-      reportError(cause, "Could not open project");
+      reportToast(cause, "Could not open project");
       return undefined;
     } finally {
       if (activate) projectLoading = false;
@@ -668,7 +673,7 @@
         if (loaded) projectDialogElement?.close();
       }
     } catch (cause) {
-      reportError(cause, "Could not open the folder picker");
+      reportToast(cause, "Could not open the folder picker");
     }
   }
   async function approveProjectTrust() {
@@ -685,7 +690,7 @@
       workspace = loaded;
       rememberWorkspace(loaded, false);
     } catch (cause) {
-      reportError(cause, "Project trust could not be saved");
+      reportToast(cause, "Project trust could not be saved");
     }
   }
   async function toggleProject(project: RecentWorkspace) {
@@ -762,7 +767,7 @@
         if (created) await disposeCreatedTask(created);
         return;
       }
-      reportError(cause, "Could not create task");
+      reportToast(cause, "Could not create task");
     } finally {
       if (sequence === routeSequence) chatLoading = false;
     }
@@ -809,7 +814,7 @@
         ...(previousSnapshot.model ? { model: previousSnapshot.model } : {}),
         thinkingLevel: previousSnapshot.thinkingLevel,
       });
-      if (!configured) throw new Error(error || "Could not configure worktree");
+      if (!configured) throw new Error(toast || "Could not configure worktree");
       if (sequence !== routeSequence) return abandon();
       await afterChat(initialDraft, true);
       if (sequence !== routeSequence) return abandon();
@@ -825,7 +830,7 @@
       projectPath = source.path;
       localStorage.setItem("pidex:last-project", source.path);
       snapshot = previousSnapshot;
-      reportError(cause, "Could not create worktree");
+      reportToast(cause, "Could not create worktree");
       return false;
     } finally {
       if (sequence === routeSequence) chatLoading = false;
@@ -1085,7 +1090,7 @@
         persistDraft();
         void tick().then(taskViews.resizeComposer);
       }
-      reportError(cause, "Prompt rejected");
+      reportToast(cause, "Prompt rejected");
     }
   }
   async function stop() {
@@ -1094,7 +1099,7 @@
       const outcome = await api.abort(snapshot.chatId, snapshot.run.runId, snapshot.revision);
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
     } catch (cause) {
-      reportError(cause, "Stop failed");
+      reportToast(cause, "Stop failed");
     }
   }
   async function clearQueue() {
@@ -1102,7 +1107,7 @@
     try {
       snapshot = await api.clearQueue(snapshot.chatId, snapshot.revision);
     } catch (cause) {
-      reportError(cause, "Could not clear queued instructions");
+      reportToast(cause, "Could not clear queued instructions");
     }
   }
   async function configure(patch: ChatConfiguration) {
@@ -1117,7 +1122,7 @@
       if (snapshot?.chatId === chatId) snapshot = configured;
       return true;
     } catch (cause) {
-      reportError(cause, "Configuration failed");
+      reportToast(cause, "Configuration failed");
       return false;
     } finally {
       configurationPendingTaskIds = configurationPendingTaskIds.filter(
@@ -1137,7 +1142,7 @@
       renameDialogElement?.close();
       await refreshSessions();
     } catch (cause) {
-      reportError(cause, "Rename failed");
+      reportToast(cause, "Rename failed");
     }
   }
   async function compact(instructions?: string) {
@@ -1154,7 +1159,7 @@
       return true;
     } catch (cause) {
       if (snapshot?.chatId !== chatId) return false;
-      reportError(cause, "Compaction failed");
+      reportToast(cause, "Compaction failed");
       return false;
     } finally {
       compactPendingTaskIds = compactPendingTaskIds.filter(
@@ -1173,7 +1178,7 @@
       );
       dialogElement?.close();
     } catch (cause) {
-      reportError(cause, "Extension response failed");
+      reportToast(cause, "Extension response failed");
     }
   }
   async function acknowledgeInterrupted() {
@@ -1186,7 +1191,7 @@
         run: { ...snapshot.run, requiresAcknowledgement: false },
       };
     } catch (cause) {
-      reportError(cause, "Could not acknowledge interrupted run");
+      reportToast(cause, "Could not acknowledge interrupted run");
     }
   }
   async function loadToolOutput(item: ToolItem) {
@@ -1245,7 +1250,7 @@
         transcriptTotal: transcriptPage.total,
       };
     } catch (cause) {
-      reportError(cause, "Earlier messages could not be loaded");
+      reportToast(cause, "Earlier messages could not be loaded");
     } finally {
       loadingEarlier = false;
     }
@@ -1831,6 +1836,8 @@
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
     {/if}
+
+    <Toast message={toast} ondismiss={() => (toast = "")} />
 
     {@render children()}
   </main>
