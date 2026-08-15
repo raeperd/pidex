@@ -18,6 +18,7 @@ import type {
   AdapterEvent,
   AdapterSession,
   AdapterSessionInfo,
+  AdapterToolOutput,
   AdapterWorkspaceInfo,
   EffectAdapterSession,
 } from "./adapter.js";
@@ -30,11 +31,6 @@ interface WorkspaceRecord {
   id: string;
   path: string;
   info: AdapterWorkspaceInfo;
-}
-interface ToolResource {
-  id: string;
-  text: string;
-  sourceTruncated: boolean;
 }
 type NativeSessionReference =
   | Pick<EffectAdapterSession["state"], "nativeId" | "nativePath">
@@ -57,7 +53,7 @@ interface ChatRecord {
   steering: string[];
   followUp: string[];
   extensionDialog: ExtensionDialog | undefined;
-  resources: Map<string, ToolResource>;
+  resources: Map<string, AdapterToolOutput>;
   eventId: number;
   events: ServerEvent[];
   sockets: Set<WebSocket>;
@@ -469,14 +465,10 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     outcome: ActionOutcome,
   ) {
     return Effect.gen(function* () {
-      chat.revision = Math.max(chat.revision, outcome.revision);
-      if (outcome.replayed) return outcome;
-      const deliveryEffect =
-        delivery === "steer" ? chat.session.steer(text) : chat.session.followUp(text);
-      yield* deliveryEffect.pipe(
-        Effect.andThen(metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
+      yield* settleAction(chat, outcome, () =>
+        delivery === "steer" ? chat.session.steer(text) : chat.session.followUp(text),
       );
+      if (outcome.replayed) return outcome;
       broadcastRun(chat);
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
     });
@@ -493,10 +485,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       chat.abortRequested = true;
       chat.runStatus = "stopping";
       broadcastRun(chat);
-      yield* chat.session.abort().pipe(
-        Effect.andThen(metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
-      );
+      yield* settleAction(chat, outcome, () => chat.session.abort());
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
     });
   }
@@ -512,14 +501,24 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     outcome: ActionOutcome,
     work: () => Effect.Effect<T, E, R>,
   ) {
+    return settleAction(chat, outcome, work).pipe(
+      Effect.tap(() => Effect.sync(() => outcome.replayed || broadcastRun(chat))),
+      Effect.tapError(() => Effect.sync(() => broadcastRun(chat))),
+    );
+  }
+
+  /** Shared action protocol: bump the revision, replay without effects, then run and record. */
+  function settleAction<T, E, R>(
+    chat: ChatRecord,
+    outcome: ActionOutcome,
+    work: () => Effect.Effect<T, E, R>,
+  ) {
     return Effect.gen(function* () {
       chat.revision = Math.max(chat.revision, outcome.revision);
       if (outcome.replayed) return undefined;
       return yield* work().pipe(
         Effect.tap(() => metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tap(() => Effect.sync(() => broadcastRun(chat))),
         Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
-        Effect.tapError(() => Effect.sync(() => broadcastRun(chat))),
       );
     });
   }

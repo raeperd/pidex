@@ -5,18 +5,12 @@ import path from "node:path";
 import { Effect } from "effect";
 import { applicationError, ConfigurationError, HttpError } from "./errors.js";
 
-export { HttpError } from "./errors.js";
-
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export function parsePort(value = process.env.PORT): number {
   if (value === undefined || value === "") return 4783;
-  if (!/^\d+$/.test(value))
-    throw ConfigurationError.make({
-      message: "PORT must be an integer from 1024 through 65535",
-    });
   const port = Number(value);
-  if (port < 1024 || port > 65535)
+  if (!/^\d+$/.test(value) || port < 1024 || port > 65535)
     throw ConfigurationError.make({
       message: "PORT must be an integer from 1024 through 65535",
     });
@@ -76,8 +70,6 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
 
 export const validateRequest = Effect.fn("security.validateRequest")(function* (
   req: IncomingMessage,
-  mutation: boolean,
-  csrf: string,
 ) {
   const rawHost = req.headers.host;
   if (!rawHost)
@@ -114,10 +106,6 @@ export const validateRequest = Effect.fn("security.validateRequest")(function* (
         HttpError.make({ status: 403, code: "bad_origin", message: "Origin is not allowed" }),
       );
   }
-  if (mutation && req.headers["x-pidex-csrf"] !== csrf)
-    return yield* Effect.fail(
-      HttpError.make({ status: 403, code: "csrf", message: "Invalid CSRF token" }),
-    );
 });
 
 export function isDescendant(root: string, candidate: string): boolean {

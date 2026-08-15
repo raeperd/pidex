@@ -22,7 +22,7 @@ export type AdapterEvent =
   | { type: "settled" }
   | { type: "dialog"; dialog?: ExtensionDialog };
 
-interface AdapterToolOutput {
+export interface AdapterToolOutput {
   readonly id: string;
   readonly text: string;
   readonly sourceTruncated: boolean;
