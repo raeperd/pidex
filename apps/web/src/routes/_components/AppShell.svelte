@@ -59,8 +59,6 @@
   const bannerClass = (tone: string, text: string) =>
     `z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border ${tone} px-3 py-2 text-control ${text}`;
   const warningBannerClass = bannerClass("border-warning/25 bg-warning/10", "text-warning-text");
-  const errorBannerClass = bannerClass("border-danger/25 bg-danger/10", "text-danger");
-  const connectionBannerClass = bannerClass("border-primary/25 bg-primary/8", "text-muted");
   const bannerActionClass =
     "flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold";
   const shellIconButtonClass =
@@ -1781,7 +1779,7 @@
     {#if isNewTask && hasTopBanner}<div class="h-13 flex-none" aria-hidden="true"></div>{/if}
 
     {#if error}
-      <div class={errorBannerClass} role="alert">
+      <div class={bannerClass("border-danger/25 bg-danger/10", "text-danger")} role="alert">
         <span>{error}</span><button
           class="grid rounded p-1 text-inherit"
           aria-label="Dismiss error"
@@ -1790,7 +1788,7 @@
       </div>
     {/if}
     {#if snapshot && banner && !routeLoading}
-      <div class={connectionBannerClass} role="status">
+      <div class={bannerClass("border-primary/25 bg-primary/8", "text-muted")} role="status">
         <span class="leading-relaxed"
           >{#if banner === "connecting"}<strong>Connecting…</strong> Waiting for the desktop host.{:else}<strong
               >Reconnecting…</strong
