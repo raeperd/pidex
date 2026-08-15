@@ -49,6 +49,21 @@
     if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
     return `${phrases.slice(0, -1).join(", ")}, and ${phrases.at(-1)}`;
   }
+
+  export function resolveFollowing(
+    following: boolean,
+    event: { kind: "wheel" | "touchmove" | "scroll"; deltaY?: number },
+    position: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  ): boolean {
+    const nearBottom = position.scrollHeight - position.scrollTop - position.clientHeight < 96;
+    // A wheel event fires before the browser applies its scroll, so `position` can still read
+    // "at the bottom" for an upward step that is about to move away from it: decide upward wheel
+    // gestures by direction alone, not by this pre-scroll position.
+    if (event.kind === "wheel" && (event.deltaY ?? 0) < 0) return false;
+    if (event.kind === "scroll") return following || nearBottom;
+    if (nearBottom) return true;
+    return false;
+  }
 </script>
 
 <script lang="ts">
@@ -85,17 +100,20 @@
 
   let transcript = $state<HTMLElement>();
   let nearBottom = $state(true);
+  let following = $state(true);
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
+  const reducedMotion = new MediaQuery("prefers-reduced-motion: reduce");
   let rows = $derived(groupTranscriptItems(items));
 
   export function scrollLatest() {
     if (!transcript) return;
     transcript.scrollTop = transcript.scrollHeight;
     nearBottom = true;
+    following = true;
   }
 
   export function scrollIfNearBottom() {
-    if (nearBottom) requestAnimationFrame(scrollLatest);
+    if (following) requestAnimationFrame(scrollLatest);
   }
 
   async function prependEarlierMessages() {
@@ -108,9 +126,54 @@
     }
   }
 
+  function jumpToLatest() {
+    if (!transcript) return;
+    transcript.scrollTo({
+      top: transcript.scrollHeight,
+      behavior: reducedMotion.current ? "auto" : "smooth",
+    });
+    nearBottom = true;
+    following = true;
+  }
+
   function onScroll() {
-    if (transcript)
-      nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
+    if (!transcript) return;
+    nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
+    following = resolveFollowing(
+      following,
+      { kind: "scroll" },
+      {
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+      },
+    );
+  }
+
+  function onWheel(event: WheelEvent) {
+    if (!transcript) return;
+    following = resolveFollowing(
+      following,
+      { kind: "wheel", deltaY: event.deltaY },
+      {
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+      },
+    );
+  }
+
+  function onTouchMove() {
+    if (!transcript) return;
+    following = resolveFollowing(
+      following,
+      { kind: "touchmove" },
+      {
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+      },
+    );
   }
 </script>
 
@@ -205,9 +268,11 @@
 {/snippet}
 
 <section
-  class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+  class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
   bind:this={transcript}
   onscroll={onScroll}
+  onwheel={onWheel}
+  ontouchmove={onTouchMove}
   role="log"
   aria-live="polite"
   aria-relevant="additions text"
@@ -247,7 +312,7 @@
     <div class="pointer-events-none sticky bottom-4 z-7 flex h-0 justify-center">
       <button
         class="pointer-events-auto flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-raised hover:text-foreground"
-        onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
+        onclick={jumpToLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
       >
     </div>
   {/if}
