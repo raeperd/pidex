@@ -9,12 +9,12 @@
     level === "error"
       ? "border-danger/25 text-danger"
       : level === "warning"
-        ? "border-warning/25 text-warning"
+        ? "border-warning/25 text-warning-text"
         : "border-border text-muted"
   }`}
 >
   <span
-    class={`mt-px flex-none ${level === "error" ? "text-danger" : level === "warning" ? "text-warning" : "text-primary-text"}`}
+    class={`mt-px flex-none ${level === "error" ? "text-danger" : level === "warning" ? "text-warning-text" : "text-primary-text"}`}
     ><Icon name="activity" size={14} /></span
   ><span>{text}</span>
 </div>

@@ -1770,7 +1770,7 @@
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="alert"
       >
         <span class="leading-relaxed"
@@ -1784,7 +1784,7 @@
     {/if}
     {#if workspace?.protectedResourcesSkipped}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="status"
       >
         <span
@@ -1799,7 +1799,7 @@
     {/if}
     {#if workspace?.resourceDiagnostics.length}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="status"
       >
         <span
@@ -1811,7 +1811,7 @@
     {/if}
     {#if workspace && workspace.models.length === 0}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
       >
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
