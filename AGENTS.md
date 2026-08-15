@@ -1,6 +1,6 @@
 - Organize code top-down: put high-level entry points first and implementation details below them.
 - Prefer simple, direct solutions over unnecessary abstractions and dependencies.
-- Keep one-use code local. Do not create a new file for a function, helper, or logic used in only one place.
+- Keep one-use code local. A function with one consumer lives inside that consumer — in a Svelte component, its `<script module>` block. When the consumer is not importable by tests, cover the logic through rendering or the verification checklist; extracting it to a new file to make it unit-testable is still a violation.
 - Keep route-specific components and logic under the route that owns them. Move code to a parent `_components/` directory only when multiple child routes use it.
 - Keep application wiring in one obvious composition root.
 - Use Effect for effectful application logic; keep plain TypeScript for pure functions and framework UI code.
