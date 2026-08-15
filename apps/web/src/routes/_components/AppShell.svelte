@@ -37,6 +37,10 @@
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
+  const warningBannerClass =
+    "z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning";
+  const appDialogClass =
+    "app-dialog m-auto max-h-[calc(100dvh-28px)] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
     readonly configuration: ChatConfiguration;
@@ -82,9 +86,7 @@
   let startMode = $state<TaskStartMode>("local");
   let configurationPendingTaskIds = $state.raw<string[]>([]);
   let compactPendingTaskIds = $state.raw<string[]>([]);
-  let pendingPrompt = $state.raw<
-    { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
-  >();
+  let pendingPrompt = $state.raw<{ actionId: string; text: string } | undefined>();
   let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
@@ -346,6 +348,9 @@
       unit as Intl.RelativeTimeFormatUnit,
     );
   };
+  function reportError(cause: unknown, fallback: string) {
+    error = cause instanceof Error ? cause.message : fallback;
+  }
   async function loadBootstrap() {
     try {
       bootstrapError = "";
@@ -469,7 +474,7 @@
       } catch {
         bootstrap = { ...bootstrap, recentWorkspaces: previous };
       }
-      error = cause instanceof Error ? cause.message : "Project order could not be saved";
+      reportError(cause, "Project order could not be saved");
     } finally {
       projectOrderSaving = false;
     }
@@ -516,13 +521,7 @@
               expand: false,
               remember: false,
             });
-      }
-      if (activate) {
-        chatConnection.close();
-        workspace = loaded;
-        projectPath = loaded.path;
-        startMode = workspaceIsWorktree(loaded.id) ? "worktree" : "local";
-        localStorage.setItem("pidex:last-project", loaded.path);
+        adoptWorkspace(loaded);
         snapshot = undefined;
         draft = "";
         if (options.closeDrawer ?? true) drawerOpen = false;
@@ -534,12 +533,19 @@
       }
       return loaded;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not open project";
+      reportError(cause, "Could not open project");
       return undefined;
     } finally {
       if (activate) projectLoading = false;
       projectLoadingId = "";
     }
+  }
+  function adoptWorkspace(loaded: Workspace, mode?: TaskStartMode) {
+    chatConnection.close();
+    workspace = loaded;
+    projectPath = loaded.path;
+    startMode = mode ?? (workspaceIsWorktree(loaded.id) ? "worktree" : "local");
+    localStorage.setItem("pidex:last-project", loaded.path);
   }
   async function loadSourceWorkspace(project: RecentWorkspace) {
     const sourceId = sourceWorkspaceId(project);
@@ -606,7 +612,7 @@
         if (loaded) projectDialogElement?.close();
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not open the folder picker";
+      reportError(cause, "Could not open the folder picker");
     }
   }
   async function approveProjectTrust() {
@@ -623,7 +629,7 @@
       workspace = loaded;
       rememberWorkspace(loaded, false);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Project trust could not be saved";
+      reportError(cause, "Project trust could not be saved");
     }
   }
   async function toggleProject(project: RecentWorkspace) {
@@ -676,12 +682,8 @@
         return;
       }
       persistDraft();
-      chatConnection.close();
-      workspace = rememberedTarget;
-      projectPath = rememberedTarget.path;
-      startMode = workspaceIsWorktree(rememberedTarget.id) ? "worktree" : "local";
+      adoptWorkspace(rememberedTarget);
       rememberWorkspace(rememberedTarget);
-      localStorage.setItem("pidex:last-project", rememberedTarget.path);
       snapshot = created;
       draft = starterPrompt?.draft ?? "";
       await afterChat(draft, !starterPrompt, !starterPrompt);
@@ -704,7 +706,7 @@
         if (created) await disposeCreatedTask(created);
         return;
       }
-      error = cause instanceof Error ? cause.message : "Could not create task";
+      reportError(cause, "Could not create task");
     } finally {
       if (sequence === routeSequence) chatLoading = false;
     }
@@ -732,39 +734,29 @@
       error = "";
       chatLoading = true;
       worktree = await api.createWorktree(source.id);
+      const createdWorktree = worktree;
       created = await api.createChat(worktree.id);
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
+      const createdChat = created;
+      const abandon = async () => {
+        await disposeCreatedWorktree(createdWorktree, createdChat);
         return false;
-      }
+      };
+      if (sequence !== routeSequence) return abandon();
       persistDraft();
       const refreshedBootstrap = await api.bootstrap();
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (sequence !== routeSequence) return abandon();
       bootstrap = refreshedBootstrap;
       rememberWorkspace(worktree, false);
-      chatConnection.close();
-      workspace = worktree;
-      projectPath = worktree.path;
-      localStorage.setItem("pidex:last-project", worktree.path);
+      adoptWorkspace(worktree, "worktree");
       snapshot = created;
-      startMode = "worktree";
       const configured = await configure({
         ...(previousSnapshot.model ? { model: previousSnapshot.model } : {}),
         thinkingLevel: previousSnapshot.thinkingLevel,
       });
       if (!configured) throw new Error(error || "Could not configure worktree");
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (sequence !== routeSequence) return abandon();
       await afterChat(initialDraft, true);
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (sequence !== routeSequence) return abandon();
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path, { replaceState: true });
@@ -777,7 +769,7 @@
       projectPath = source.path;
       localStorage.setItem("pidex:last-project", source.path);
       snapshot = previousSnapshot;
-      error = cause instanceof Error ? cause.message : "Could not create worktree";
+      reportError(cause, "Could not create worktree");
       return false;
     } finally {
       if (sequence === routeSequence) chatLoading = false;
@@ -828,16 +820,12 @@
       const target = await workspaceById(resumed.workspaceId);
       if (sequence !== routeSequence) return;
       if (!target) throw new Error("The project for this task is no longer available");
-      workspace = target;
-      projectPath = target.path;
-      startMode = workspaceIsWorktree(target.id) ? "worktree" : "local";
+      adoptWorkspace(target);
       rememberWorkspace(target);
-      localStorage.setItem("pidex:last-project", target.path);
       snapshot = resumed;
       await afterChat();
     } catch (cause) {
-      if (sequence === routeSequence)
-        error = cause instanceof Error ? cause.message : "Task could not be opened";
+      if (sequence === routeSequence) reportError(cause, "Task could not be opened");
     } finally {
       if (sequence === routeSequence) {
         routeLoading = false;
@@ -1017,11 +1005,8 @@
   }
   async function submitPrompt(text: string, submittedDraft: string) {
     if (!snapshot) return;
-    const matching =
-      pendingPrompt?.text === text && pendingPrompt.delivery === "normal"
-        ? pendingPrompt
-        : undefined;
-    pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: "normal" };
+    const matching = pendingPrompt?.text === text ? pendingPrompt : undefined;
+    pendingPrompt = matching ?? { actionId: api.createActionId(), text };
     localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
     const clearedSubmittedDraft = draft === submittedDraft;
     if (clearedSubmittedDraft) {
@@ -1033,9 +1018,7 @@
       const outcome = await api.sendMessage(
         snapshot.chatId,
         text,
-        "normal",
         snapshot.revision,
-        undefined,
         pendingPrompt.actionId,
       );
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
@@ -1046,7 +1029,7 @@
         persistDraft();
         void tick().then(taskViews.resizeComposer);
       }
-      error = cause instanceof Error ? cause.message : "Prompt rejected";
+      reportError(cause, "Prompt rejected");
     }
   }
   async function stop() {
@@ -1055,7 +1038,7 @@
       const outcome = await api.abort(snapshot.chatId, snapshot.run.runId, snapshot.revision);
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Stop failed";
+      reportError(cause, "Stop failed");
     }
   }
   async function clearQueue() {
@@ -1063,7 +1046,7 @@
     try {
       snapshot = await api.clearQueue(snapshot.chatId, snapshot.revision);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not clear queued instructions";
+      reportError(cause, "Could not clear queued instructions");
     }
   }
   async function configure(patch: ChatConfiguration) {
@@ -1078,7 +1061,7 @@
       if (snapshot?.chatId === chatId) snapshot = configured;
       return true;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Configuration failed";
+      reportError(cause, "Configuration failed");
       return false;
     } finally {
       configurationPendingTaskIds = configurationPendingTaskIds.filter(
@@ -1098,7 +1081,7 @@
       renameDialogElement?.close();
       await refreshSessions();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Rename failed";
+      reportError(cause, "Rename failed");
     }
   }
   async function compact(instructions?: string) {
@@ -1115,7 +1098,7 @@
       return true;
     } catch (cause) {
       if (snapshot?.chatId !== chatId) return false;
-      error = cause instanceof Error ? cause.message : "Compaction failed";
+      reportError(cause, "Compaction failed");
       return false;
     } finally {
       compactPendingTaskIds = compactPendingTaskIds.filter(
@@ -1134,7 +1117,7 @@
       );
       dialogElement?.close();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Extension response failed";
+      reportError(cause, "Extension response failed");
     }
   }
   async function acknowledgeInterrupted() {
@@ -1147,7 +1130,7 @@
         run: { ...snapshot.run, requiresAcknowledgement: false },
       };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not acknowledge interrupted run";
+      reportError(cause, "Could not acknowledge interrupted run");
     }
   }
   async function loadToolOutput(item: ToolItem) {
@@ -1206,7 +1189,7 @@
         transcriptTotal: transcriptPage.total,
       };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded";
+      reportError(cause, "Earlier messages could not be loaded");
     } finally {
       loadingEarlier = false;
     }
@@ -1227,7 +1210,7 @@
         routeReady = true;
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "The Pidex host is still unavailable";
+      reportError(cause, "The Pidex host is still unavailable");
     } finally {
       retryingConnection = false;
     }
@@ -1262,8 +1245,11 @@
   }
   function collapseSidebarAtDefaultWidth() {
     sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void collapseSidebar();
+  }
+  function persistSidebarWidth() {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }
   function startSidebarResize(event: PointerEvent) {
     if (mobileViewport.current || sidebarCollapsed || event.button !== 0) return;
@@ -1287,7 +1273,7 @@
   function finishSidebarResize() {
     if (!sidebarResizing) return;
     sidebarResizing = false;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function resizeSidebarWithKeyboard(event: KeyboardEvent) {
@@ -1311,12 +1297,12 @@
           ? MAX_SIDEBAR_WIDTH
           : sidebarWidth + (event.key === "ArrowLeft" ? -step : step),
     );
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function resetSidebarWidth() {
     sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function finishSidebarTransition(event: TransitionEvent) {
@@ -1514,10 +1500,8 @@
           </div>
         {:else}
           {#each visibleProjects as project (project.id)}
-            {@const loaded =
-              workspaceCache[project.id] ?? (workspace?.id === project.id ? workspace : undefined)}
-            {@const expanded =
-              expandedProjectIds.includes(project.id) || Boolean(search.trim() && loaded)}
+            {@const loaded = workspaceFor(project.id)}
+            {@const expanded = projectExpanded(project.id) || Boolean(search.trim() && loaded)}
             {@const matchingTasks = tasksFor(project)}
             {@const sessionLimit = search.trim()
               ? matchingTasks.length
@@ -1655,25 +1639,21 @@
     class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background"
     inert={mobileViewport.current && drawerOpen}
   >
-    {#if isNewTask}
-      {#if usesIntegratedTitleBar}<div
-          class="window-drag-region absolute inset-x-0 top-0 z-8 h-8"
-          aria-hidden="true"
-        ></div>{/if}
-      {#if sidebarCollapsed}
-        <button
-          class={`absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
-          bind:this={expandSidebarButton}
-          aria-label="Expand sidebar"
-          aria-controls="tasks-drawer"
-          aria-expanded="false"
-          onclick={expandSidebar}
-        >
-          <Icon name="sidebar-expand" size={19} />
-        </button>
-      {/if}
+    {#snippet expandSidebarControl(buttonClass: string)}
       <button
-        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
+        class={buttonClass}
+        bind:this={expandSidebarButton}
+        aria-label="Expand sidebar"
+        aria-controls="tasks-drawer"
+        aria-expanded="false"
+        onclick={expandSidebar}
+      >
+        <Icon name="sidebar-expand" size={19} />
+      </button>
+    {/snippet}
+    {#snippet openTasksControl(buttonClass: string)}
+      <button
+        class={buttonClass}
         aria-label="Open tasks"
         aria-expanded={drawerOpen}
         aria-controls="tasks-drawer"
@@ -1681,31 +1661,32 @@
       >
         <Icon name="menu" size={19} />
       </button>
+    {/snippet}
+    {#if isNewTask}
+      {#if usesIntegratedTitleBar}<div
+          class="window-drag-region absolute inset-x-0 top-0 z-8 h-8"
+          aria-hidden="true"
+        ></div>{/if}
+      {#if sidebarCollapsed}
+        {@render expandSidebarControl(
+          `absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+        )}
+      {/if}
+      {@render openTasksControl(
+        `menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+      )}
     {:else}
       <header
         class={`z-8 flex flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 backdrop-blur-xl max-[900px]:px-2.5 ${usesIntegratedTitleBar ? `window-drag-region h-13 min-h-13 py-0 ${sidebarCollapsed ? "pl-20" : "max-[900px]:pl-20"}` : "min-h-14 py-1.5 max-[560px]:min-h-13"}`}
       >
         {#if sidebarCollapsed}
-          <button
-            class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
-            bind:this={expandSidebarButton}
-            aria-label="Expand sidebar"
-            aria-controls="tasks-drawer"
-            aria-expanded="false"
-            onclick={expandSidebar}
-          >
-            <Icon name="sidebar-expand" size={19} />
-          </button>
+          {@render expandSidebarControl(
+            "inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden",
+          )}
         {/if}
-        <button
-          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10"
-          aria-label="Open tasks"
-          aria-expanded={drawerOpen}
-          aria-controls="tasks-drawer"
-          onclick={() => (drawerOpen = true)}
-        >
-          <Icon name="menu" size={19} />
-        </button>
+        {@render openTasksControl(
+          "menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10",
+        )}
         <div class="min-w-0 flex-1">
           <strong
             class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
@@ -1757,10 +1738,7 @@
       </div>
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="alert"
-      >
+      <div class={warningBannerClass} role="alert">
         <span class="leading-relaxed"
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
@@ -1771,10 +1749,7 @@
       </div>
     {/if}
     {#if workspace?.protectedResourcesSkipped}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="status"
-      >
+      <div class={warningBannerClass} role="status">
         <span
           >Project resources requiring trust were skipped. {window.pidexDesktop
             ? "Review the project before loading them."
@@ -1786,10 +1761,7 @@
       </div>
     {/if}
     {#if workspace?.resourceDiagnostics.length}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="status"
-      >
+      <div class={warningBannerClass} role="status">
         <span
           ><strong>Pi resource warning.</strong>
           {workspace.resourceDiagnostics[0]?.message}{#if workspace.resourceDiagnostics.length > 1}
@@ -1798,9 +1770,7 @@
       </div>
     {/if}
     {#if workspace && workspace.models.length === 0}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-      >
+      <div class={warningBannerClass}>
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
     {/if}
@@ -1809,9 +1779,30 @@
   </main>
 </div>
 
+{#snippet dialogHeader(
+  icon: "folder-plus" | "rename" | "activity",
+  titleId: string,
+  title: string,
+  description?: string,
+)}
+  <div class="mb-4.5 flex items-start gap-3">
+    <div
+      class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+    >
+      <Icon name={icon} />
+    </div>
+    <div>
+      <h2 class="m-0 text-heading font-semibold" id={titleId}>{title}</h2>
+      {#if description}<p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+          {description}
+        </p>{/if}
+    </div>
+  </div>
+{/snippet}
+
 <dialog
   bind:this={projectDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class={[appDialogClass, "w-[min(560px,calc(100vw-28px))]"]}
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1819,19 +1810,12 @@
   }}
 >
   <form class="p-5 pb-3.5" method="dialog" onsubmit={(event) => event.preventDefault()}>
-    <div class="mb-4.5 flex items-start gap-3">
-      <div
-        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-      >
-        <Icon name="folder-plus" />
-      </div>
-      <div>
-        <h2 class="m-0 text-heading font-semibold" id="project-dialog-title">Add a project</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Choose by project name. Folder paths stay out of the main workspace UI.
-        </p>
-      </div>
-    </div>
+    {@render dialogHeader(
+      "folder-plus",
+      "project-dialog-title",
+      "Add a project",
+      "Choose by project name. Folder paths stay out of the main workspace UI.",
+    )}
     <label
       class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary/55 focus-within:text-muted"
     >
@@ -1919,7 +1903,7 @@
 
 <dialog
   bind:this={renameDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class={[appDialogClass, "w-[min(460px,calc(100vw-28px))]"]}
   aria-labelledby="rename-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1934,19 +1918,12 @@
       void rename();
     }}
   >
-    <div class="mb-4.5 flex items-start gap-3">
-      <div
-        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-      >
-        <Icon name="rename" />
-      </div>
-      <div>
-        <h2 class="m-0 text-heading font-semibold" id="rename-dialog-title">Rename task</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Give this task a concise, memorable name.
-        </p>
-      </div>
-    </div>
+    {@render dialogHeader(
+      "rename",
+      "rename-dialog-title",
+      "Rename task",
+      "Give this task a concise, memorable name.",
+    )}
     <label class="mb-1.5 block text-control font-medium text-muted" for="session-name"
       >Task name</label
     >
@@ -1973,7 +1950,7 @@
 {#if snapshot?.extensionDialog}
   <dialog
     bind:this={dialogElement}
-    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+    class={[appDialogClass, "w-[min(460px,calc(100vw-28px))]"]}
     aria-labelledby="extension-dialog-title"
     oncancel={(event) => {
       event.preventDefault();
@@ -1988,23 +1965,12 @@
         void answerDialog(snapshot!.extensionDialog!);
       }}
     >
-      <div class="mb-4.5 flex items-start gap-3">
-        <div
-          class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-        >
-          <Icon name="activity" />
-        </div>
-        <div>
-          <h2 class="m-0 text-heading font-semibold" id="extension-dialog-title">
-            {snapshot.extensionDialog.title}
-          </h2>
-          {#if snapshot.extensionDialog.message}<p
-              class="mt-1 mb-0 text-xs leading-relaxed text-muted"
-            >
-              {snapshot.extensionDialog.message}
-            </p>{/if}
-        </div>
-      </div>
+      {@render dialogHeader(
+        "activity",
+        "extension-dialog-title",
+        snapshot.extensionDialog.title,
+        snapshot.extensionDialog.message,
+      )}
       {#if snapshot.extensionDialog.kind === "select"}
         <select
           class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"

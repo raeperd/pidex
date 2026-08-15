@@ -2,12 +2,9 @@
   import type { ChatSnapshot } from "@pidex/api";
   import { getAppShellContext } from "./_components/AppShellContext.svelte";
   import type { TaskConfigurationPatch } from "./_components/AppShellContext.svelte";
+  import ComposerModelControls from "./_components/ComposerModelControls.svelte";
+  import HostUnavailable from "./_components/HostUnavailable.svelte";
   import Icon from "./_components/Icon.svelte";
-
-  const composerSelectLabelClass =
-    "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
-  const composerSelectClass =
-    "h-full max-w-44 min-w-0 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap border-0 border-none bg-transparent pr-5 text-control font-semibold text-inherit outline-none disabled:cursor-not-allowed disabled:opacity-42 max-[560px]:pr-3.5 max-[560px]:text-control [@supports(appearance:base-select)]:flex [@supports(appearance:base-select)]:items-center [@supports(appearance:base-select)]:gap-1.5 [@supports(appearance:base-select)]:pr-1.5 [@supports(appearance:base-select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:max-h-[min(22rem,calc(100dvh-2rem))] [@supports(appearance:base-select)]:[&::picker(select)]:overflow-y-auto [@supports(appearance:base-select)]:[&::picker(select)]:[position-area:block-start_span-inline-end] [@supports(appearance:base-select)]:[&::picker(select)]:[position-try-fallbacks:flip-block] [@supports(appearance:base-select)]:[&::picker(select)]:mb-2 [@supports(appearance:base-select)]:[&::picker(select)]:rounded-xl [@supports(appearance:base-select)]:[&::picker(select)]:border [@supports(appearance:base-select)]:[&::picker(select)]:border-border-strong [@supports(appearance:base-select)]:[&::picker(select)]:bg-card [@supports(appearance:base-select)]:[&::picker(select)]:p-1 [@supports(appearance:base-select)]:[&::picker(select)]:text-foreground [@supports(appearance:base-select)]:[&::picker(select)]:shadow-[0_18px_48px_rgb(0_0_0/24%)] [@supports(appearance:base-select)]:[&::picker(select)]:[scrollbar-width:thin] [@supports(appearance:base-select)]:[&::picker-icon]:size-3 [@supports(appearance:base-select)]:[&::picker-icon]:ml-0.5 [@supports(appearance:base-select)]:[&::picker-icon]:text-faint [@supports(appearance:base-select)]:[&::picker-icon]:transition-[rotate] [@supports(appearance:base-select)]:[&::picker-icon]:duration-[140ms] [@supports(appearance:base-select)]:[&::picker-icon]:ease-[ease] [@supports(appearance:base-select)]:[&:open::picker-icon]:rotate-180 [@supports(appearance:base-select)]:[&_option]:flex [@supports(appearance:base-select)]:[&_option]:min-h-8 [@supports(appearance:base-select)]:[&_option]:items-center [@supports(appearance:base-select)]:[&_option]:rounded-lg [@supports(appearance:base-select)]:[&_option]:px-2 [@supports(appearance:base-select)]:[&_option]:py-[0.45rem] [@supports(appearance:base-select)]:[&_option]:text-xs [@supports(appearance:base-select)]:[&_option]:font-medium [@supports(appearance:base-select)]:[&_option]:text-muted [@supports(appearance:base-select)]:[&_option]:cursor-pointer [@supports(appearance:base-select)]:[&_option:hover]:bg-secondary [@supports(appearance:base-select)]:[&_option:hover]:text-foreground [@supports(appearance:base-select)]:[&_option:focus-visible]:bg-secondary [@supports(appearance:base-select)]:[&_option:focus-visible]:text-foreground [@supports(appearance:base-select)]:[&_option:checked]:bg-[color-mix(in_srgb,var(--primary)_12%,var(--secondary))] [@supports(appearance:base-select)]:[&_option:checked]:font-[650] [@supports(appearance:base-select)]:[&_option:checked]:text-foreground [@supports(appearance:base-select)]:[&_option::checkmark]:order-1 [@supports(appearance:base-select)]:[&_option::checkmark]:ml-auto [@supports(appearance:base-select)]:[&_option::checkmark]:text-primary";
 
   interface StarterState {
     readonly draft: string;
@@ -145,49 +142,15 @@
             <div
               class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
             >
-              <label class={composerSelectLabelClass}>
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:w-36 max-[560px]:max-w-36 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-56",
-                  ]}
-                  aria-label="Model"
-                  value={selectedModel}
-                  onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-                  disabled={!context.shell.workspace?.models.length || starter.submitting}
-                >
-                  {#each context.shell.workspace?.models ?? [] as model (model.id)}<option
-                      value={model.id}>{model.name}</option
-                    >{/each}
-                </select>
-              </label>
-              <span class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0" aria-hidden="true"
-              ></span>
-              <label class={composerSelectLabelClass}>
-                <span
-                  class="grid w-4 flex-none place-items-center text-current max-[560px]:hidden"
-                  aria-hidden="true"><Icon name="activity" size={14} /></span
-                >
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:max-w-27 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-36",
-                  ]}
-                  aria-label="Thinking level"
-                  value={starter.thinkingLevel}
-                  onchange={(event) =>
-                    stageConfiguration({
-                      thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                    })}
-                  disabled={!context.shell.workspace || starter.submitting}
-                >
-                  <option value="off">Off</option><option value="minimal">Minimal</option><option
-                    value="low">Low</option
-                  ><option value="medium">Medium</option><option value="high">High</option><option
-                    value="xhigh">Extra high</option
-                  ><option value="max">Max</option>
-                </select>
-              </label>
+              <ComposerModelControls
+                models={context.shell.workspace?.models ?? []}
+                {selectedModel}
+                thinkingLevel={starter.thinkingLevel}
+                modelDisabled={!context.shell.workspace?.models.length || starter.submitting}
+                thinkingDisabled={!context.shell.workspace || starter.submitting}
+                onModel={(model) => stageConfiguration({ model })}
+                onThinking={(thinkingLevel) => stageConfiguration({ thinkingLevel })}
+              />
             </div>
             <button
               class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
@@ -209,35 +172,6 @@
     aria-live="polite"
     aria-relevant="additions text"
   >
-    <div
-      class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-      role="status"
-    >
-      <div
-        class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-      >
-        <Icon name="activity" size={22} />
-      </div>
-      <p
-        class="m-0 mb-2.5 font-mono text-meta leading-none font-semibold tracking-widest text-faint uppercase"
-      >
-        HOST UNAVAILABLE
-      </p>
-      <h1
-        class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-      >
-        Your projects are still on the desktop.
-      </h1>
-      <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
-        Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
-        automatically.
-      </p>
-      <button
-        class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-        onclick={context.projectActions.retryConnection}
-        disabled={context.shell.retryingConnection}
-        >{context.shell.retryingConnection ? "Retrying…" : "Retry connection"}</button
-      >
-    </div>
+    <HostUnavailable />
   </section>
 {/if}
