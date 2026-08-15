@@ -20,6 +20,7 @@
     type PidexApiClient,
   } from "./AppShellApiClient";
   import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
+  import { connectionBanner } from "./AppShellConnectionBanner";
   import {
     createTaskViewControllerRegistry,
     provideAppShellContext,
@@ -82,6 +83,8 @@
   let appliedRoute = $state("");
   let routeSequence = 0;
   let retryingConnection = $state(false);
+  let hasEverConnected = $state(false);
+  let connectionBannerDelayElapsed = $state(false);
   let loadingEarlier = $state(false);
   let startMode = $state<TaskStartMode>("local");
   let configurationPendingTaskIds = $state.raw<string[]>([]);
@@ -149,16 +152,34 @@
   let taskHasNoTranscript = $derived(
     Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
   );
+  let banner = $derived(
+    connectionBanner(connection, hasEverConnected, connectionBannerDelayElapsed),
+  );
   let hasTopBanner = $derived(
     Boolean(
       error ||
-      (snapshot && connection !== "connected" && !routeLoading) ||
+      (snapshot && banner && !routeLoading) ||
       snapshot?.run?.requiresAcknowledgement ||
       workspace?.protectedResourcesSkipped ||
       workspace?.resourceDiagnostics.length ||
       (workspace && workspace.models.length === 0),
     ),
   );
+  let snapshotChatId = $derived(snapshot?.chatId);
+  /** Delay-gates the connection banner so a blip shorter than ~1.5s never flashes it. */
+  $effect(() => {
+    if (connection === "connected") {
+      hasEverConnected = true;
+      connectionBannerDelayElapsed = false;
+      return;
+    }
+    const timer = window.setTimeout(() => (connectionBannerDelayElapsed = true), 1_500);
+    return () => window.clearTimeout(timer);
+  });
+  $effect(() => {
+    void snapshotChatId;
+    hasEverConnected = false;
+  });
   let selectedModel = $derived(snapshot?.model ?? "");
   let selectedThinkingLevel = $derived(snapshot?.thinkingLevel ?? "medium");
   let startModeEditable = $derived(
@@ -1744,14 +1765,15 @@
         >
       </div>
     {/if}
-    {#if snapshot && connection !== "connected" && !routeLoading}
+    {#if snapshot && banner && !routeLoading}
       <div
         class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-control text-muted"
         role="status"
       >
         <span class="leading-relaxed"
-          ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
-          while disconnected.</span
+          >{#if banner === "connecting"}<strong>Connecting…</strong> Waiting for the desktop host.{:else}<strong
+              >Reconnecting…</strong
+            > Your task remains on the desktop; drafts will not be submitted while disconnected.{/if}</span
         ><button
           class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
           onclick={retryConnection}
