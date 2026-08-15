@@ -2,12 +2,12 @@
   import type { ChatSnapshot } from "@pidex/api";
   import { getAppShellContext } from "./_components/AppShellContext.svelte";
   import type { TaskConfigurationPatch } from "./_components/AppShellContext.svelte";
+  import ComposerModelControls from "./_components/ComposerModelControls.svelte";
+  import HostUnavailable from "./_components/HostUnavailable.svelte";
   import Icon from "./_components/Icon.svelte";
   import {
     composerControlsClass,
     composerFooterClass,
-    composerSelectClass,
-    composerSelectLabelClass,
     composerSendButtonClass,
     composerSurfaceClass,
     composerTextareaClass,
@@ -142,49 +142,15 @@
             aria-label="Prompt"></textarea>
           <div class={composerFooterClass}>
             <div class={composerControlsClass}>
-              <label class={composerSelectLabelClass}>
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:w-36 max-[560px]:max-w-36 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-56",
-                  ]}
-                  aria-label="Model"
-                  value={selectedModel}
-                  onchange={(event) => stageConfiguration({ model: event.currentTarget.value })}
-                  disabled={!context.shell.workspace?.models.length || starter.submitting}
-                >
-                  {#each context.shell.workspace?.models ?? [] as model (model.id)}<option
-                      value={model.id}>{model.name}</option
-                    >{/each}
-                </select>
-              </label>
-              <span class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0" aria-hidden="true"
-              ></span>
-              <label class={composerSelectLabelClass}>
-                <span
-                  class="grid w-4 flex-none place-items-center text-current max-[560px]:hidden"
-                  aria-hidden="true"><Icon name="activity" size={14} /></span
-                >
-                <select
-                  class={[
-                    composerSelectClass,
-                    "max-[560px]:max-w-27 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-36",
-                  ]}
-                  aria-label="Thinking level"
-                  value={starter.thinkingLevel}
-                  onchange={(event) =>
-                    stageConfiguration({
-                      thinkingLevel: event.currentTarget.value as ChatSnapshot["thinkingLevel"],
-                    })}
-                  disabled={!context.shell.workspace || starter.submitting}
-                >
-                  <option value="off">Off</option><option value="minimal">Minimal</option><option
-                    value="low">Low</option
-                  ><option value="medium">Medium</option><option value="high">High</option><option
-                    value="xhigh">Extra high</option
-                  ><option value="max">Max</option>
-                </select>
-              </label>
+              <ComposerModelControls
+                models={context.shell.workspace?.models ?? []}
+                {selectedModel}
+                thinkingLevel={starter.thinkingLevel}
+                modelDisabled={!context.shell.workspace?.models.length || starter.submitting}
+                thinkingDisabled={!context.shell.workspace || starter.submitting}
+                onModel={(model) => stageConfiguration({ model })}
+                onThinking={(thinkingLevel) => stageConfiguration({ thinkingLevel })}
+              />
             </div>
             <button
               class={composerSendButtonClass}
@@ -206,33 +172,6 @@
     aria-live="polite"
     aria-relevant="additions text"
   >
-    <div
-      class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-      role="status"
-    >
-      <div
-        class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-      >
-        <Icon name="activity" size={22} />
-      </div>
-      <p
-        class="m-0 mb-2.5 font-mono text-meta leading-none font-semibold tracking-widest text-faint uppercase"
-      >
-        HOST UNAVAILABLE
-      </p>
-      <h1 class="m-0 max-w-175 text-display font-normal tracking-tighter text-foreground">
-        Your projects are still on the desktop.
-      </h1>
-      <p class="mt-3 max-w-125 text-ui leading-relaxed text-muted">
-        Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
-        automatically.
-      </p>
-      <button
-        class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-control font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
-        onclick={context.projectActions.retryConnection}
-        disabled={context.shell.retryingConnection}
-        >{context.shell.retryingConnection ? "Retrying…" : "Retry connection"}</button
-      >
-    </div>
+    <HostUnavailable />
   </section>
 {/if}

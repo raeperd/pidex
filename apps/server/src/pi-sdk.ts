@@ -34,13 +34,9 @@ import {
   type AdapterWorkspaceInfo,
   type EffectAdapterSession,
 } from "./adapter.js";
+import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 
-interface PiSdkError {
-  readonly _tag: "PiSdkError";
-  readonly operation: string;
-  readonly message: string;
-  readonly cause: unknown;
-}
+type PiSdkError = TaggedOperationError<"PiSdkError">;
 
 export interface PiSdkServiceApi {
   inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
@@ -211,21 +207,6 @@ function makePiSession(session: AgentSession) {
         emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
     });
   }
-  function readMessages(): TranscriptItem[] {
-    return restoredTranscript.items;
-  }
-  function readToolOutputs() {
-    return restoredTranscript.toolOutputs;
-  }
-  function readModel() {
-    return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
-  }
-  function readThinkingLevel() {
-    return session.thinkingLevel;
-  }
-  function readSessionName() {
-    return session.sessionName;
-  }
   function readContextUsage(): ContextUsage | undefined {
     const usage = session.getContextUsage();
     if (!usage) return undefined;
@@ -234,9 +215,6 @@ function makePiSession(session: AgentSession) {
       totalProcessedTokens: session.getSessionStats().tokens.total,
       compactsAutomatically: session.settingsManager.getCompactionSettings().enabled,
     };
-  }
-  function readIsIdle() {
-    return session.isIdle;
   }
   function subscribe(listener: (event: AdapterEvent) => void) {
     listeners.add(listener);
@@ -251,20 +229,21 @@ function makePiSession(session: AgentSession) {
   }
   function handle(event: AgentSessionEvent) {
     if (
-      event.type === "message_start" &&
+      (event.type === "message_start" || event.type === "message_end") &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
+      const thinking = thinkingOf(event.message.content);
       const item: TextItem = {
         type: event.message.role,
         id: messageId(event.message),
         text: textOf(event.message.content),
-        ...(thinkingOf(event.message.content)
-          ? { thinking: thinkingOf(event.message.content) }
-          : {}),
-        complete: false,
+        ...(thinking ? { thinking } : {}),
+        complete: event.type === "message_end",
         timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
       };
       for (const message of messageItems(item)) emit({ type: "message", item: message });
+      if (event.type === "message_end" && event.message.role === "assistant")
+        scheduleContextUsage();
     } else if (event.type === "message_update") {
       const update = event.assistantMessageEvent;
       if (update.type === "text_delta")
@@ -281,22 +260,6 @@ function makePiSession(session: AgentSession) {
           delta: update.delta,
           channel: "thinking",
         });
-    } else if (
-      event.type === "message_end" &&
-      (event.message.role === "user" || event.message.role === "assistant")
-    ) {
-      const item: TextItem = {
-        type: event.message.role,
-        id: messageId(event.message),
-        text: textOf(event.message.content),
-        ...(thinkingOf(event.message.content)
-          ? { thinking: thinkingOf(event.message.content) }
-          : {}),
-        complete: true,
-        timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
-      };
-      for (const message of messageItems(item)) emit({ type: "message", item: message });
-      if (event.message.role === "assistant") scheduleContextUsage();
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800);
       emit({
@@ -414,18 +377,9 @@ function makePiSession(session: AgentSession) {
     await session.prompt(text);
     if (session.isIdle && settlementGeneration === previousSettlement) emitSettled();
   }
-  async function steer(text: string) {
-    await session.steer(text);
-  }
-  async function followUp(text: string) {
-    await session.followUp(text);
-  }
   async function abort() {
     session.clearQueue();
     await session.abort();
-  }
-  function clearQueue() {
-    session.clearQueue();
   }
   async function configure(input: {
     model?: string;
@@ -442,12 +396,6 @@ function makePiSession(session: AgentSession) {
       await session.setModel(model);
     }
     if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
-  }
-  function rename(name: string) {
-    session.setSessionName(name);
-  }
-  async function compact(instructions?: string) {
-    await session.compact(instructions);
   }
   function getStats() {
     const stats = session.getSessionStats();
@@ -478,37 +426,39 @@ function makePiSession(session: AgentSession) {
   return {
     nativeId,
     nativePath,
-    get messages() {
-      return readMessages();
+    get messages(): TranscriptItem[] {
+      return restoredTranscript.items;
     },
     get toolOutputs() {
-      return readToolOutputs();
+      return restoredTranscript.toolOutputs;
     },
     get model() {
-      return readModel();
+      return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
     },
     get thinkingLevel() {
-      return readThinkingLevel();
+      return session.thinkingLevel;
     },
     get sessionName() {
-      return readSessionName();
+      return session.sessionName;
     },
     get contextUsage() {
       return readContextUsage();
     },
     get isIdle() {
-      return readIsIdle();
+      return session.isIdle;
     },
     bind,
     subscribe,
     prompt,
-    steer,
-    followUp,
+    steer: (text: string) => session.steer(text),
+    followUp: (text: string) => session.followUp(text),
     abort,
-    clearQueue,
+    clearQueue: () => session.clearQueue(),
     configure,
-    rename,
-    compact,
+    rename: (name: string) => session.setSessionName(name),
+    compact: async (instructions?: string) => {
+      await session.compact(instructions);
+    },
     getStats,
     respondToDialog,
     dispose,
@@ -612,14 +562,17 @@ export function makePiSdk(options: PiSdkOptions = {}) {
     };
   }
 
-  async function open(cwd: string, manager: SessionManager) {
-    const { agentDir, settings, loader, modelRuntime } = await services(cwd);
+  async function open(
+    cwd: string,
+    svc: Awaited<ReturnType<typeof services>>,
+    manager: SessionManager,
+  ) {
     const result = await createAgentSession({
       cwd,
-      agentDir,
-      settingsManager: settings,
-      resourceLoader: loader,
-      modelRuntime,
+      agentDir: svc.agentDir,
+      settingsManager: svc.settings,
+      resourceLoader: svc.loader,
+      modelRuntime: svc.modelRuntime,
       sessionManager: manager,
     });
     const wrapped = makePiSession(result.session);
@@ -633,13 +586,13 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function createSession(cwd: string) {
-    const { sessionDir } = await services(cwd);
-    return open(cwd, SessionManager.create(cwd, sessionDir));
+    const svc = await services(cwd);
+    return open(cwd, svc, SessionManager.create(cwd, svc.sessionDir));
   }
 
   async function resumeSession(cwd: string, nativePath: string) {
-    const { sessionDir } = await services(cwd);
-    return open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
+    const svc = await services(cwd);
+    return open(cwd, svc, SessionManager.open(nativePath, svc.sessionDir, cwd));
   }
 
   async function setWorkspaceTrust(cwd: string, trusted: boolean) {
@@ -667,7 +620,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
 
 export type PiSdk = ReturnType<typeof makePiSdk>;
 
-export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi {
+export function makePiSdkService(sdk: PiSdk): PiSdkServiceApi {
   return {
     inspectWorkspace: (cwd) => fromPiPromise("workspace.inspect", () => sdk.inspectWorkspace(cwd)),
     createSession: (cwd) =>
@@ -685,21 +638,4 @@ export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi
   };
 }
 
-function fromPiPromise<A>(
-  operation: string,
-  evaluate: () => Promise<A>,
-): Effect.Effect<A, PiSdkError> {
-  return Effect.tryPromise({
-    try: evaluate,
-    catch: (cause) => piSdkError(operation, cause),
-  });
-}
-
-function piSdkError(operation: string, cause: unknown): PiSdkError {
-  return {
-    _tag: "PiSdkError",
-    operation,
-    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
-    cause,
-  };
-}
+const { promise: fromPiPromise } = taggedAttempt("PiSdkError");

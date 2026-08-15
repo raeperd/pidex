@@ -37,24 +37,18 @@
   }
 
   function showOnHover(event: PointerEvent) {
-    if (event.pointerType === "touch") return;
-    positionDetails(event.currentTarget);
-    hovered = true;
-    dismissed = false;
-  }
-
-  function hideAfterHover() {
-    hovered = false;
+    if (event.pointerType !== "touch") revealDetails(event.currentTarget, "hover");
   }
 
   function showOnFocus(event: FocusEvent) {
-    positionDetails(event.currentTarget);
-    focused = true;
-    dismissed = false;
+    revealDetails(event.currentTarget, "focus");
   }
 
-  function hideAfterFocus() {
-    focused = false;
+  function revealDetails(target: EventTarget | null, via: "hover" | "focus") {
+    positionDetails(target);
+    if (via === "hover") hovered = true;
+    else focused = true;
+    dismissed = false;
   }
 
   function closeDetails() {
@@ -159,9 +153,9 @@
     aria-expanded={expanded}
     onclick={toggleDetails}
     onfocus={showOnFocus}
-    onblur={hideAfterFocus}
+    onblur={() => (focused = false)}
     onpointerenter={showOnHover}
-    onpointerleave={hideAfterHover}
+    onpointerleave={() => (hovered = false)}
   >
     <svg class="size-4.5 [rotate:-90deg]" viewBox="0 0 24 24" aria-hidden="true">
       <circle
@@ -199,17 +193,11 @@
   >
     <div class="flex items-center justify-between gap-3">
       <strong class="font-semibold text-muted">Context Window</strong>
-      {#if percentageLabel}
-        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
-          >{percentageLabel} · {formatTokens(usage.tokens)}/{formatTokens(
-            usage.contextWindow,
-          )}</span
-        >
-      {:else}
-        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
-          >{formatTokens(usage.tokens)}/{formatTokens(usage.contextWindow)}</span
-        >
-      {/if}
+      <span class="font-mono text-meta whitespace-nowrap tabular-nums"
+        >{percentageLabel ? `${percentageLabel} · ` : ""}{formatTokens(usage.tokens)}/{formatTokens(
+          usage.contextWindow,
+        )}</span
+      >
     </div>
     <div
       class="h-1.5 overflow-hidden rounded-[999px] bg-[color-mix(in_srgb,var(--faint)_18%,transparent)]"

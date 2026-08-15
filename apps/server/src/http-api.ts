@@ -189,17 +189,11 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const metadata = yield* Metadata;
         const manager = yield* Chats;
         const chat = yield* manager.chat(input.chatId);
-        const action = {
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
-          requestDigest: requestDigest({
-            text: input.text,
-            delivery: input.delivery,
-            runId: input.runId ?? null,
-          }),
-        };
+        const action = actionInput(chat, input, {
+          text: input.text,
+          delivery: input.delivery,
+          runId: input.runId ?? null,
+        });
         if (input.delivery === "normal") {
           const outcome = yield* metadata.acceptPrompt(action);
           yield* manager.startPrompt(chat, input.text, outcome);
@@ -223,12 +217,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const manager = yield* Chats;
         const chat = yield* manager.chat(input.chatId);
         const outcome = yield* metadata.acceptStop({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, { runId: input.runId }),
           runId: input.runId,
-          requestDigest: requestDigest({ runId: input.runId }),
         });
         return yield* manager.abort(chat, outcome);
       }),
@@ -236,13 +226,9 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const metadata = yield* Metadata;
         const manager = yield* Chats;
         const chat = yield* manager.chat(input.chatId);
-        const outcome = yield* metadata.acknowledgeInterrupted({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
-          requestDigest: requestDigest({ acknowledge: chat.run?.runId ?? null }),
-        });
+        const outcome = yield* metadata.acknowledgeInterrupted(
+          actionInput(chat, input, { acknowledge: chat.run?.runId ?? null }),
+        );
         manager.acknowledgeInterrupted(chat, outcome);
         return outcome;
       }),
@@ -263,12 +249,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const manager = yield* Chats;
         const chat = yield* manager.chat(input.chatId);
         const outcome = yield* metadata.acceptSessionMutation({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, { clearQueue: true }),
           kind: "clear-queue",
-          requestDigest: requestDigest({ clearQueue: true }),
         });
         yield* manager.performMutation(chat, outcome, () => manager.clear(chat));
         return yield* manager.snapshot(chat);
@@ -293,12 +275,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         };
         const outcome = yield* metadata.acceptSessionMutation({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, patch),
           kind: "config",
-          requestDigest: requestDigest(patch),
         });
         yield* manager.performMutation(chat, outcome, () => manager.configure(chat, patch));
         return yield* manager.snapshot(chat);
@@ -308,12 +286,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const manager = yield* Chats;
         const chat = yield* manager.chat(input.chatId);
         const outcome = yield* metadata.acceptSessionMutation({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, { name: input.name }),
           kind: "rename",
-          requestDigest: requestDigest({ name: input.name }),
         });
         yield* manager.performMutation(chat, outcome, () => manager.rename(chat, input.name));
         return yield* manager.snapshot(chat);
@@ -324,12 +298,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const chat = yield* manager.chat(input.chatId);
         yield* requireIdle(chat.session.state.isIdle, "Compaction can only run while idle");
         const outcome = yield* metadata.acceptSessionMutation({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, { instructions: input.instructions ?? null }),
           kind: "compact",
-          requestDigest: requestDigest({ instructions: input.instructions ?? null }),
         });
         yield* manager.performMutation(chat, outcome, () =>
           manager.compact(chat, input.instructions),
@@ -342,12 +312,8 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const chat = yield* manager.chat(input.chatId);
         yield* validateDialogResponse(chat.extensionDialog, input.requestId, input.value);
         const outcome = yield* metadata.acceptSessionMutation({
-          actionId: input.actionId,
-          clientId: input.clientId,
-          expectedRevision: input.expectedRevision,
-          sessionKey: chat.sessionKey,
+          ...actionInput(chat, input, { requestId: input.requestId, value: input.value }),
           kind: "dialog",
-          requestDigest: requestDigest({ requestId: input.requestId, value: input.value }),
         });
         yield* manager.performMutation(chat, outcome, () =>
           chat.session.respondToDialog(input.requestId, input.value),
@@ -373,6 +339,20 @@ const protocolErrors = os.middleware(async ({ next }) => {
 
 interface RpcApiContext extends WithEffectContext<ApplicationServices> {
   req: IncomingMessage;
+}
+
+function actionInput(
+  chat: { sessionKey: string },
+  input: { actionId: string; clientId: string; expectedRevision: number },
+  digest: unknown,
+) {
+  return {
+    actionId: input.actionId,
+    clientId: input.clientId,
+    expectedRevision: input.expectedRevision,
+    sessionKey: chat.sessionKey,
+    requestDigest: requestDigest(digest),
+  };
 }
 
 function workspaceId(metadata: MetadataService, canonical: string, remember: boolean | undefined) {

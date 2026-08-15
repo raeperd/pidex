@@ -1,19 +1,25 @@
 <script lang="ts" module>
-  export type ToolCallKind = "shell" | "read" | "search" | "edit" | "generic";
+  type ToolCallKind = "shell" | "read" | "search" | "edit" | "generic";
 
-  export interface ToolCallHeader {
+  interface ToolCallHeader {
     kind: ToolCallKind;
     label: string;
     detail: string;
     range?: string;
   }
 
-  export interface ToolCallPreview {
+  interface ToolCallPreview {
     lines: string[];
     skipped: number;
   }
 
-  export const TOOL_PREVIEW_LINES = 5;
+  const KIND_ICONS = {
+    shell: "terminal",
+    read: "file",
+    search: "search",
+    edit: "compose",
+    generic: "tool",
+  } as const;
 
   export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
     const kind = toolCallKind(name);
@@ -49,7 +55,7 @@
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
-  export function toolCallPreview(output: string, maxLines = TOOL_PREVIEW_LINES): ToolCallPreview {
+  export function toolCallPreview(output: string, maxLines = 5): ToolCallPreview {
     const lines = output.replace(/\s+$/, "").split("\n");
     if (lines.length <= maxLines) return { lines, skipped: 0 };
     return { lines: lines.slice(-maxLines), skipped: lines.length - maxLines };
@@ -179,17 +185,7 @@
       ? undefined
       : `${status === "running" ? "Elapsed" : "Took"} ${formatToolDuration((endedAt ?? now) - startedAt)}`,
   );
-  let icon: "terminal" | "file" | "search" | "compose" | "tool" = $derived(
-    header.kind === "shell"
-      ? "terminal"
-      : header.kind === "read"
-        ? "file"
-        : header.kind === "search"
-          ? "search"
-          : header.kind === "edit"
-            ? "compose"
-            : "tool",
-  );
+  let icon = $derived(KIND_ICONS[header.kind]);
   let accessibleLabel = $derived(
     `${header.label}${header.detail ? ` ${header.detail}${header.range ?? ""}` : ""}`,
   );

@@ -8,7 +8,6 @@
   --color-sidebar-active: var(--sidebar-active);
   --color-card: var(--card);
   --color-secondary: var(--secondary);
-  --color-secondary-hover: var(--secondary-hover);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-border: var(--border);
@@ -17,7 +16,6 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-text: var(--primary-text);
-  --color-success: var(--success);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-warning-text: var(--warning-text);
@@ -62,7 +60,6 @@
   --sidebar-active: #fff;
   --card: #fff;
   --secondary: #f1f1f2;
-  --secondary-hover: #e9e9eb;
   --muted: #71717a;
   --faint: #a1a1aa;
   --border: #e4e4e7;
@@ -72,16 +69,12 @@
   --primary-foreground: #09090b;
   /* Darker primary for text on light surfaces; #6a9fcc itself is ~2.8:1 on the background. */
   --primary-text: #386f9f;
-  --success: #16a36a;
   --danger: #c73e3e;
   --warning: #b7791f;
   /* Darker warning for small text on tinted surfaces; --warning stays for borders and tints. */
   --warning-text: #8a5a12;
   --shadow: 0 18px 45px rgb(24 24 27 / 8%), 0 2px 6px rgb(24 24 27 / 4%);
   --mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, monospace;
-  --tool-pending: #e8e8f0;
-  --tool-success: #e8f0e8;
-  --tool-error: #f0e8e8;
   --tool-argument: #2f7f76;
 }
 
@@ -387,7 +380,6 @@ summary::-webkit-details-marker {
     --sidebar-active: #1a1a1d;
     --card: #111113;
     --secondary: #1a1a1d;
-    --secondary-hover: #232327;
     --muted: #a1a1aa;
     --faint: #7f7f89;
     --border: rgb(255 255 255 / 7%);
@@ -398,9 +390,6 @@ summary::-webkit-details-marker {
     --danger: #dc4c4c;
     --warning-text: #d6a354;
     --shadow: 0 18px 55px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 2%);
-    --tool-pending: #282832;
-    --tool-success: #283228;
-    --tool-error: #3c2828;
     --tool-argument: #8abeb7;
   }
 

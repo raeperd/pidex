@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import Icon from "../../../_components/Icon.svelte";
   import AgentMessageBody from "./AgentMessageBody.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
   import type { HighlightTheme } from "./AgentMessageCodeBlock.svelte";
+  import { createCopyState } from "./copyState.svelte";
 
   let {
     complete,
@@ -21,8 +21,7 @@
 
   let nodes = $derived(parseAgentMessage(text));
   let thinkingNodes = $derived(parseAgentMessage(thinking ?? ""));
-  let copied = $state(false);
-  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  const copyState = createCopyState();
   let sentAt = $derived.by(() => {
     const date = new Date(timestamp);
     return Number.isNaN(date.getTime()) ? undefined : date;
@@ -32,21 +31,6 @@
       ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(sentAt)
       : undefined,
   );
-
-  async function copyResponse() {
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-      if (copiedTimer) clearTimeout(copiedTimer);
-      copiedTimer = setTimeout(() => (copied = false), 1_500);
-    } catch {
-      copied = false;
-    }
-  }
-
-  onDestroy(() => {
-    if (copiedTimer) clearTimeout(copiedTimer);
-  });
 </script>
 
 <article class="group/assistant my-6 min-w-0 px-2 py-1">
@@ -76,14 +60,14 @@
         <button
           type="button"
           class="grid size-6 place-items-center rounded text-faint hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-          aria-label={copied ? "Response copied" : "Copy response"}
-          onclick={() => void copyResponse()}
+          aria-label={copyState.copied ? "Response copied" : "Copy response"}
+          onclick={() => void copyState.copy(text)}
         >
-          <Icon name={copied ? "check" : "copy"} size={13} />
+          <Icon name={copyState.copied ? "check" : "copy"} size={13} />
         </button>
         <span
           class="pointer-events-none absolute bottom-[calc(100%+0.375rem)] left-1/2 z-20 -translate-x-1/2 rounded-md border border-border-strong bg-card px-2 py-1 text-meta leading-none whitespace-nowrap text-foreground opacity-0 shadow-raised transition-opacity duration-100 group-hover/copy:opacity-100 group-focus-within/copy:opacity-100"
-          role="tooltip">{copied ? "Copied" : "Copy"}</span
+          role="tooltip">{copyState.copied ? "Copied" : "Copy"}</span
         >
       </span>
       {#if sentAt && formattedTimestamp}

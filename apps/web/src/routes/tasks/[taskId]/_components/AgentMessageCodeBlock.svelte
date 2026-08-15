@@ -3,7 +3,7 @@
 
   export type HighlightTheme = "light" | "dark";
 
-  export interface HighlightToken {
+  interface HighlightToken {
     content: string;
     color?: string;
     bold: boolean;
@@ -11,7 +11,7 @@
     underline: boolean;
   }
 
-  export interface HighlightedCode {
+  interface HighlightedCode {
     lines: HighlightToken[][];
   }
 
@@ -152,7 +152,7 @@
 
 <script lang="ts">
   import { Check, Copy, WrapText } from "@lucide/svelte";
-  import { onDestroy } from "svelte";
+  import { createCopyState } from "./copyState.svelte";
 
   let {
     code,
@@ -169,27 +169,11 @@
   } = $props();
 
   let wrapped = $state(false);
-  let copied = $state(false);
-  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  const copyState = createCopyState();
   const newline = "\n";
   let highlighted = $derived(
     streaming ? Promise.resolve(null) : highlightCode(code, language, theme),
   );
-
-  async function copyCode() {
-    try {
-      await navigator.clipboard.writeText(code);
-      copied = true;
-      if (copiedTimer) clearTimeout(copiedTimer);
-      copiedTimer = setTimeout(() => (copied = false), 1_500);
-    } catch {
-      copied = false;
-    }
-  }
-
-  onDestroy(() => {
-    if (copiedTimer) clearTimeout(copiedTimer);
-  });
 </script>
 
 <div class="markdown-codeblock" data-wrap={wrapped ? "true" : "false"}>
@@ -208,10 +192,10 @@
       <button
         type="button"
         class="markdown-codeblock__action"
-        aria-label={copied ? "Copied" : "Copy code"}
-        onclick={() => void copyCode()}
+        aria-label={copyState.copied ? "Copied" : "Copy code"}
+        onclick={() => void copyState.copy(code)}
       >
-        {#if copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+        {#if copyState.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
       </button>
     </span>
   </div>
