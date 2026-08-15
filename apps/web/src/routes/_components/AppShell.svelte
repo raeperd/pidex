@@ -231,6 +231,17 @@
   function projectAdded(candidate: ProjectCandidate) {
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
+  const projectTileClasses = [
+    "border-primary/15 bg-primary/10 text-primary-text",
+    "border-purple-500/20 bg-purple-500/10 text-purple-500",
+    "border-emerald-500/20 bg-emerald-500/10 text-emerald-500",
+  ];
+  /* Hash the name so a project keeps its tile color while the list is filtered or reordered. */
+  function projectTileClass(name: string) {
+    let hash = 0;
+    for (const character of name) hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 9973;
+    return projectTileClasses[hash % projectTileClasses.length];
+  }
   let currentTitle = $derived.by(() => {
     if (!snapshot) return workspace?.name ?? "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
@@ -1873,7 +1884,7 @@
           >
         </div>
       {:else}
-        {#each availableProjects as candidate, candidateIndex (candidate.path)}
+        {#each availableProjects as candidate (candidate.path)}
           <button
             type="button"
             class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
@@ -1882,7 +1893,7 @@
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
             <span
-              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
+              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${projectTileClass(candidate.name)}`}
               >{candidate.name.slice(0, 1).toUpperCase()}</span
             >
             <span class="grid min-w-0 flex-1 gap-1"
