@@ -1709,7 +1709,7 @@
         </button>
         <div class="min-w-0 flex-1">
           <strong
-            class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
+            class="block overflow-hidden text-ellipsis whitespace-nowrap text-ui font-semibold tracking-tight"
             >{currentTitle}</strong
           >
         </div>
@@ -1732,7 +1732,7 @@
 
     {#if error}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-control text-danger"
         role="alert"
       >
         <span>{error}</span><button
@@ -1744,7 +1744,7 @@
     {/if}
     {#if snapshot && connection !== "connected" && !routeLoading}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs text-muted"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-control text-muted"
         role="status"
       >
         <span class="leading-relaxed"
@@ -1759,7 +1759,7 @@
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
         role="alert"
       >
         <span class="leading-relaxed"
@@ -1773,7 +1773,7 @@
     {/if}
     {#if workspace?.protectedResourcesSkipped}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
         role="status"
       >
         <span
@@ -1788,7 +1788,7 @@
     {/if}
     {#if workspace?.resourceDiagnostics.length}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
         role="status"
       >
         <span
@@ -1800,7 +1800,7 @@
     {/if}
     {#if workspace && workspace.models.length === 0}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning"
       >
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
@@ -1828,7 +1828,7 @@
       </div>
       <div>
         <h2 class="m-0 text-heading font-semibold" id="project-dialog-title">Add a project</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+        <p class="mt-1 mb-0 text-control leading-relaxed text-muted">
           Choose by project name. Folder paths stay out of the main workspace UI.
         </p>
       </div>
@@ -1943,7 +1943,7 @@
       </div>
       <div>
         <h2 class="m-0 text-heading font-semibold" id="rename-dialog-title">Rename task</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+        <p class="mt-1 mb-0 text-control leading-relaxed text-muted">
           Give this task a concise, memorable name.
         </p>
       </div>
@@ -2000,7 +2000,7 @@
             {snapshot.extensionDialog.title}
           </h2>
           {#if snapshot.extensionDialog.message}<p
-              class="mt-1 mb-0 text-xs leading-relaxed text-muted"
+              class="mt-1 mb-0 text-control leading-relaxed text-muted"
             >
               {snapshot.extensionDialog.message}
             </p>{/if}

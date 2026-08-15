@@ -157,7 +157,7 @@
     aria-label={`Skill loaded: ${item.name}`}
   >
     <summary
-      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-[11px] transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
     >
       <span class="font-bold text-primary-text">[skill]</span>
       <strong class="font-semibold text-foreground">{item.name}</strong>
@@ -167,7 +167,7 @@
       >
     </summary>
     <div
-      class="markdown border-t border-border px-3 py-2.5 font-mono text-[12px] leading-[1.55] text-muted [overflow-wrap:anywhere]"
+      class="markdown border-t border-border px-3 py-2.5 font-mono text-control leading-[1.55] text-muted [overflow-wrap:anywhere]"
     >
       <AgentMessageBody
         nodes={parseAgentMessage(item.content)}
