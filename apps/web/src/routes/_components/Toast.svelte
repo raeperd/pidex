@@ -107,7 +107,7 @@
   <!-- inset-auto/m-0 override the popover UA stylesheet's default `inset: 0; margin: auto;`
        (which centers the box and would otherwise fight bottom-6/left-1/2 below). -->
   <div
-    class="fixed inset-auto bottom-6 left-1/2 z-30 m-0 w-[min(420px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-danger/30 bg-card p-3 text-control text-foreground shadow-raised transition-[opacity,translate] duration-150 ease-out motion-reduce:transition-none"
+    class="fixed inset-auto bottom-6 left-1/2 z-30 m-0 w-[min(420px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-danger/30 bg-card p-3 text-control text-foreground shadow-raised transition-[opacity,translate] duration-150 ease-out motion-reduce:transition-none max-[900px]:bottom-24"
     popover="manual"
     role="alert"
     {@attach attachToast(message)}
