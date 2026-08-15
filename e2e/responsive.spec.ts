@@ -126,7 +126,10 @@ test("scales mobile task and composer targets while preserving responsive densit
   await expect(prompt).toBeVisible();
   await prompt.fill("Keep compact controls readable on narrow screens");
 
-  const model = page.getByLabel("Model");
+  // `exact: true` avoids an accessible-name collision with the composer's disabled-reason
+  // cascade, whose "no models" message text ("Run pi and /login to enable models") otherwise
+  // substring-matches "Model" -- see TaskComposer.svelte's `composerAffordances`.
+  const model = page.getByLabel("Model", { exact: true });
   const send = page.getByRole("button", { name: "Send" });
   await expect(model).toHaveCSS("font-size", "12px");
   await expect(model).toHaveCSS("white-space", "nowrap");
