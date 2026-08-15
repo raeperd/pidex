@@ -1,6 +1,21 @@
 <script lang="ts" module>
   import type { Workspace } from "@pidex/api";
 
+  export const composerSurfaceClass =
+    "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
+  export const composerTextareaClass =
+    "block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-ui leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base";
+  export const composerFooterClass =
+    "flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2";
+  export const composerControlsClass =
+    "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0";
+  export const composerSendButtonClass =
+    "inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none";
+  export const composerSelectLabelClass =
+    "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
+  export const composerSelectClass =
+    "h-full max-w-44 min-w-0 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap border-0 border-none bg-transparent pr-5 text-control font-semibold text-inherit outline-none disabled:cursor-not-allowed disabled:opacity-40 max-[560px]:pr-3.5 max-[560px]:text-control [@supports(appearance:base-select)]:flex [@supports(appearance:base-select)]:items-center [@supports(appearance:base-select)]:gap-1.5 [@supports(appearance:base-select)]:pr-1.5 [@supports(appearance:base-select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:max-h-[min(22rem,calc(100dvh-2rem))] [@supports(appearance:base-select)]:[&::picker(select)]:overflow-y-auto [@supports(appearance:base-select)]:[&::picker(select)]:[position-area:block-start_span-inline-end] [@supports(appearance:base-select)]:[&::picker(select)]:[position-try-fallbacks:flip-block] [@supports(appearance:base-select)]:[&::picker(select)]:mb-2 [@supports(appearance:base-select)]:[&::picker(select)]:rounded-xl [@supports(appearance:base-select)]:[&::picker(select)]:border [@supports(appearance:base-select)]:[&::picker(select)]:border-border-strong [@supports(appearance:base-select)]:[&::picker(select)]:bg-card [@supports(appearance:base-select)]:[&::picker(select)]:p-1 [@supports(appearance:base-select)]:[&::picker(select)]:text-foreground [@supports(appearance:base-select)]:[&::picker(select)]:shadow-popover [@supports(appearance:base-select)]:[&::picker(select)]:[scrollbar-width:thin] [@supports(appearance:base-select)]:[&::picker-icon]:size-3 [@supports(appearance:base-select)]:[&::picker-icon]:ml-0.5 [@supports(appearance:base-select)]:[&::picker-icon]:text-faint [@supports(appearance:base-select)]:[&::picker-icon]:transition-[rotate] [@supports(appearance:base-select)]:[&::picker-icon]:duration-[140ms] [@supports(appearance:base-select)]:[&::picker-icon]:ease-[ease] [@supports(appearance:base-select)]:[&:open::picker-icon]:rotate-180 [@supports(appearance:base-select)]:[&_option]:flex [@supports(appearance:base-select)]:[&_option]:min-h-8 [@supports(appearance:base-select)]:[&_option]:items-center [@supports(appearance:base-select)]:[&_option]:rounded-lg [@supports(appearance:base-select)]:[&_option]:px-2 [@supports(appearance:base-select)]:[&_option]:py-[0.45rem] [@supports(appearance:base-select)]:[&_option]:text-control [@supports(appearance:base-select)]:[&_option]:font-medium [@supports(appearance:base-select)]:[&_option]:text-muted [@supports(appearance:base-select)]:[&_option]:cursor-pointer [@supports(appearance:base-select)]:[&_option:hover]:bg-secondary [@supports(appearance:base-select)]:[&_option:hover]:text-foreground [@supports(appearance:base-select)]:[&_option:focus-visible]:bg-secondary [@supports(appearance:base-select)]:[&_option:focus-visible]:text-foreground [@supports(appearance:base-select)]:[&_option:checked]:bg-[color-mix(in_srgb,var(--primary)_12%,var(--secondary))] [@supports(appearance:base-select)]:[&_option:checked]:font-[650] [@supports(appearance:base-select)]:[&_option:checked]:text-foreground [@supports(appearance:base-select)]:[&_option::checkmark]:order-1 [@supports(appearance:base-select)]:[&_option::checkmark]:ml-auto [@supports(appearance:base-select)]:[&_option::checkmark]:text-primary-text";
+
   export type ComposerCommand = Workspace["commands"][number];
 
   export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
@@ -127,11 +142,6 @@
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
-
-  const composerSelectLabelClass =
-    "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
-  const composerSelectClass =
-    "h-full max-w-44 min-w-0 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap border-0 border-none bg-transparent pr-5 text-control font-semibold text-inherit outline-none disabled:cursor-not-allowed disabled:opacity-42 max-[560px]:pr-3.5 max-[560px]:text-control [@supports(appearance:base-select)]:flex [@supports(appearance:base-select)]:items-center [@supports(appearance:base-select)]:gap-1.5 [@supports(appearance:base-select)]:pr-1.5 [@supports(appearance:base-select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:max-h-[min(22rem,calc(100dvh-2rem))] [@supports(appearance:base-select)]:[&::picker(select)]:overflow-y-auto [@supports(appearance:base-select)]:[&::picker(select)]:[position-area:block-start_span-inline-end] [@supports(appearance:base-select)]:[&::picker(select)]:[position-try-fallbacks:flip-block] [@supports(appearance:base-select)]:[&::picker(select)]:mb-2 [@supports(appearance:base-select)]:[&::picker(select)]:rounded-xl [@supports(appearance:base-select)]:[&::picker(select)]:border [@supports(appearance:base-select)]:[&::picker(select)]:border-border-strong [@supports(appearance:base-select)]:[&::picker(select)]:bg-card [@supports(appearance:base-select)]:[&::picker(select)]:p-1 [@supports(appearance:base-select)]:[&::picker(select)]:text-foreground [@supports(appearance:base-select)]:[&::picker(select)]:shadow-[0_18px_48px_rgb(0_0_0/24%)] [@supports(appearance:base-select)]:[&::picker(select)]:[scrollbar-width:thin] [@supports(appearance:base-select)]:[&::picker-icon]:size-3 [@supports(appearance:base-select)]:[&::picker-icon]:ml-0.5 [@supports(appearance:base-select)]:[&::picker-icon]:text-faint [@supports(appearance:base-select)]:[&::picker-icon]:transition-[rotate] [@supports(appearance:base-select)]:[&::picker-icon]:duration-[140ms] [@supports(appearance:base-select)]:[&::picker-icon]:ease-[ease] [@supports(appearance:base-select)]:[&:open::picker-icon]:rotate-180 [@supports(appearance:base-select)]:[&_option]:flex [@supports(appearance:base-select)]:[&_option]:min-h-8 [@supports(appearance:base-select)]:[&_option]:items-center [@supports(appearance:base-select)]:[&_option]:rounded-lg [@supports(appearance:base-select)]:[&_option]:px-2 [@supports(appearance:base-select)]:[&_option]:py-[0.45rem] [@supports(appearance:base-select)]:[&_option]:text-xs [@supports(appearance:base-select)]:[&_option]:font-medium [@supports(appearance:base-select)]:[&_option]:text-muted [@supports(appearance:base-select)]:[&_option]:cursor-pointer [@supports(appearance:base-select)]:[&_option:hover]:bg-secondary [@supports(appearance:base-select)]:[&_option:hover]:text-foreground [@supports(appearance:base-select)]:[&_option:focus-visible]:bg-secondary [@supports(appearance:base-select)]:[&_option:focus-visible]:text-foreground [@supports(appearance:base-select)]:[&_option:checked]:bg-[color-mix(in_srgb,var(--primary)_12%,var(--secondary))] [@supports(appearance:base-select)]:[&_option:checked]:font-[650] [@supports(appearance:base-select)]:[&_option:checked]:text-foreground [@supports(appearance:base-select)]:[&_option::checkmark]:order-1 [@supports(appearance:base-select)]:[&_option::checkmark]:ml-auto [@supports(appearance:base-select)]:[&_option::checkmark]:text-primary";
 
   let {
     active,
@@ -335,25 +345,22 @@
 >
   {#if active}
     <div
-      class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
+      class="mx-auto flex w-full max-w-transcript items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
     >
       <span class="flex items-center gap-1.5"
         ><span class="size-1.5 animate-pulse rounded-full bg-primary"></span>{runStatus} · {steeringCount}
         steer · {followUpCount} follow-up</span
       >
       {#if steeringCount + followUpCount > 0}<button
-          class="border-0 bg-transparent p-0 text-meta text-primary"
+          class="border-0 bg-transparent p-0 text-meta text-primary-text"
           onclick={clearQueue}>Clear queues</button
         >{/if}
     </div>
   {/if}
-  <div
-    class="relative mx-auto w-full max-w-3xl overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]"
-    data-testid="chat-composer"
-  >
+  <div class={composerSurfaceClass} data-testid="chat-composer">
     {#if commandSuggestions.length > 0}
       <div
-        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-[0_18px_48px_rgb(0_0_0/24%)]"
+        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-popover"
         id={commandListId}
         role="listbox"
         aria-label="Commands"
@@ -370,7 +377,7 @@
             aria-selected={command === selectedSuggestion}
             onclick={() => completeCommand(command)}
           >
-            <span class="w-30 flex-none font-mono text-xs font-medium text-primary"
+            <span class="w-30 flex-none font-mono text-control font-medium text-primary-text"
               >/{command.name}</span
             >
             <span class="min-w-0 text-control text-muted"
@@ -409,13 +416,13 @@
           </button>
           {#if startMenuOpen}
             <div
-              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
+              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-popover"
               role="menu"
               aria-label="Start in"
             >
               <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
               <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
                 role="menuitemradio"
                 aria-checked={startMode === "local"}
                 onclick={() => chooseStartMode("local")}
@@ -425,7 +432,7 @@
                 {#if startMode === "local"}<Icon name="check" size={13} />{/if}
               </button>
               <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
                 role="menuitemradio"
                 aria-checked={startMode === "worktree"}
                 onclick={() => chooseStartMode("worktree")}
@@ -440,7 +447,7 @@
       </div>
     {/if}
     <textarea
-      class="block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+      class={composerTextareaClass}
       {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
@@ -460,12 +467,8 @@
       aria-haspopup="listbox"
       role="combobox"
       aria-label="Prompt"></textarea>
-    <div
-      class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-      >
+    <div class={composerFooterClass}>
+      <div class={composerControlsClass}>
         <label class={composerSelectLabelClass}>
           <select
             class={[
@@ -520,7 +523,7 @@
           >
         {:else}
           <button
-            class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
+            class={composerSendButtonClass}
             onclick={submitDraft}
             disabled={idleSubmissionDisabled}
             aria-label="Send"><Icon name="send" /></button

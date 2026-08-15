@@ -231,6 +231,17 @@
   function projectAdded(candidate: ProjectCandidate) {
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
   }
+  const projectTileClasses = [
+    "border-primary/15 bg-primary/10 text-primary-text",
+    "border-purple-500/20 bg-purple-500/10 text-purple-500",
+    "border-emerald-500/20 bg-emerald-500/10 text-emerald-500",
+  ];
+  /* Hash the name so a project keeps its tile color while the list is filtered or reordered. */
+  function projectTileClass(name: string) {
+    let hash = 0;
+    for (const character of name) hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 9973;
+    return projectTileClasses[hash % projectTileClasses.length];
+  }
   let currentTitle = $derived.by(() => {
     if (!snapshot) return workspace?.name ?? "Pidex";
     if (snapshot?.sessionName) return snapshot.sessionName;
@@ -1624,7 +1635,7 @@
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
                         {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-sky-500 max-[900px]:text-meta"
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
@@ -1709,7 +1720,7 @@
         </button>
         <div class="min-w-0 flex-1">
           <strong
-            class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
+            class="block overflow-hidden text-ellipsis whitespace-nowrap text-ui font-semibold tracking-tight"
             >{currentTitle}</strong
           >
         </div>
@@ -1732,7 +1743,7 @@
 
     {#if error}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-control text-danger"
         role="alert"
       >
         <span>{error}</span><button
@@ -1744,14 +1755,14 @@
     {/if}
     {#if snapshot && connection !== "connected" && !routeLoading}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs text-muted"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-control text-muted"
         role="status"
       >
         <span class="leading-relaxed"
           ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
           while disconnected.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
+          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
           onclick={retryConnection}
           disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
@@ -1759,21 +1770,21 @@
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="alert"
       >
         <span class="leading-relaxed"
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
+          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
           onclick={acknowledgeInterrupted}>Acknowledge</button
         >
       </div>
     {/if}
     {#if workspace?.protectedResourcesSkipped}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="status"
       >
         <span
@@ -1781,14 +1792,14 @@
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
         >{#if window.pidexDesktop}<button
-            class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
+            class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
             onclick={approveProjectTrust}>Review & trust</button
           >{/if}
       </div>
     {/if}
     {#if workspace?.resourceDiagnostics.length}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
         role="status"
       >
         <span
@@ -1800,7 +1811,7 @@
     {/if}
     {#if workspace && workspace.models.length === 0}
       <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
+        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text"
       >
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
@@ -1812,7 +1823,7 @@
 
 <dialog
   bind:this={projectDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1828,13 +1839,13 @@
       </div>
       <div>
         <h2 class="m-0 text-heading font-semibold" id="project-dialog-title">Add a project</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+        <p class="mt-1 mb-0 text-control leading-relaxed text-muted">
           Choose by project name. Folder paths stay out of the main workspace UI.
         </p>
       </div>
     </div>
     <label
-      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary/55 focus-within:text-muted"
+      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary focus-within:text-muted"
     >
       <Icon name="search" size={15} />
       <input
@@ -1873,7 +1884,7 @@
           >
         </div>
       {:else}
-        {#each availableProjects as candidate, candidateIndex (candidate.path)}
+        {#each availableProjects as candidate (candidate.path)}
           <button
             type="button"
             class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
@@ -1882,7 +1893,7 @@
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
             <span
-              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
+              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${projectTileClass(candidate.name)}`}
               >{candidate.name.slice(0, 1).toUpperCase()}</span
             >
             <span class="grid min-w-0 flex-1 gap-1"
@@ -1893,7 +1904,7 @@
               ></span
             >
             <span
-              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
+              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary-text" : "text-muted"}`}
               >{projectAdded(candidate) ? "Open" : "Add"}</span
             >
           </button>
@@ -1920,7 +1931,7 @@
 
 <dialog
   bind:this={renameDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
   aria-labelledby="rename-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1943,7 +1954,7 @@
       </div>
       <div>
         <h2 class="m-0 text-heading font-semibold" id="rename-dialog-title">Rename task</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
+        <p class="mt-1 mb-0 text-control leading-relaxed text-muted">
           Give this task a concise, memorable name.
         </p>
       </div>
@@ -1952,7 +1963,7 @@
       >Task name</label
     >
     <input
-      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
       id="session-name"
       bind:value={renameValue}
       autocomplete="off"
@@ -1974,7 +1985,7 @@
 {#if snapshot?.extensionDialog}
   <dialog
     bind:this={dialogElement}
-    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
     aria-labelledby="extension-dialog-title"
     oncancel={(event) => {
       event.preventDefault();
@@ -2000,7 +2011,7 @@
             {snapshot.extensionDialog.title}
           </h2>
           {#if snapshot.extensionDialog.message}<p
-              class="mt-1 mb-0 text-xs leading-relaxed text-muted"
+              class="mt-1 mb-0 text-control leading-relaxed text-muted"
             >
               {snapshot.extensionDialog.message}
             </p>{/if}
@@ -2008,7 +2019,7 @@
       </div>
       {#if snapshot.extensionDialog.kind === "select"}
         <select
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
@@ -2025,13 +2036,13 @@
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
         <textarea
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           rows="8"></textarea>
       {:else}
         <input
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
           bind:value={dialogValue}
           aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}

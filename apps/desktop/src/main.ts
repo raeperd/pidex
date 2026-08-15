@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
 import { healthSchema, safeParse, type PidexApiContractClient } from "@pidex/api";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
@@ -107,7 +107,7 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
         height: 820,
         minWidth: 320,
         minHeight: 560,
-        backgroundColor: "#181b18",
+        backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#fafafa",
         ...(process.platform === "darwin"
           ? {
               titleBarStyle: "hiddenInset",

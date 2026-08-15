@@ -128,7 +128,7 @@
   >
     {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
       <button
-        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary disabled:opacity-40"
+        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary-text disabled:opacity-40"
         onclick={() => loadToolOutput(item)}
         disabled={toolOutputs[item.resourceId]?.loading}
         >{toolOutputs[item.resourceId]?.loading
@@ -157,9 +157,9 @@
     aria-label={`Skill loaded: ${item.name}`}
   >
     <summary
-      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-[11px] transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
     >
-      <span class="font-bold text-primary">[skill]</span>
+      <span class="font-bold text-primary-text">[skill]</span>
       <strong class="font-semibold text-foreground">{item.name}</strong>
       <span class="text-faint">loaded</span>
       <span class="ml-auto text-faint transition-transform group-open/skill:rotate-90"
@@ -167,7 +167,7 @@
       >
     </summary>
     <div
-      class="markdown border-t border-border px-3 py-2.5 font-mono text-[12px] leading-[1.55] text-muted [overflow-wrap:anywhere]"
+      class="markdown border-t border-border px-3 py-2.5 font-mono text-control leading-[1.55] text-muted [overflow-wrap:anywhere]"
     >
       <AgentMessageBody
         nodes={parseAgentMessage(item.content)}
@@ -243,9 +243,12 @@
       {/if}
     {/each}
   </div>
+  {#if !nearBottom}
+    <div class="pointer-events-none sticky bottom-4 z-7 flex h-0 justify-center">
+      <button
+        class="pointer-events-auto flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-raised hover:text-foreground"
+        onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
+      >
+    </div>
+  {/if}
 </section>
-
-{#if !nearBottom}<button
-    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
-    onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
-  >{/if}
