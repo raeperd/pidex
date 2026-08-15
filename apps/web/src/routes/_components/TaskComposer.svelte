@@ -88,10 +88,6 @@
     return query === normalizedText ? score - 100 : score;
   }
 
-  export function completeSlashCommand(command: ComposerCommand): string {
-    return `/${command.name} `;
-  }
-
   export function nextSlashCommand(
     commands: ComposerCommand[],
     current: ComposerCommand | undefined,
@@ -105,7 +101,7 @@
     return commands[(currentIndex + direction + commands.length) % commands.length];
   }
 
-  export function parseCompactCommand(draft: string): { instructions?: string } | undefined {
+  function parseCompactCommand(draft: string): { instructions?: string } | undefined {
     const match = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
     if (!match) return undefined;
     const instructions = match[1]?.trim();
@@ -295,7 +291,7 @@
   }
 
   function completeCommand(command: ComposerCommand) {
-    draft = completeSlashCommand(command);
+    draft = `/${command.name} `;
     selectedCommandName = "";
     persistDraft();
     resize();

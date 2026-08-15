@@ -2,7 +2,6 @@ import type { ComponentProps } from "svelte";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import TaskComposer, {
-  completeSlashCommand,
   composerCommands,
   formatRunElapsed,
   nextSlashCommand,
@@ -234,10 +233,6 @@ describe("slashCommandSuggestions", () => {
     const body = renderComposer("", true);
 
     expect(body).not.toContain("invisible");
-  });
-
-  it("completes a selected command in the composer", () => {
-    expect(completeSlashCommand({ name: "compact" })).toBe("/compact ");
   });
 
   it("moves keyboard selection through matching commands", () => {

@@ -1,6 +1,11 @@
 <script lang="ts" module>
   import type { ConnectionState } from "./AppShellConnection";
 
+  const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat(undefined, {
+    numeric: "auto",
+    style: "narrow",
+  });
+
   /** `"disconnected"` (offline) is gated the same as `"reconnecting"` — a uniform delay, no special case. */
   function connectionBanner(
     connection: ConnectionState,
@@ -51,10 +56,21 @@
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
-  const warningBannerClass =
-    "z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-control text-warning-text";
+  const bannerClass = (tone: string, text: string) =>
+    `z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border ${tone} px-3 py-2 text-control ${text}`;
+  const warningBannerClass = bannerClass("border-warning/25 bg-warning/10", "text-warning-text");
+  const bannerActionClass =
+    "flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold";
+  const shellIconButtonClass =
+    "place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground";
   const appDialogClass =
     "app-dialog m-auto max-h-[calc(100dvh-28px)] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal";
+  const dialogSecondaryButtonClass =
+    "min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground";
+  const dialogPrimaryButtonClass =
+    "min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground";
+  const dialogInputClass =
+    "w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
     readonly configuration: ChatConfiguration;
@@ -399,10 +415,7 @@
           : absolute < 86_400
             ? [Math.round(seconds / 3600), "hour"]
             : [Math.round(seconds / 86_400), "day"];
-    return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" }).format(
-      amount,
-      unit as Intl.RelativeTimeFormatUnit,
-    );
+    return RELATIVE_TIME_FORMAT.format(amount, unit as Intl.RelativeTimeFormatUnit);
   };
   function reportError(cause: unknown, fallback: string) {
     error = cause instanceof Error ? cause.message : fallback;
@@ -840,9 +853,6 @@
       /* Cleanup is best-effort; the original task remains usable if removal fails. */
     }
   }
-  function navigateToTask(taskId: string) {
-    if (!chatLoading) void goto(taskPath(taskId));
-  }
   async function activateRoute(path: string, taskId: string) {
     appliedRoute = path;
     const sequence = ++routeSequence;
@@ -1276,7 +1286,7 @@
   }
   async function focusSearch() {
     searchOpen = true;
-    if (matchMedia("(max-width: 900px)").matches) drawerOpen = true;
+    if (mobileViewport.current) drawerOpen = true;
     await tick();
     searchInput?.focus();
     searchInput?.select();
@@ -1390,12 +1400,6 @@
     }
     if (document.activeElement === searchInput) taskViews.focusComposer();
   }
-  function wentOffline() {
-    chatConnection.disconnect();
-  }
-  function cameOnline() {
-    if (snapshot) chatConnection.reconnect();
-  }
   onMount(() => {
     projectPath = localStorage.getItem("pidex:last-project") ?? "";
     const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
@@ -1422,7 +1426,13 @@
   });
 </script>
 
-<svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
+<svelte:window
+  onkeydown={globalKeydown}
+  onoffline={() => chatConnection.disconnect()}
+  ononline={() => {
+    if (snapshot) chatConnection.reconnect();
+  }}
+/>
 
 <svelte:head>
   <title>{currentTitle}</title>
@@ -1648,7 +1658,9 @@
                       {@const current = routeTaskId === task.id}
                       <button
                         class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-ui text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
-                        onclick={() => navigateToTask(task.id)}
+                        onclick={() => {
+                          if (!chatLoading) void goto(taskPath(task.id));
+                        }}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
                       >
@@ -1725,11 +1737,11 @@
         ></div>{/if}
       {#if sidebarCollapsed}
         {@render expandSidebarControl(
-          `absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+          `absolute top-2.5 z-9 hidden size-8.5 ${shellIconButtonClass} min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
         )}
       {/if}
       {@render openTasksControl(
-        `menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+        `menu-button absolute top-2.5 z-9 hidden size-8.5 ${shellIconButtonClass} max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
       )}
     {:else}
       <header
@@ -1737,11 +1749,11 @@
       >
         {#if sidebarCollapsed}
           {@render expandSidebarControl(
-            "inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden",
+            `inline-grid size-8.5 flex-none ${shellIconButtonClass} max-[900px]:hidden`,
           )}
         {/if}
         {@render openTasksControl(
-          "menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10",
+          `menu-button hidden size-8.5 flex-none ${shellIconButtonClass} max-[900px]:inline-grid max-[900px]:size-10`,
         )}
         <div class="min-w-0 flex-1">
           <strong
@@ -1767,10 +1779,7 @@
     {#if isNewTask && hasTopBanner}<div class="h-13 flex-none" aria-hidden="true"></div>{/if}
 
     {#if error}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-control text-danger"
-        role="alert"
-      >
+      <div class={bannerClass("border-danger/25 bg-danger/10", "text-danger")} role="alert">
         <span>{error}</span><button
           class="grid rounded p-1 text-inherit"
           aria-label="Dismiss error"
@@ -1779,16 +1788,13 @@
       </div>
     {/if}
     {#if snapshot && banner && !routeLoading}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-control text-muted"
-        role="status"
-      >
+      <div class={bannerClass("border-primary/25 bg-primary/8", "text-muted")} role="status">
         <span class="leading-relaxed"
           >{#if banner === "connecting"}<strong>Connecting…</strong> Waiting for the desktop host.{:else}<strong
               >Reconnecting…</strong
             > Your task remains on the desktop; drafts will not be submitted while disconnected.{/if}</span
         ><button
-          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
+          class={`${bannerActionClass} disabled:opacity-40`}
           onclick={retryConnection}
           disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
@@ -1799,10 +1805,7 @@
         <span class="leading-relaxed"
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
-        ><button
-          class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
-          onclick={acknowledgeInterrupted}>Acknowledge</button
-        >
+        ><button class={bannerActionClass} onclick={acknowledgeInterrupted}>Acknowledge</button>
       </div>
     {/if}
     {#if workspace?.protectedResourcesSkipped}
@@ -1811,9 +1814,8 @@
           >Project resources requiring trust were skipped. {window.pidexDesktop
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
-        >{#if window.pidexDesktop}<button
-            class="flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold"
-            onclick={approveProjectTrust}>Review & trust</button
+        >{#if window.pidexDesktop}<button class={bannerActionClass} onclick={approveProjectTrust}
+            >Review & trust</button
           >{/if}
       </div>
     {/if}
@@ -1949,7 +1951,7 @@
           ><Icon name="folder" size={14} /> Browse another folder</button
         >{/if}
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground disabled:opacity-40"
+        class={`${dialogSecondaryButtonClass} disabled:opacity-40`}
         type="button"
         onclick={() => projectDialogElement?.close()}
         disabled={projectBatchLoading}>Done</button
@@ -1984,19 +1986,14 @@
     <label class="mb-1.5 block text-control font-medium text-muted" for="session-name"
       >Task name</label
     >
-    <input
-      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
-      id="session-name"
-      bind:value={renameValue}
-      autocomplete="off"
-    />
+    <input class={dialogInputClass} id="session-name" bind:value={renameValue} autocomplete="off" />
     <div class="mt-5 flex justify-end gap-2">
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
+        class={dialogSecondaryButtonClass}
         type="button"
         onclick={() => renameDialogElement?.close()}>Cancel</button
       ><button
-        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground disabled:opacity-40"
+        class={`${dialogPrimaryButtonClass} disabled:opacity-40`}
         type="submit"
         disabled={!renameValue.trim()}>Save name</button
       >
@@ -2029,10 +2026,7 @@
         snapshot.extensionDialog.message,
       )}
       {#if snapshot.extensionDialog.kind === "select"}
-        <select
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
-          bind:value={dialogValue}
-          aria-label="Response"
+        <select class={dialogInputClass} bind:value={dialogValue} aria-label="Response"
           >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
               >{option}</option
             >{/each}</select
@@ -2046,14 +2040,11 @@
           /> Confirm</label
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
-        <textarea
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
-          bind:value={dialogValue}
-          aria-label="Response"
-          rows="8"></textarea>
+        <textarea class={dialogInputClass} bind:value={dialogValue} aria-label="Response" rows="8"
+        ></textarea>
       {:else}
         <input
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground"
+          class={dialogInputClass}
           bind:value={dialogValue}
           aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}
@@ -2061,13 +2052,10 @@
       {/if}
       <div class="mt-5 flex justify-end gap-2">
         <button
-          class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
+          class={dialogSecondaryButtonClass}
           type="button"
           onclick={() => answerDialog(snapshot!.extensionDialog!, true)}>Cancel</button
-        ><button
-          class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground"
-          type="submit">Continue</button
-        >
+        ><button class={dialogPrimaryButtonClass} type="submit">Continue</button>
       </div>
     </form>
   </dialog>

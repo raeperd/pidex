@@ -27,20 +27,16 @@
 
   export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
     const kind = toolCallKind(name);
+    const label = toolCallLabel(name, kind);
     const args = parseArguments(argumentSummary);
-    if (!args)
-      return {
-        kind,
-        label: toolCallLabel(name, kind),
-        detail: argumentSummary.trim(),
-      };
+    if (!args) return { kind, label, detail: argumentSummary.trim() };
     if (kind === "shell")
-      return { kind, label: "$", detail: text(args.command) || compactArguments(args) || "…" };
-    if (kind === "read") return { kind, label: "Read", ...readDetail(args) };
+      return { kind, label, detail: text(args.command) || compactArguments(args) || "…" };
+    if (kind === "read") return { kind, label, ...readDetail(args) };
     if (kind === "search")
       return {
         kind,
-        label: "Search",
+        label,
         detail: [text(args.pattern), text(args.path) || text(args.file_path)]
           .filter(Boolean)
           .join(" · "),
@@ -48,14 +44,14 @@
     if (kind === "edit")
       return {
         kind,
-        label: name === "write" ? "Write" : "Edit",
+        label,
         detail:
           text(args.path) || text(args.file_path) || text(args.patch) || compactArguments(args),
       };
     const detail = [text(args.pattern), text(args.path) || text(args.file_path)]
       .filter(Boolean)
       .join(" ");
-    return { kind, label: humanizeToolName(name), detail: detail || compactArguments(args) };
+    return { kind, label, detail: detail || compactArguments(args) };
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
@@ -198,13 +194,9 @@
 
 <div
   class={[
-    "tool-call min-w-0 text-control leading-[1.5]",
-    header.kind === "shell"
-      ? "tool-call--shell rounded-lg bg-secondary/70 px-2 py-2 font-mono"
-      : "tool-call--activity font-sans",
+    "min-w-0 text-control leading-[1.5]",
+    header.kind === "shell" ? "rounded-lg bg-secondary/70 px-2 py-2 font-mono" : "font-sans",
   ]}
-  data-tool-kind={header.kind}
-  data-tool-status={status}
 >
   {#snippet headerContent()}
     <span
@@ -290,7 +282,7 @@
   {#if expanded && hasDetails}
     <div
       class={[
-        "tool-call__details mt-1.5 min-w-0",
+        "mt-1.5 min-w-0",
         header.kind === "shell"
           ? "border-t border-border pt-2"
           : "ml-7 rounded-r-lg border-l border-border-strong bg-secondary/45 px-3 py-2 font-mono",
