@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
@@ -357,9 +358,36 @@ describe.sequential("HTTP API endpoints", () => {
   });
 
   it("workspaces.sessions", async () => {
+    // Pi only writes a session file to disk once it holds an assistant reply (never for a
+    // chat that was created but never answered), and this suite runs without a live model.
+    // Seed one directly through the real SessionManager persistence API — no mock of our
+    // own code, just a session with a genuine reply already on disk — so the listing has
+    // something to resolve a status for.
+    const seeded = SessionManager.create(workspacePath, path.join(tempRoot, "sessions"));
+    seeded.appendMessage({ role: "user", content: "Ping", timestamp: Date.now() });
+    seeded.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Pong" }],
+      api: "messages",
+      provider: "test",
+      model: "test-model",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
     const result = await api.workspaces.sessions({ workspaceId });
 
     expect(result.sessions).toEqual(expect.any(Array));
+    const session = result.sessions.find((entry) => entry.firstMessage === "Ping");
+    expect(session?.status).toBe("idle");
   });
 
   it("workspaces.trust", async () => {

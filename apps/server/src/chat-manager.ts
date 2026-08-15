@@ -75,7 +75,11 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function publicSession(workspaceId: string, info: AdapterSessionInfo) {
     return Effect.gen(function* () {
       const workspace = yield* getWorkspace(workspaceId);
-      const id = yield* metadata.rememberTask(workspaceId, workspace.path, nativeSessionKey(info));
+      const key = nativeSessionKey(info);
+      const id = yield* metadata.rememberTask(workspaceId, workspace.path, key);
+      const liveChatId = owners.get(key);
+      const liveChat = liveChatId ? chats.get(liveChatId) : undefined;
+      const persisted = liveChat ? undefined : (yield* metadata.sessionState(key)).run;
       return {
         id,
         ...(info.name ? { name: info.name } : {}),
@@ -83,6 +87,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         createdAt: info.createdAt,
         modifiedAt: info.modifiedAt,
         messageCount: info.messageCount,
+        status: resolveSessionStatus(liveChat?.runStatus, persisted),
       } satisfies SessionSummary;
     });
   }
@@ -613,6 +618,29 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 }
 
 export type ChatManager = ReturnType<typeof makeChatManager>;
+
+/**
+ * Coarsens run state down to what the sidebar needs. A live chat always wins over persisted
+ * state (it is the more current source of truth); with no live chat, only a persisted failure
+ * or an unacknowledged crash-interrupted run counts as "error" — everything else the server
+ * knows (completed, cancelled, or an in-flight run left behind by a race) reads as idle rather
+ * than inventing a status the server cannot actually stand behind.
+ */
+export function resolveSessionStatus(
+  liveRunStatus: ChatSnapshot["runStatus"] | undefined,
+  persistedRun: RunOutcome | undefined,
+): "running" | "error" | "idle" {
+  if (liveRunStatus === "running" || liveRunStatus === "stopping" || liveRunStatus === "compacting")
+    return "running";
+  if (liveRunStatus === "error") return "error";
+  if (liveRunStatus === "idle") return "idle";
+  if (
+    persistedRun?.status === "failed" ||
+    (persistedRun?.status === "interrupted" && persistedRun.requiresAcknowledgement)
+  )
+    return "error";
+  return "idle";
+}
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
   const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } as ServerEvent;
