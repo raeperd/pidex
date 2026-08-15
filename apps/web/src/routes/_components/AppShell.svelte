@@ -28,7 +28,6 @@
     type TaskToolOutput,
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
-  import { faviconHref, type FaviconStatus } from "./AppShellFavicon";
   import Icon from "./Icon.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
@@ -127,16 +126,16 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
-  let faviconStatus = $derived<FaviconStatus>(
+  let faviconHref = $derived(
     snapshot?.runStatus === "error" || snapshot?.run?.requiresAcknowledgement
-      ? "attention"
+      ? "/favicon-attention.svg"
       : active
-        ? "running"
-        : "none",
+        ? "/favicon-running.svg"
+        : "/favicon.svg",
   );
   $effect(() => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
-    if (link) link.href = faviconHref(faviconStatus);
+    if (link) link.href = faviconHref;
   });
   let configurationPending = $derived(
     Boolean(snapshot && configurationPendingTaskIds.includes(snapshot.taskId)),
