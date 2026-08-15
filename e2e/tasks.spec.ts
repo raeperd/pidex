@@ -1,29 +1,18 @@
 import { expect, test } from "@playwright/test";
-import { basename } from "node:path";
 import {
+  createTask,
   emitServerEvent,
+  fulfillJson,
   installFakeWebSocket,
   openTasks,
   rememberWorkspace,
-  rpcRequest,
   waitForFakeWebSocket,
+  workspaceName,
 } from "./support";
 
 test("retries a deep-linked task without replacing its route", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const opened = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: process.cwd() },
-    bootstrap.result.csrfToken,
-  );
-  const created = await rpcRequest<{ taskId: string }>(
-    request,
-    "chats/create",
-    { workspaceId: opened.result.id },
-    bootstrap.result.csrfToken,
-  );
-  const taskPath = `/tasks/${created.result.taskId}`;
+  const { task } = await createTask(request, process.cwd());
+  const taskPath = `/tasks/${task.taskId}`;
   let failBootstrap = true;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     if (failBootstrap) {
@@ -127,11 +116,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     connectedDuringConfiguration = await page.evaluate(() =>
       Boolean((globalThis as typeof globalThis & { pidexTestSocket?: WebSocket }).pidexTestSocket),
     );
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: taskSnapshot },
-    });
+    await fulfillJson(route, taskSnapshot);
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {
     if (!taskSnapshot) throw new Error("Expected the starter to create a task first");
@@ -139,19 +124,13 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     mutations.push({ procedure: "send", input });
     const revision = Number(input.expectedRevision) + 1;
     taskSnapshot = { ...taskSnapshot, revision };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          accepted: true,
-          actionId: input.actionId,
-          runId: "run_starter_e2e",
-          status: "accepted",
-          revision,
-          replayed: false,
-        },
-      },
+    await fulfillJson(route, {
+      accepted: true,
+      actionId: input.actionId,
+      runId: "run_starter_e2e",
+      status: "accepted",
+      revision,
+      replayed: false,
     });
   });
   await rememberWorkspace(request, process.cwd());
@@ -307,7 +286,6 @@ test("creates, navigates, and durably submits the first starter prompt", async (
 });
 
 test("defers worktree creation until the first prompt is sent", async ({ page, request }) => {
-  const workspaceName = basename(process.cwd());
   let sourceWorkspace: Record<string, unknown> | undefined;
   let localSnapshot: Record<string, unknown> | undefined;
   let worktreeSnapshot: Record<string, unknown> | undefined;
@@ -343,36 +321,22 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   await page.route("**/api/rpc/workspaces/createWorktree", async (route) => {
     worktreeCreations += 1;
     if (!sourceWorkspace) throw new Error("Expected the source workspace to be open");
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...sourceWorkspace,
-          id: "worktree_workspace_e2e",
-          path: `${process.cwd()}/.pidex-test-worktree`,
-          sessions: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...sourceWorkspace,
+      id: "worktree_workspace_e2e",
+      path: `${process.cwd()}/.pidex-test-worktree`,
+      sessions: [],
     });
   });
   await page.route("**/api/rpc/workspaces/removeWorktree", async (route) => {
     const input = (route.request().postDataJSON() as { json: { workspaceId: string } }).json;
     removedWorktrees.push(input.workspaceId);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ok: true } },
-    });
+    await fulfillJson(route, { ok: true });
   });
   await page.route("**/api/rpc/chats/dispose", async (route) => {
     const input = (route.request().postDataJSON() as { json: { chatId: string } }).json;
     disposedChats.push(input.chatId);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ok: true } },
-    });
+    await fulfillJson(route, { ok: true });
   });
   await page.route("**/api/rpc/chats/create", async (route) => {
     chatCreations += 1;
@@ -396,11 +360,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
         followUpQueue: [],
         stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
       };
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        json: { json: localSnapshot },
-      });
+      await fulfillJson(route, localSnapshot);
       return;
     }
     worktreeChatCreations += 1;
@@ -416,11 +376,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       taskId: `worktree_task_e2e${suffix}`,
       workspaceId: "worktree_workspace_e2e",
     };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: worktreeSnapshot },
-    });
+    await fulfillJson(route, worktreeSnapshot);
   });
   await page.route("**/api/rpc/chats/configure", async (route) => {
     if (!worktreeSnapshot) throw new Error("Expected a worktree task before configuration");
@@ -431,28 +387,18 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
       ...(typeof input.thinkingLevel === "string" ? { thinkingLevel: input.thinkingLevel } : {}),
       revision: Number(input.expectedRevision) + 1,
     };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: worktreeSnapshot },
-    });
+    await fulfillJson(route, worktreeSnapshot);
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {
     const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
     sentPrompts.push(input);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          accepted: true,
-          actionId: input.actionId,
-          runId: "worktree_run_e2e",
-          status: "accepted",
-          revision: Number(input.expectedRevision) + 1,
-          replayed: false,
-        },
-      },
+    await fulfillJson(route, {
+      accepted: true,
+      actionId: input.actionId,
+      runId: "worktree_run_e2e",
+      status: "accepted",
+      revision: Number(input.expectedRevision) + 1,
+      replayed: false,
     });
   });
 
