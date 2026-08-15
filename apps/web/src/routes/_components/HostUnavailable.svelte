@@ -19,17 +19,15 @@
   >
     HOST UNAVAILABLE
   </p>
-  <h1
-    class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-  >
+  <h1 class="m-0 max-w-175 text-display font-normal tracking-tighter text-foreground">
     Your projects are still on the desktop.
   </h1>
-  <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+  <p class="mt-3 max-w-125 text-ui leading-relaxed text-muted">
     Pidex could not reach its local host. Nothing was deleted and no draft will be submitted
     automatically.
   </p>
   <button
-    class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
+    class="mt-5.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-control font-semibold text-foreground shadow-[var(--shadow)] disabled:opacity-40"
     onclick={context.projectActions.retryConnection}
     disabled={context.shell.retryingConnection}
     >{context.shell.retryingConnection ? "Retrying…" : "Retry connection"}</button

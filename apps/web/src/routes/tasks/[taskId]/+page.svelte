@@ -60,7 +60,7 @@
       <HostUnavailable />
     {:else if context.shell.routeLoading}
       <div
-        class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
+        class="mx-auto flex min-h-full w-full max-w-transcript flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
         aria-label="Loading task"
         role="status"
       >
@@ -86,16 +86,14 @@
         >
           YOUR PRIVATE PI PROJECT
         </p>
-        <h1
-          class="m-0 max-w-175 text-[clamp(27px,3vw,38px)] leading-tight font-normal tracking-tighter text-foreground max-[560px]:text-[27px]"
-        >
+        <h1 class="m-0 max-w-175 text-display font-normal tracking-tighter text-foreground">
           Bring Pi with you.
         </h1>
-        <p class="mt-3 max-w-125 text-sm leading-relaxed text-muted">
+        <p class="mt-3 max-w-125 text-ui leading-relaxed text-muted">
           Choose a project to create or resume a task.
         </p>
         <button
-          class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-[var(--shadow)]"
+          class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-control font-semibold text-foreground shadow-[var(--shadow)]"
           onclick={context.projectActions.openProjectPicker}>Add a project</button
         >
       </div>
@@ -104,10 +102,10 @@
         class="flex min-h-full w-full flex-col items-center justify-center px-6 pb-16 text-center max-[560px]:px-4.5"
         role="status"
       >
-        <h1 class="m-0 text-xl font-semibold tracking-tight text-foreground">
+        <h1 class="m-0 text-title font-semibold tracking-tight text-foreground">
           Pick a task to continue
         </h1>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
+        <p class="mt-2 text-ui leading-relaxed text-muted">
           Select an existing task or create a new one to get started.
         </p>
       </div>

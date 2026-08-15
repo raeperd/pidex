@@ -180,7 +180,7 @@
 
   <div
     class={[
-      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-control text-muted shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
+      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-control text-muted shadow-popover transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
       expanded
         ? "pointer-events-auto opacity-100 [translate:var(--context-popover-shift,0)_0] delay-150"
         : "pointer-events-none opacity-0 [translate:var(--context-popover-shift,0)_0.25rem] delay-0",

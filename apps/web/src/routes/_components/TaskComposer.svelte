@@ -1,6 +1,16 @@
 <script lang="ts" module>
   import type { Workspace } from "@pidex/api";
 
+  export const composerSurfaceClass =
+    "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
+  export const composerTextareaClass =
+    "block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-ui leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base";
+  export const composerFooterClass =
+    "flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2";
+  export const composerControlsClass =
+    "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0";
+  export const composerSendButtonClass =
+    "inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none";
   export type ComposerCommand = Workspace["commands"][number];
 
   export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
@@ -317,25 +327,22 @@
 >
   {#if active}
     <div
-      class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
+      class="mx-auto flex w-full max-w-transcript items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
     >
       <span class="flex items-center gap-1.5"
         ><span class="size-1.5 animate-pulse rounded-full bg-primary"></span>{runStatus} · {steeringCount}
         steer · {followUpCount} follow-up</span
       >
       {#if steeringCount + followUpCount > 0}<button
-          class="border-0 bg-transparent p-0 text-meta text-primary"
+          class="border-0 bg-transparent p-0 text-meta text-primary-text"
           onclick={clearQueue}>Clear queues</button
         >{/if}
     </div>
   {/if}
-  <div
-    class="relative mx-auto w-full max-w-3xl overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]"
-    data-testid="chat-composer"
-  >
+  <div class={composerSurfaceClass} data-testid="chat-composer">
     {#if commandSuggestions.length > 0}
       <div
-        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-[0_18px_48px_rgb(0_0_0/24%)]"
+        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-popover"
         id={commandListId}
         role="listbox"
         aria-label="Commands"
@@ -352,7 +359,7 @@
             aria-selected={command === selectedSuggestion}
             onclick={() => completeCommand(command)}
           >
-            <span class="w-30 flex-none font-mono text-xs font-medium text-primary"
+            <span class="w-30 flex-none font-mono text-control font-medium text-primary-text"
               >/{command.name}</span
             >
             <span class="min-w-0 text-control text-muted"
@@ -391,13 +398,13 @@
           </button>
           {#if startMenuOpen}
             <div
-              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
+              class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-popover"
               role="menu"
               aria-label="Start in"
             >
               <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
               <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
                 role="menuitemradio"
                 aria-checked={startMode === "local"}
                 onclick={() => chooseStartMode("local")}
@@ -407,7 +414,7 @@
                 {#if startMode === "local"}<Icon name="check" size={13} />{/if}
               </button>
               <button
-                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+                class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
                 role="menuitemradio"
                 aria-checked={startMode === "worktree"}
                 onclick={() => chooseStartMode("worktree")}
@@ -422,7 +429,7 @@
       </div>
     {/if}
     <textarea
-      class="block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+      class={composerTextareaClass}
       {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
@@ -442,12 +449,8 @@
       aria-haspopup="listbox"
       role="combobox"
       aria-label="Prompt"></textarea>
-    <div
-      class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-      >
+    <div class={composerFooterClass}>
+      <div class={composerControlsClass}>
         <ComposerModelControls
           {models}
           {selectedModel}
@@ -476,7 +479,7 @@
           >
         {:else}
           <button
-            class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
+            class={composerSendButtonClass}
             onclick={submitDraft}
             disabled={idleSubmissionDisabled}
             aria-label="Send"><Icon name="send" /></button

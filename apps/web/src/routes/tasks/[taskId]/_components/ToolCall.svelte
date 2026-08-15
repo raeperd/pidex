@@ -221,7 +221,7 @@
           title={header.detail}>{header.detail}</span
         >{/if}
       {#if header.range}<span
-          class="tool-call__range flex-none font-mono font-semibold text-[#DCDC1F]"
+          class="tool-call__range flex-none font-mono font-semibold text-warning-text"
           >{header.range}</span
         >{/if}
     </span>

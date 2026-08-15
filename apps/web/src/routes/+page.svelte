@@ -5,6 +5,13 @@
   import ComposerModelControls from "./_components/ComposerModelControls.svelte";
   import HostUnavailable from "./_components/HostUnavailable.svelte";
   import Icon from "./_components/Icon.svelte";
+  import {
+    composerControlsClass,
+    composerFooterClass,
+    composerSendButtonClass,
+    composerSurfaceClass,
+    composerTextareaClass,
+  } from "./_components/TaskComposer.svelte";
 
   interface StarterState {
     readonly draft: string;
@@ -78,7 +85,7 @@
   <section class="min-h-0 flex-1 overflow-hidden" aria-label="Loading project" role="status">
     <span class="sr-only">Loading project…</span>
     <div
-      class="mx-auto flex min-h-full w-full max-w-3xl animate-pulse flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+      class="mx-auto flex min-h-full w-full max-w-transcript animate-pulse flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
       aria-hidden="true"
     >
       <div class="mx-auto h-9 w-3/5 max-w-105 rounded-full bg-border/70"></div>
@@ -93,7 +100,7 @@
       data-testid="starter-composer"
     >
       <div
-        class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+        class="mx-auto flex min-h-full w-full max-w-transcript flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
       >
         <h1
           class="m-0 text-center text-display font-semibold tracking-tight text-foreground max-[560px]:text-title"
@@ -121,12 +128,9 @@
             >
           {/if}
         </h1>
-        <div
-          class="relative mx-auto w-full max-w-3xl overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]"
-          data-testid="chat-composer"
-        >
+        <div class={composerSurfaceClass} data-testid="chat-composer">
           <textarea
-            class="block min-h-18 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:min-h-16 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+            class={composerTextareaClass}
             value={starter.draft}
             oninput={(event) => draftInput(event.currentTarget)}
             onkeydown={keydown}
@@ -136,12 +140,8 @@
               : "Choose a project above to start a task"}
             disabled={!context.shell.workspace || starter.submitting}
             aria-label="Prompt"></textarea>
-          <div
-            class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-10.5 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
-          >
-            <div
-              class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-            >
+          <div class={composerFooterClass}>
+            <div class={composerControlsClass}>
               <ComposerModelControls
                 models={context.shell.workspace?.models ?? []}
                 {selectedModel}
@@ -153,7 +153,7 @@
               />
             </div>
             <button
-              class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
+              class={composerSendButtonClass}
               onclick={send}
               disabled={!starter.draft.trim() ||
                 !context.shell.workspace?.models.length ||

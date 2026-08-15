@@ -95,7 +95,7 @@ const answer = 42;
   const assistantHeading = page.getByRole("heading", { name: "Rendered result" });
   await expect(assistantHeading).toHaveCSS("font-size", "21.7px");
   expect(await assistantHeading.evaluate((element) => getComputedStyle(element).color)).not.toBe(
-    "rgb(183, 121, 31)",
+    "rgb(138, 90, 18)",
   );
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
   await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
@@ -279,7 +279,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   await expect(readBlock).toBeVisible();
   await expect(readContainer).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(readContainer.locator(".tool-call__range")).toHaveText(":1-800");
-  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(220, 220, 31)");
+  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(138, 90, 18)");
   await expect(readBlock).toHaveAttribute("aria-expanded", "false");
   await expect(readContainer.locator(".tool-call__output")).toHaveCount(0);
   await readBlock.click();
