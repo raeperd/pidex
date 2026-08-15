@@ -28,6 +28,7 @@
     type TaskToolOutput,
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
+  import { faviconHref, type FaviconStatus } from "./AppShellFavicon";
   import Icon from "./Icon.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
 
@@ -126,6 +127,17 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
+  let faviconStatus = $derived<FaviconStatus>(
+    snapshot?.runStatus === "error" || snapshot?.run?.requiresAcknowledgement
+      ? "attention"
+      : active
+        ? "running"
+        : "none",
+  );
+  $effect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
+    if (link) link.href = faviconHref(faviconStatus);
+  });
   let configurationPending = $derived(
     Boolean(snapshot && configurationPendingTaskIds.includes(snapshot.taskId)),
   );
@@ -1380,7 +1392,7 @@
 <svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
 
 <svelte:head>
-  <title>{active ? "● " : ""}{currentTitle}</title>
+  <title>{currentTitle}</title>
   <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 
