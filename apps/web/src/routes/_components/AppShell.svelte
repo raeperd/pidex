@@ -48,6 +48,7 @@
     type TaskToolTiming,
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
+  import { resolveTaskStatus, rollupProjectStatus } from "./SidebarTaskStatus";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
   import Toast from "./Toast.svelte";
 
@@ -165,13 +166,35 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
-  let faviconHref = $derived(
-    snapshot?.runStatus === "error" || snapshot?.run?.requiresAcknowledgement
-      ? "/favicon-attention.svg"
-      : active
-        ? "/favicon-running.svg"
-        : "/favicon.svg",
-  );
+  /** Every session from every project loaded into the cache, resolved through the same
+   * priority table the sidebar rows and rollup dots use — the favicon reflects the whole
+   * app's state, not just the open task, so a task running or erroring in another project
+   * still surfaces here. */
+  let knownSessionStatuses = $derived.by(() => {
+    const loaded =
+      workspace && !(workspace.id in workspaceCache)
+        ? { ...workspaceCache, [workspace.id]: workspace }
+        : workspaceCache;
+    return Object.values(loaded).flatMap((entry) =>
+      entry.sessions.map((session) =>
+        resolveTaskStatus({
+          session,
+          liveTaskId: snapshot?.taskId,
+          liveRunStatus: snapshot?.runStatus,
+        }),
+      ),
+    );
+  });
+  /** "Attention" folds in `requiresAcknowledgement` for the open task on top of the
+   * aggregate error rollup: a crash-interrupted run awaiting acknowledgement has no
+   * `runStatus` of its own to roll up (it reads as idle), but it is exactly the kind of
+   * thing the favicon exists to surface. */
+  let faviconHref = $derived.by(() => {
+    const aggregate = rollupProjectStatus(knownSessionStatuses);
+    if (aggregate === "error" || snapshot?.run?.requiresAcknowledgement)
+      return "/favicon-attention.svg";
+    return aggregate === "running" ? "/favicon-running.svg" : "/favicon.svg";
+  });
   $effect(() => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
     if (link) link.href = faviconHref;
@@ -869,6 +892,13 @@
     const sequence = ++routeSequence;
     persistDraft();
     chatConnection.close();
+    // The chat's WebSocket for the task we're leaving just closed, so if its run settles
+    // while we're gone, its idle run_status event never arrives and refreshSessions never
+    // fires for it. Per-chat events alone can't keep the list live; refresh that task's
+    // workspace now as a cheap mitigation. (A workspace-level event stream would be the
+    // proper fix but is out of scope here.) Gated on `snapshot` so this only fires when
+    // actually navigating away from an open task, not on every route activation.
+    if (snapshot) void refreshSessions(snapshot.workspaceId);
 
     if (!taskId) {
       snapshot = undefined;
@@ -1017,6 +1047,7 @@
       if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
     } else if (event.type === "run_status") {
+      const wasIdle = snapshot.runStatus === "idle";
       snapshot = {
         ...snapshot,
         runStatus: event.status,
@@ -1024,7 +1055,12 @@
         ...(event.run ? { run: event.run } : {}),
       };
       if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt();
-      if (event.status === "idle") void refreshSessions();
+      // A session only enters the sidebar listing via refreshSessions, which used to fire
+      // only when a run settles. Without also refreshing on the idle -> non-idle transition,
+      // a task created this session had no sidebar presence for its entire first run.
+      // `wasIdle` here already implies `event.status !== "idle"`: this branch of the OR only
+      // runs once the first has ruled that out.
+      if (event.status === "idle" || wasIdle) void refreshSessions();
     } else if (event.type === "queue")
       snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp };
     else if (event.type === "context_usage") snapshot = { ...snapshot, contextUsage: event.usage };
@@ -1600,6 +1636,17 @@
             {@const hiddenTasks = expanded
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
+            {@const projectRollup = expanded
+              ? "idle"
+              : rollupProjectStatus(
+                  matchingTasks.map((task) =>
+                    resolveTaskStatus({
+                      session: task,
+                      liveTaskId: snapshot?.taskId,
+                      liveRunStatus: snapshot?.runStatus,
+                    }),
+                  ),
+                )}
             <div
               class="relative mb-1 rounded-lg"
               role="group"
@@ -1642,6 +1689,13 @@
                     class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ui font-medium text-foreground"
                     >{projectLabel(project)}</strong
                   >
+                  {#if projectRollup !== "idle"}<span
+                      class={`size-1.5 flex-none rounded-full ${projectRollup === "error" ? "bg-danger" : "bg-primary animate-status-pulse"}`}
+                      aria-label={projectRollup === "error"
+                        ? "Task needs attention"
+                        : "Tasks running"}
+                      title={projectRollup === "error" ? "Task needs attention" : "Tasks running"}
+                    ></span>{/if}
                   {#if projectLoadingId === project.id}<span
                       class="flex-none font-mono text-meta leading-none tracking-wider text-faint max-[900px]:text-meta"
                       >•••</span
@@ -1678,6 +1732,11 @@
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
+                      {@const rowStatus = resolveTaskStatus({
+                        session: task,
+                        liveTaskId: snapshot?.taskId,
+                        liveRunStatus: snapshot?.runStatus,
+                      })}
                       <button
                         class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-ui text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => {
@@ -1696,11 +1755,16 @@
                             aria-label="Worktree"
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
-                        {#if current && active}<span
+                        {#if rowStatus === "running"}<span
                             class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
+                            title="Working"
                             ><i
                               class="size-1.5 animate-status-pulse rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
+                          >{:else if rowStatus === "error"}<span
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-danger max-[900px]:text-meta"
+                            title="Error"
+                            ><i class="size-1.5 rounded-full bg-current"></i>Error</span
                           >{:else}<time
                             class="flex-none font-mono text-meta leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
