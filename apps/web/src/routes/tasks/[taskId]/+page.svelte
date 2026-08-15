@@ -105,7 +105,7 @@
       </div>
     {:else if context.shell.routeLoading}
       <div
-        class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
+        class="mx-auto flex min-h-full w-full max-w-transcript flex-col gap-6 px-5 pt-10 pb-12 max-[900px]:px-4"
         aria-label="Loading task"
         role="status"
       >

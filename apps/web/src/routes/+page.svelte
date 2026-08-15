@@ -85,7 +85,7 @@
   <section class="min-h-0 flex-1 overflow-hidden" aria-label="Loading project" role="status">
     <span class="sr-only">Loading project…</span>
     <div
-      class="mx-auto flex min-h-full w-full max-w-3xl animate-pulse flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+      class="mx-auto flex min-h-full w-full max-w-transcript animate-pulse flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
       aria-hidden="true"
     >
       <div class="mx-auto h-9 w-3/5 max-w-105 rounded-full bg-border/70"></div>
@@ -100,7 +100,7 @@
       data-testid="starter-composer"
     >
       <div
-        class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
+        class="mx-auto flex min-h-full w-full max-w-transcript flex-col justify-center gap-5 px-5 py-12 max-[560px]:gap-4 max-[560px]:px-3 max-[560px]:py-8"
       >
         <h1
           class="m-0 text-center text-display font-semibold tracking-tight text-foreground max-[560px]:text-title"
