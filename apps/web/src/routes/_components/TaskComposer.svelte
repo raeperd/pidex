@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import type { ChatSnapshot, Workspace } from "@pidex/api";
+  import type { ConnectionState } from "./AppShellConnection";
 
   export const composerSurfaceClass =
     "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
@@ -108,6 +109,68 @@
     return instructions ? { instructions } : {};
   }
 
+  /**
+   * Cascades the composer's disabled-state reason into the textarea placeholder and the
+   * send/stop button's aria-label + title. First match wins; the order encodes why each
+   * reason outranks the ones below it:
+   *
+   * 1. disconnected/reconnecting — a connection failure invalidates everything downstream
+   *    (you cannot acknowledge, configure, or send while disconnected), so it wins even
+   *    while the stop button is showing (the stop button is itself disabled by the same
+   *    connection check).
+   * 2. requiresAcknowledgement — blocks every submission path and needs a user action, so
+   *    it outranks the passive setup states below it.
+   * 3. no models — sending can never work regardless of any transient pending state.
+   * 4. creatingTask — the task's worktree does not exist yet; nothing else can be true
+   *    until it is.
+   * 5. configurationPending — a model/thinking-level change is being saved; a transient
+   *    wait that can only happen once the task exists.
+   * 6. compactPending — a context compaction is in flight; can coexist with `active`, and
+   *    wins over it since it is the more specific, more recent reason.
+   * 7. active — not an error at all; drafting the next message is allowed, so it only
+   *    applies once nothing above blocks.
+   * 8. default idle — healthy composer, ready to send (or empty draft, which intentionally
+   *    gets no special-cased message: a disabled-but-labeled-"Send" button for an empty
+   *    draft is expected UX).
+   */
+  export function composerAffordances(state: {
+    active: boolean;
+    compactPending: boolean;
+    configurationPending: boolean;
+    connection: ConnectionState;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } {
+    if (state.connection !== "connected") {
+      return {
+        placeholder: "Draft locally while the host reconnects…",
+        sendLabel: "Environment disconnected",
+      };
+    }
+    if (state.requiresAcknowledgement) {
+      const reason = "Acknowledge the interrupted run above to continue";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (!state.hasModels) {
+      const reason = "Run pi and /login to enable models";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (state.creatingTask) {
+      return { placeholder: "Preparing worktree…", sendLabel: "Preparing worktree" };
+    }
+    if (state.configurationPending) {
+      return { placeholder: "Saving configuration…", sendLabel: "Saving configuration" };
+    }
+    if (state.compactPending) {
+      return { placeholder: "Compacting session context…", sendLabel: "Compacting context" };
+    }
+    if (state.active) {
+      return { placeholder: "Draft your next message…", sendLabel: "Stop" };
+    }
+    return { placeholder: "Ask Pi to work on this project…", sendLabel: "Send" };
+  }
+
   export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
     switch (status) {
       case "running":
@@ -159,7 +222,6 @@
   import type { ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
-  import type { ConnectionState } from "./AppShellConnection";
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ComposerModelControls from "./ComposerModelControls.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
@@ -233,6 +295,17 @@
       creatingTask ||
       configurationPending ||
       compactPending,
+  );
+  let affordances = $derived(
+    composerAffordances({
+      active,
+      compactPending,
+      configurationPending,
+      connection,
+      creatingTask,
+      hasModels: models.length > 0,
+      requiresAcknowledgement,
+    }),
   );
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
@@ -490,11 +563,7 @@
       oninput={draftInput}
       onkeydown={keydown}
       rows="2"
-      placeholder={connection !== "connected"
-        ? "Draft locally while the host reconnects…"
-        : active
-          ? "Draft your next message…"
-          : "Ask Pi to work on this project…"}
+      placeholder={affordances.placeholder}
       aria-autocomplete="list"
       aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
       aria-activedescendant={selectedSuggestion
@@ -530,14 +599,16 @@
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
             onclick={stop}
             disabled={connection !== "connected"}
-            aria-label="Stop"><Icon name="stop" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="stop" /></button
           >
         {:else}
           <button
             class={composerSendButtonClass}
             onclick={submitDraft}
             disabled={idleSubmissionDisabled}
-            aria-label="Send"><Icon name="send" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="send" /></button
           >
         {/if}
       </div>
