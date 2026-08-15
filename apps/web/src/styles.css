@@ -39,6 +39,10 @@
   --text-display--line-height: 2.25rem;
   --radius-composer: 1rem;
   --container-transcript: 36rem;
+  /* Elevation scale: raised (tooltips, floating chips), popover (menus), modal (dialogs). */
+  --shadow-raised: 0 4px 16px rgb(0 0 0 / 14%);
+  --shadow-popover: 0 18px 48px rgb(0 0 0 / 24%);
+  --shadow-modal: 0 24px 90px rgb(0 0 0 / 28%);
 }
 
 :root {

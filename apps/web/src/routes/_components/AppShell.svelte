@@ -1812,7 +1812,7 @@
 
 <dialog
   bind:this={projectDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1920,7 +1920,7 @@
 
 <dialog
   bind:this={renameDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
   aria-labelledby="rename-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1974,7 +1974,7 @@
 {#if snapshot?.extensionDialog}
   <dialog
     bind:this={dialogElement}
-    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal"
     aria-labelledby="extension-dialog-title"
     oncancel={(event) => {
       event.preventDefault();

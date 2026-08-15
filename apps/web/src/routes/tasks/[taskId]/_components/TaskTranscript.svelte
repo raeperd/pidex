@@ -246,6 +246,6 @@
 </section>
 
 {#if !nearBottom}<button
-    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
+    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-raised hover:text-foreground max-[560px]:bottom-33"
     onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
   >{/if}
