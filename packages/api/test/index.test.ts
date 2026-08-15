@@ -14,6 +14,7 @@ import {
 } from "../src/index.js";
 
 const actionRequest = {
+  chatId: "chat_123",
   clientId: "client_123",
   actionId: "action_123",
   expectedRevision: 0,
