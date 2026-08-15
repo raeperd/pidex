@@ -21,6 +21,8 @@
   }
 
   const context = getAppShellContext();
+  const projectButtonClass =
+    "cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary";
   const defaultStarter: StarterState = {
     draft: "",
     modelOverride: "",
@@ -81,7 +83,13 @@
   }
 </script>
 
-{#if !context.shell.routeReady && !(context.shell.bootstrapError && !context.shell.bootstrap)}
+{#if context.shell.bootstrapError && !context.shell.bootstrap}
+  <section
+    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+  >
+    <HostUnavailable />
+  </section>
+{:else if !context.shell.routeReady}
   <section class="min-h-0 flex-1 overflow-hidden" aria-label="Loading project" role="status">
     <span class="sr-only">Loading project…</span>
     <div
@@ -92,7 +100,7 @@
       <div class="mx-auto h-35 w-full rounded-[20px] bg-secondary/75"></div>
     </div>
   </section>
-{:else if !(context.shell.bootstrapError && !context.shell.bootstrap)}
+{:else}
   {#key workspaceId}
     <section
       class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
@@ -112,7 +120,7 @@
           {#if context.shell.workspace}
             What should we work on in <span class="inline-block"
               ><button
-                class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+                class={projectButtonClass}
                 type="button"
                 onclick={context.projectActions.openProjectPicker}
                 aria-haspopup="dialog"
@@ -121,7 +129,7 @@
             >
           {:else}
             <button
-              class="cursor-pointer border-0 border-b border-dashed border-faint bg-transparent p-0 text-inherit transition-colors hover:border-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+              class={projectButtonClass}
               type="button"
               onclick={context.projectActions.openProjectPicker}
               aria-haspopup="dialog">Choose a project to start</button
@@ -165,13 +173,4 @@
       </div>
     </section>
   {/key}
-{:else}
-  <section
-    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
-    role="log"
-    aria-live="polite"
-    aria-relevant="additions text"
-  >
-    <HostUnavailable />
-  </section>
 {/if}

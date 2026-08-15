@@ -143,7 +143,7 @@
 <svelte:window onresize={handleWindowResize} />
 <svelte:document onpointerdown={handleDocumentPointerDown} onkeydown={handleDocumentKeydown} />
 
-<div class="context-meter relative inline-flex flex-none" data-context-meter={componentId}>
+<div class="relative inline-flex flex-none" data-context-meter={componentId}>
   <button
     class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] border-0 border-none bg-transparent text-primary transition-[background-color] duration-[140ms] ease-[ease] hover:bg-secondary focus-visible:bg-secondary"
     type="button"

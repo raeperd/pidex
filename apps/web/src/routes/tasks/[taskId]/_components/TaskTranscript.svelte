@@ -71,6 +71,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import AgentMessage from "./AgentMessage.svelte";
   import AgentMessageBody from "./AgentMessageBody.svelte";
+  import type { HighlightTheme } from "./AgentMessageCodeBlock.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
   import type { TaskToolOutput, TaskToolTiming } from "../../../_components/AppShellContext.svelte";
   import Icon from "../../../_components/Icon.svelte";
@@ -103,6 +104,7 @@
   let following = $state(true);
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
   const reducedMotion = new MediaQuery("prefers-reduced-motion: reduce");
+  let theme: HighlightTheme = $derived(darkMode.current ? "dark" : "light");
   let rows = $derived(groupTranscriptItems(items));
 
   export function scrollLatest() {
@@ -178,7 +180,8 @@
 </script>
 
 {#snippet toolCall(item: ToolItem)}
-  {@const output = (item.resourceId ? toolOutputs[item.resourceId]?.text : "") || item.preview}
+  {@const state = item.resourceId ? toolOutputs[item.resourceId] : undefined}
+  {@const output = state?.text || item.preview}
   <ToolCall
     name={item.name}
     argumentSummary={item.argumentSummary}
@@ -189,27 +192,23 @@
     now={toolElapsedNow}
     detailsAvailable={Boolean(output || item.resourceId)}
   >
-    {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
+    {#if item.resourceId && !state?.complete}
       <button
         class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary-text disabled:opacity-40"
         onclick={() => loadToolOutput(item)}
-        disabled={toolOutputs[item.resourceId]?.loading}
-        >{toolOutputs[item.resourceId]?.loading
+        disabled={state?.loading}
+        >{state?.loading
           ? "Loading bounded chunk…"
-          : toolOutputs[item.resourceId]?.text
-            ? `Load more · ${toolOutputs[item.resourceId]?.nextOffset.toLocaleString()} / ${toolOutputs[item.resourceId]?.total.toLocaleString()}`
+          : state?.text
+            ? `Load more · ${state.nextOffset.toLocaleString()} / ${state.total.toLocaleString()}`
             : `Load complete output · ${(item.outputSize ?? 0).toLocaleString()} chars`}</button
       >
     {/if}
-    {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-        class="mt-2 text-meta text-faint"
-      >
+    {#if state?.sourceTruncated}<p class="mt-2 text-meta text-faint">
         The host bounded this output at its safety limit.
       </p>{/if}
-    {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-        class="mt-2 text-meta text-danger"
-      >
-        {toolOutputs[item.resourceId]?.error}
+    {#if state?.error}<p class="mt-2 text-meta text-danger">
+        {state.error}
       </p>{/if}
   </ToolCall>
 {/snippet}
@@ -232,10 +231,7 @@
     <div
       class="markdown border-t border-border px-3 py-2.5 font-mono text-control leading-[1.55] text-muted [overflow-wrap:anywhere]"
     >
-      <AgentMessageBody
-        nodes={parseAgentMessage(item.content)}
-        theme={darkMode.current ? "dark" : "light"}
-      />
+      <AgentMessageBody nodes={parseAgentMessage(item.content)} {theme} />
     </div>
   </details>
 {/snippet}
@@ -243,7 +239,7 @@
 {#snippet toolGroup(row: Extract<TranscriptRow, { kind: "tools" }>)}
   {@const previous = row.items.slice(0, -1)}
   {@const latest = row.items.at(-1)}
-  <div class="tool-activity-group my-3 space-y-2">
+  <div class="my-3 space-y-2">
     {#if previous.length > 0}
       <details class="group/tool-history">
         <summary
@@ -299,7 +295,7 @@
           text={row.item.text}
           thinking={row.item.thinking}
           timestamp={row.item.timestamp}
-          theme={darkMode.current ? "dark" : "light"}
+          {theme}
         />
       {:else if row.item.type === "skill"}
         {@render skillActivity(row.item)}

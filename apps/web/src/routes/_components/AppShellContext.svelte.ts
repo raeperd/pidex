@@ -96,7 +96,7 @@ const [getAppShellContext, provideAppShellContext] = createContext<AppShellConte
 export { getAppShellContext, provideAppShellContext };
 
 export function createTaskViewControllerRegistry(
-  scheduleTask: (callback: () => void) => void = scheduleOnNextFrame,
+  scheduleTask: (callback: () => void) => void = (callback) => requestAnimationFrame(callback),
 ): TaskViewControllerRegistry {
   let composer: TaskComposerController | undefined;
   let composerFocusPending = false;
@@ -125,8 +125,4 @@ export function createTaskViewControllerRegistry(
     scrollIfNearBottom: () => transcript?.scrollIfNearBottom(),
     scrollLatest: () => transcript?.scrollLatest(),
   };
-}
-
-function scheduleOnNextFrame(callback: () => void) {
-  requestAnimationFrame(callback);
 }

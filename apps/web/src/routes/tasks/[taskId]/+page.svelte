@@ -5,7 +5,14 @@
     type TaskComposerController,
     type TaskTranscriptController,
   } from "../../_components/AppShellContext.svelte";
-  import HostUnavailable from "../../_components/HostUnavailable.svelte";
+  import HostUnavailable, {
+    heroBadgeClass,
+    heroButtonClass,
+    heroClass,
+    heroKickerClass,
+    heroLeadClass,
+    heroTitleClass,
+  } from "../../_components/HostUnavailable.svelte";
   import TaskComposer from "../../_components/TaskComposer.svelte";
   import TaskTranscript from "./_components/TaskTranscript.svelte";
 
@@ -71,9 +78,6 @@
 {:else}
   <section
     class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
-    role="log"
-    aria-live="polite"
-    aria-relevant="additions text"
   >
     {#if context.shell.bootstrapError && !context.shell.bootstrap}
       <HostUnavailable />
@@ -92,27 +96,15 @@
         {/each}
       </div>
     {:else if !context.shell.workspace}
-      <div
-        class="flex min-h-full w-full flex-col items-center justify-center px-6 pt-12 pb-30 text-center max-[560px]:px-4.5"
-      >
-        <div
-          class="relative mb-5 grid size-12 place-items-center rounded-2xl border border-border bg-card shadow-[var(--shadow)] before:absolute before:-inset-2 before:rounded-[20px] before:border before:border-border/60 before:content-['']"
-        >
+      <div class={heroClass}>
+        <div class={heroBadgeClass}>
           <span class="font-serif text-[26px] leading-none font-bold">π</span>
         </div>
-        <p
-          class="m-0 mb-2.5 font-mono text-meta leading-none font-semibold tracking-widest text-faint uppercase"
-        >
-          YOUR PRIVATE PI PROJECT
-        </p>
-        <h1 class="m-0 max-w-175 text-display font-normal tracking-tighter text-foreground">
-          Bring Pi with you.
-        </h1>
-        <p class="mt-3 max-w-125 text-ui leading-relaxed text-muted">
-          Choose a project to create or resume a task.
-        </p>
+        <p class={heroKickerClass}>YOUR PRIVATE PI PROJECT</p>
+        <h1 class={heroTitleClass}>Bring Pi with you.</h1>
+        <p class={heroLeadClass}>Choose a project to create or resume a task.</p>
         <button
-          class="mt-4.5 rounded-lg border border-border-strong bg-card px-3.5 py-2 text-control font-semibold text-foreground shadow-[var(--shadow)]"
+          class={`mt-4.5 ${heroButtonClass}`}
           onclick={context.projectActions.openProjectPicker}>Add a project</button
         >
       </div>

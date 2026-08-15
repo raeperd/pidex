@@ -70,9 +70,9 @@
           role="tooltip">{copyState.copied ? "Copied" : "Copy"}</span
         >
       </span>
-      {#if sentAt && formattedTimestamp}
+      {#if formattedTimestamp}
         <span aria-hidden="true">·</span>
-        <time datetime={timestamp} title={sentAt.toLocaleString()}>{formattedTimestamp}</time>
+        <time datetime={timestamp} title={sentAt?.toLocaleString()}>{formattedTimestamp}</time>
       {/if}
     </footer>
   {/if}
