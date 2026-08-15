@@ -8,9 +8,15 @@ import { NodeRuntime } from "@effect/platform-node";
 import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
-import { safeParse, wsClientMessageSchema } from "@pidex/api";
+import {
+  safeParse,
+  terminalClientMessageSchema,
+  type TerminalServerMessage,
+  wsClientMessageSchema,
+} from "@pidex/api";
 import { Context, Effect } from "effect";
-import { WebSocketServer, type RawData } from "ws";
+import * as pty from "node-pty";
+import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { Chats, makeApplicationRuntime } from "./app-runtime.js";
 import { applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
@@ -116,19 +122,23 @@ export async function createPidexApplication() {
         });
       }
     };
-    const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+    const chatWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+    const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
     const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
+      const route = new URL(req.url ?? "/", "http://localhost").pathname;
+      const target =
+        route === "/api/ws" ? chatWss : route === "/api/terminal" ? terminalWss : undefined;
+      if (!target) return false;
       try {
         runtime.runSync(validateRequest(req, false, csrf));
-        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+        target.handleUpgrade(req, socket, head, (ws) => target.emit("connection", ws, req));
       } catch {
         socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         socket.destroy();
       }
       return true;
     };
-    wss.on("connection", (socket) => {
+    chatWss.on("connection", (socket) => {
       let connected = false;
       let alive = true;
       socket.on("message", (data) => {
@@ -155,6 +165,86 @@ export async function createPidexApplication() {
       }, 20_000);
       socket.once("close", () => clearInterval(timer));
     });
+    terminalWss.on("connection", (socket) => {
+      const send = (message: TerminalServerMessage) => socket.send(JSON.stringify(message));
+      let terminal: pty.IPty | undefined;
+      let starting = false;
+
+      socket.on("message", (data) => {
+        const message = parseTerminalMessage(data);
+        if (!message) return socket.close(1008, "Invalid terminal message");
+        if (message.type === "hello") {
+          if (terminal || starting) return socket.close(1008, "Terminal already started");
+          starting = true;
+          void runtime
+            .runPromise(
+              Effect.gen(function* () {
+                const chat = yield* manager.chat(message.chatId);
+                const workspace = yield* manager.workspace(chat.workspaceId);
+                if (socket.readyState !== WebSocket.OPEN) return undefined;
+                const shell = defaultShell();
+                const ptyProcess = yield* Effect.try({
+                  try: () =>
+                    pty.spawn(shell, processPlatformArguments(), {
+                      name: "xterm-256color",
+                      cols: message.cols,
+                      rows: message.rows,
+                      cwd: workspace.path,
+                      env: { ...globalThis.process.env, TERM: "xterm-256color" },
+                    }),
+                  catch: (cause) => applicationError("terminal.spawn", cause),
+                });
+                return { process: ptyProcess, shell, workspace };
+              }),
+            )
+            .then((opened) => {
+              starting = false;
+              if (!opened) return;
+              if (socket.readyState !== WebSocket.OPEN) {
+                opened.process.kill();
+                return;
+              }
+              terminal = opened.process;
+              send({ type: "ready", shell: opened.shell, cwd: opened.workspace.path });
+              terminal.onData((output) => {
+                if (socket.readyState === WebSocket.OPEN) send({ type: "output", data: output });
+              });
+              terminal.onExit(({ exitCode }) => {
+                terminal = undefined;
+                if (socket.readyState === WebSocket.OPEN) {
+                  send({ type: "exit", code: exitCode });
+                  socket.close(1000, "Terminal exited");
+                }
+              });
+            })
+            .catch((cause) => {
+              starting = false;
+              if (socket.readyState === WebSocket.OPEN) {
+                send({ type: "error", message: safeError(cause).slice(0, 4096) });
+                socket.close(1008, "Terminal could not start");
+              }
+            });
+          return;
+        }
+        if (!terminal) return socket.close(1008, "Terminal hello required");
+        try {
+          if (message.type === "input") terminal.write(message.data);
+          else if (message.type === "resize") terminal.resize(message.cols, message.rows);
+          else if (message.type === "kill") terminal.kill();
+        } catch (cause) {
+          send({ type: "error", message: safeError(cause).slice(0, 4096) });
+          socket.close(1011, "Terminal operation failed");
+        }
+      });
+      socket.once("close", () => {
+        try {
+          terminal?.kill();
+        } catch {
+          // The PTY may already have exited.
+        }
+        terminal = undefined;
+      });
+    });
     let closed = false;
     return {
       handleRequest: handler,
@@ -162,7 +252,8 @@ export async function createPidexApplication() {
       close: async () => {
         if (closed) return;
         closed = true;
-        for (const socket of wss.clients) socket.close(1001, "Server stopping");
+        for (const socket of chatWss.clients) socket.close(1001, "Server stopping");
+        for (const socket of terminalWss.clients) socket.close(1001, "Server stopping");
         await runtime.dispose();
       },
       manager,
@@ -209,6 +300,26 @@ function parseClientMessage(data: RawData) {
   } catch {
     return undefined;
   }
+}
+
+function parseTerminalMessage(data: RawData) {
+  try {
+    const result = safeParse(terminalClientMessageSchema, JSON.parse(data.toString()));
+    return result.success ? result.output : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function defaultShell() {
+  return (
+    process.env.SHELL ??
+    (process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh")
+  );
+}
+
+function processPlatformArguments() {
+  return process.platform === "win32" ? [] : ["-l"];
 }
 
 function contentTypeFor(file: string) {

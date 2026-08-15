@@ -146,14 +146,15 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   const serverDirectory = app.isPackaged
     ? path.join(process.resourcesPath, "server")
     : path.join(repositoryRoot, "apps/server");
+  const serverExecutable = app.isPackaged ? process.execPath : "node";
   const command = ChildProcess.make(
-    process.execPath,
+    serverExecutable,
     [path.join(serverDirectory, "dist/main.js")],
     {
       cwd: app.isPackaged ? process.resourcesPath : repositoryRoot,
       env: {
         ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
+        ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
         PIDEX_STATE_DIR: stateDirectory,
         PORT: String(port),
       },
