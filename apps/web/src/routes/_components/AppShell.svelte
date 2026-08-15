@@ -1506,8 +1506,9 @@
         >
           <Icon name="sidebar-collapse" />
         </button>
-        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
-          >Collapse sidebar</span
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-left"
+          role="tooltip">Collapse sidebar</span
         >
       </span>
       <a class="flex min-w-0 flex-1 items-center gap-2" href="/" aria-label="Pidex home">
@@ -1534,8 +1535,9 @@
         >
           <Icon name={searchOpen ? "x" : "search"} />
         </button>
-        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
-          >{searchOpen ? "Close search" : "Search (⌘K)"}</span
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{searchOpen ? "Close search" : "Search (⌘K)"}</span
         >
       </span>
     </div>
@@ -1737,8 +1739,9 @@
         onclick={expandSidebar}
       >
         <Icon name="sidebar-expand" size={19} />
-        <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
-          >Expand sidebar</span
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-left"
+          role="tooltip">Expand sidebar</span
         >
       </button>
     {/snippet}
@@ -1794,8 +1797,9 @@
                 aria-label="Rename"
                 ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
               >
-              <span class="icon-tooltip-bubble icon-tooltip-bubble--below" role="tooltip"
-                >Rename task</span
+              <span
+                class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+                role="tooltip">Rename task</span
               >
             </span>
           </div>

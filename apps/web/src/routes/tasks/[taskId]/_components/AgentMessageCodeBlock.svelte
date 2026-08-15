@@ -190,8 +190,9 @@
         >
           <WrapText size={13} />
         </button>
-        <span class="icon-tooltip-bubble" role="tooltip"
-          >{wrapped ? "Disable line wrap" : "Wrap lines"}</span
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{wrapped ? "Disable line wrap" : "Wrap lines"}</span
         >
       </span>
       <span class="icon-tooltip relative inline-flex">
@@ -203,8 +204,9 @@
         >
           {#if copyState.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
         </button>
-        <span class="icon-tooltip-bubble" role="tooltip"
-          >{copyState.copied ? "Copied" : "Copy code"}</span
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{copyState.copied ? "Copied" : "Copy code"}</span
         >
       </span>
     </span>

@@ -200,6 +200,21 @@
   bottom: auto;
 }
 
+/* For triggers near the left/right edge of an overflow-hidden ancestor
+   (sidebar, header), where a centered bubble wider than the trigger would
+   spill past the edge and get clipped. Anchors the bubble's edge to the
+   trigger's edge instead of centering it. */
+.icon-tooltip-bubble--align-left {
+  left: 0;
+  transform: none;
+}
+
+.icon-tooltip-bubble--align-right {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
 summary::-webkit-details-marker {
   display: none;
 }
