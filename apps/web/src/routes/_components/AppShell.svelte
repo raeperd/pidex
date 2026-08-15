@@ -1635,7 +1635,7 @@
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
                         {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-sky-500 max-[900px]:text-meta"
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
                             ><i
                               class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
