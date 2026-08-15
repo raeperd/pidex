@@ -3,6 +3,7 @@ import {
   emitServerEvent,
   fulfillJson,
   installFakeWebSocket,
+  makeChatSnapshot,
   openTasks,
   rpcRequest,
   workspaceName,
@@ -68,20 +69,15 @@ test("scales mobile task and composer targets while preserving responsive densit
       chatId: "chat_mobile_readability",
       revision: 0,
     };
-    await fulfillJson(route, {
-      ...createdSnapshot,
-      workspaceId: opened.result.id,
-      taskId: "new_task_mobile_readability",
-      runStatus: "idle",
-      model: opened.result.models[0]?.id,
-      thinkingLevel: "high",
-      items: [],
-      transcriptStart: 0,
-      transcriptTotal: 0,
-      steeringQueue: [],
-      followUpQueue: [],
-      stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
-    });
+    await fulfillJson(
+      route,
+      makeChatSnapshot({
+        ...createdSnapshot,
+        workspaceId: opened.result.id,
+        taskId: "new_task_mobile_readability",
+        model: opened.result.models[0]?.id,
+      }),
+    );
   });
 
   await page.goto("/");

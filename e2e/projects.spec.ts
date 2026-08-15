@@ -1,5 +1,49 @@
-import { expect, test } from "@playwright/test";
-import { fulfillJson, openTasks, rememberWorkspace, rpcRequest } from "./support";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { fulfillJson, openTasks, rememberWorkspace, routeInput, rpcRequest } from "./support";
+
+async function openWorkspaceTemplate(request: APIRequestContext) {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const template = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  return {
+    bootstrap: bootstrap.result,
+    csrfToken: bootstrap.result.csrfToken,
+    template: template.result,
+  };
+}
+
+async function rememberOrderedProjects(request: APIRequestContext) {
+  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
+  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
+  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const otherIds = remembered.result.recentWorkspaces
+    .map(({ id }) => id)
+    .filter((id) => id !== apps.id && id !== packages.id);
+  await rpcRequest(
+    request,
+    "workspaces/reorder",
+    { workspaceIds: [apps.id, packages.id, ...otherIds] },
+    csrfToken,
+  );
+}
+
+const projectLabels = (page: Page) =>
+  page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("group")
+    .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
 
 test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
@@ -87,7 +131,7 @@ test("groups worktree tasks under their source project", async ({ page, request 
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     openedPaths.push(input.path);
     const worktree = input.path === worktreePath;
     await fulfillJson(route, {
@@ -147,32 +191,15 @@ test("manually reorders projects and preserves their order after reload", async 
   request,
 }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "HTML drag and drop is a desktop interaction");
-  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
-  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
-  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
-    request,
-    "system/bootstrap",
-    {},
-  );
-  const otherIds = remembered.result.recentWorkspaces
-    .map(({ id }) => id)
-    .filter((id) => id !== apps.id && id !== packages.id);
-  await rpcRequest(
-    request,
-    "workspaces/reorder",
-    { workspaceIds: [apps.id, packages.id, ...otherIds] },
-    csrfToken,
-  );
+  await rememberOrderedProjects(request);
 
   await page.goto("/");
   await openTasks(page);
   const projects = page.getByRole("navigation", { name: "Projects" });
   const projectOrder = async () =>
-    (
-      await projects
-        .getByRole("group")
-        .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")))
-    ).filter((label) => label === "apps project" || label === "packages project");
+    (await projectLabels(page)).filter(
+      (label) => label === "apps project" || label === "packages project",
+    );
   await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
   await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(0);
 
@@ -242,8 +269,7 @@ test("moves against the next visible project while filtering", async ({ page, re
     });
   });
   await page.route("**/api/rpc/workspaces/reorder", async (route) => {
-    reorderedIds = (route.request().postDataJSON() as { json: { workspaceIds: string[] } }).json
-      .workspaceIds;
+    reorderedIds = routeInput<{ workspaceIds: string[] }>(route).workspaceIds;
     const recentWorkspaces = reorderedIds.map((id) => {
       const project = projects.find((candidate) => candidate.id === id);
       if (!project) throw new Error(`Unexpected workspace ID ${id}`);
@@ -259,12 +285,7 @@ test("moves against the next visible project while filtering", async ({ page, re
   await page.getByRole("button", { name: "Expand visible-a" }).press("ArrowDown");
 
   await expect.poll(() => reorderedIds).toEqual(["workspace_b", "workspace_c", "workspace_a"]);
-  const visibleOrder = () =>
-    page
-      .getByRole("navigation", { name: "Projects" })
-      .getByRole("group")
-      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
-  await expect.poll(visibleOrder).toEqual(["visible-c project", "visible-a project"]);
+  await expect.poll(() => projectLabels(page)).toEqual(["visible-c project", "visible-a project"]);
 });
 
 test("refreshes stale project membership after a reorder conflict", async ({ page, request }) => {
@@ -291,32 +312,12 @@ test("refreshes stale project membership after a reorder conflict", async ({ pag
   await openTasks(page);
   await page.getByRole("button", { name: "Expand project-a" }).press("ArrowDown");
 
-  const projectOrder = () =>
-    page
-      .getByRole("navigation", { name: "Projects" })
-      .getByRole("group")
-      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
-  await expect.poll(projectOrder).toEqual(["project-b project", "project-c project"]);
+  await expect.poll(() => projectLabels(page)).toEqual(["project-b project", "project-c project"]);
   expect(bootstrapCalls).toBe(2);
 });
 
 test("blocks project additions while saving the manual order", async ({ page, request }) => {
-  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
-  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
-  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
-    request,
-    "system/bootstrap",
-    {},
-  );
-  const otherIds = remembered.result.recentWorkspaces
-    .map(({ id }) => id)
-    .filter((id) => id !== apps.id && id !== packages.id);
-  await rpcRequest(
-    request,
-    "workspaces/reorder",
-    { workspaceIds: [apps.id, packages.id, ...otherIds] },
-    csrfToken,
-  );
+  await rememberOrderedProjects(request);
   let releaseReorder: (() => void) | undefined;
   const reorderHeld = new Promise<void>((resolve) => {
     releaseReorder = resolve;
@@ -341,17 +342,7 @@ test("blocks project additions while saving the manual order", async ({ page, re
 });
 
 test("reconciles the manual order when adding project 101", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
     path: `${process.cwd()}/apps/project-${String(index).padStart(3, "0")}`,
@@ -361,16 +352,16 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     const recentWorkspaces = bootstrapCalls++ < 2 ? existing : [...existing.slice(1), added];
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces,
       projectCandidates: [{ name: "new-project", path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const remembered = input.path === added.path ? added : existing[0];
     await fulfillJson(route, {
-      ...workspaceTemplate.result,
+      ...template,
       ...remembered,
       name: remembered.path.split("/").at(-1),
     });
@@ -392,33 +383,23 @@ test("reconciles concurrent project additions after opening a new project", asyn
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const initial = { id: "workspace_initial", path: "/tmp/project-initial" };
   const concurrent = { id: "workspace_concurrent", path: "/tmp/project-concurrent" };
   const added = { id: "workspace_added", path: "/tmp/project-added" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces: bootstrapCalls++ < 2 ? [initial] : [concurrent, added],
       projectCandidates: [{ name: "project-added", path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = input.path === added.path ? added : initial;
     await fulfillJson(route, {
-      ...workspaceTemplate.result,
+      ...template,
       ...project,
       name: project.path.split("/").at(-1),
     });
@@ -440,26 +421,20 @@ test("refreshes membership when reopening a remotely evicted project", async ({
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const stale = { id: "workspace_stale", path: "/tmp/project-stale" };
   const kept = { id: "workspace_kept", path: "/tmp/project-kept" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces: bootstrapCalls++ === 0 ? [stale] : [kept, stale],
       projectCandidates: [],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
     await fulfillJson(route, {
-      ...workspaceTemplate.result,
+      ...template,
       ...stale,
       name: "project-stale",
     });
@@ -478,13 +453,7 @@ test("keeps a successful project open within the history limit when refresh fail
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
@@ -497,15 +466,15 @@ test("keeps a successful project open within the history limit when refresh fail
       return;
     }
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces: existing,
       projectCandidates: [{ name: added.name, path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = input.path === added.path ? added : existing[0];
-    await fulfillJson(route, { ...workspaceTemplate.result, ...project });
+    await fulfillJson(route, { ...template, ...project });
   });
 
   await page.goto("/");
@@ -528,17 +497,7 @@ test("keeps a successful project open within the history limit when refresh fail
 });
 
 test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const projects = Array.from({ length: 101 }, (_, index) => {
     const suffix = String(index).padStart(3, "0");
     return {
@@ -550,16 +509,16 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces: bootstrapCalls++ === 0 ? [] : projects.slice(1),
       projectCandidates: projects.map(({ name, path }) => ({ name, path })),
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = projects.find(({ path }) => path === input.path);
     if (!project) throw new Error(`Unexpected project path ${input.path}`);
-    await fulfillJson(route, { ...workspaceTemplate.result, ...project });
+    await fulfillJson(route, { ...template, ...project });
   });
 
   await page.goto("/");
@@ -575,16 +534,7 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
 });
 
 test("releases Add all controls when history reconciliation fails", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
@@ -593,13 +543,13 @@ test("releases Add all controls when history reconciliation fails", async ({ pag
       return;
     }
     await fulfillJson(route, {
-      ...bootstrap.result,
+      ...bootstrap,
       recentWorkspaces: [],
       projectCandidates: [{ name: added.name, path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    await fulfillJson(route, { ...workspaceTemplate.result, ...added });
+    await fulfillJson(route, { ...template, ...added });
   });
 
   await page.goto("/");

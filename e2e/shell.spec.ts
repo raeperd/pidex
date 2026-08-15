@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { createTask, rememberWorkspace } from "./support";
+import { expect, test, type Locator } from "@playwright/test";
+import { createTask, installIntegratedTitleBar, rememberWorkspace } from "./support";
 
 test("serves branded assets", async ({ request }) => {
   const png = await request.get("/pidex-icon.png");
@@ -199,15 +199,4 @@ async function expectSidebarCollapsed(sidebar: Locator) {
         .evaluate((shell) => Number.parseFloat(getComputedStyle(shell).gridTemplateColumns)),
     )
     .toBe(0);
-}
-
-function installIntegratedTitleBar(page: Page) {
-  return page.addInitScript(() => {
-    Object.defineProperty(window, "pidexDesktop", {
-      value: {
-        usesIntegratedTitleBar: true,
-        pickProject: () => Promise.resolve(null),
-      },
-    });
-  });
 }
