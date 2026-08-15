@@ -1,3 +1,4 @@
+import type { ComponentProps } from "svelte";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import TaskComposer, {
@@ -206,6 +207,23 @@ describe("slashCommandSuggestions", () => {
     expect(body).not.toContain("running");
   });
 
+  it("renders a space between the status label and the queue summary, not a glued word", () => {
+    // `elapsedLabel` is driven by a client-only `$effect` timer that svelte/server's `render`
+    // never executes, so it can't be exercised at this seam; `queueLabel` is a pure `$derived`
+    // of props and hits the same `{#if …}{" "}…{/if}` block-boundary-whitespace pattern, so it
+    // stands in for the identical class of bug (Svelte trims whitespace immediately inside a
+    // block boundary, gluing adjacent text together without an explicit `{" "}`). Svelte's SSR
+    // output interleaves invisible hydration-boundary comments between text nodes, so compare
+    // against the comment-stripped text a browser would actually display.
+    const body = render(TaskComposer, {
+      props: { ...composerProps("", true), steeringCount: 2, followUpCount: 1 },
+    }).body;
+    const visibleText = body.replace(/<!--[\s\S]*?-->/g, "");
+
+    expect(visibleText).toContain("Working · 2 steering · 1 follow-up queued");
+    expect(visibleText).not.toContain("Working·");
+  });
+
   it("reserves the status row's height and hides its content when inactive", () => {
     const body = renderComposer("", false);
 
@@ -229,48 +247,54 @@ describe("slashCommandSuggestions", () => {
   });
 });
 
-function renderComposer(draft: string, active: boolean, startModeEditable = true) {
-  return render(TaskComposer, {
-    props: {
-      active,
-      clearQueue: async () => {},
-      commands: [],
-      compact: async () => true,
-      compactPending: false,
-      configure: async () => true,
-      configurationPending: false,
-      connection: "connected",
-      contextUsage: {
-        tokens: 68_000,
-        contextWindow: 272_000,
-        percent: 25,
-        totalProcessedTokens: 3_350,
-        compactsAutomatically: true,
-      },
-      creatingTask: false,
-      draft,
-      followUpCount: 0,
-      models: [
-        {
-          id: "openai/gpt-5.6-sol",
-          provider: "openai",
-          name: "GPT-5.6 Sol",
-          reasoning: true,
-        },
-      ],
-      persistDraft: () => {},
-      projectName: "pidex",
-      requiresAcknowledgement: false,
-      runStatus: active ? "running" : "idle",
-      selectedModel: "openai/gpt-5.6-sol",
-      selectedThinkingLevel: "high",
-      send: async () => {},
-      setStartMode: () => {},
-      startMode: "local",
-      startModeEditable,
-      steeringCount: 0,
-      stop: async () => {},
-      taskId: "task-1",
+function composerProps(
+  draft: string,
+  active: boolean,
+  startModeEditable = true,
+): ComponentProps<typeof TaskComposer> {
+  return {
+    active,
+    clearQueue: async () => {},
+    commands: [],
+    compact: async () => true,
+    compactPending: false,
+    configure: async () => true,
+    configurationPending: false,
+    connection: "connected",
+    contextUsage: {
+      tokens: 68_000,
+      contextWindow: 272_000,
+      percent: 25,
+      totalProcessedTokens: 3_350,
+      compactsAutomatically: true,
     },
-  }).body;
+    creatingTask: false,
+    draft,
+    followUpCount: 0,
+    models: [
+      {
+        id: "openai/gpt-5.6-sol",
+        provider: "openai",
+        name: "GPT-5.6 Sol",
+        reasoning: true,
+      },
+    ],
+    persistDraft: () => {},
+    projectName: "pidex",
+    requiresAcknowledgement: false,
+    runStatus: active ? "running" : "idle",
+    selectedModel: "openai/gpt-5.6-sol",
+    selectedThinkingLevel: "high",
+    send: async () => {},
+    setStartMode: () => {},
+    startMode: "local",
+    startModeEditable,
+    steeringCount: 0,
+    stop: async () => {},
+    taskId: "task-1",
+  };
+}
+
+function renderComposer(draft: string, active: boolean, startModeEditable = true) {
+  return render(TaskComposer, { props: composerProps(draft, active, startModeEditable) }).body;
 }

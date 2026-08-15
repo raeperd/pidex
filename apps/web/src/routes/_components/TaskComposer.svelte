@@ -390,9 +390,8 @@
   >
     <span class="flex items-center gap-1.5"
       ><span class="size-1.5 animate-pulse rounded-full bg-primary"
-      ></span>{statusLabel}{#if elapsedLabel}
-        for <span class="font-mono tabular-nums">{elapsedLabel}</span>{/if}{#if queueLabel}
-        · {queueLabel}{/if}</span
+      ></span>{statusLabel}{#if elapsedLabel}{" "}for
+        <span class="font-mono tabular-nums">{elapsedLabel}</span>{/if}{#if queueLabel}{" "}· {queueLabel}{/if}</span
     >
     {#if steeringCount + followUpCount > 0}<button
         class="border-0 bg-transparent p-0 text-meta text-primary-text"
