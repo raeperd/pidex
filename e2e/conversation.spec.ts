@@ -14,21 +14,6 @@ import {
   waitForFakeWebSocket,
 } from "./support";
 
-async function startStreamingTask(page: Page, request: APIRequestContext) {
-  await installFakeWebSocket(page);
-  const snapshot = await captureCreatedChat(page);
-  await startNewTask(page, request);
-  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-  return { snapshot, chatId: String(snapshot.current?.chatId) };
-}
-
-const settleFrames = (page: Page) =>
-  page.evaluate(
-    () =>
-      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
-
 test("renders assistant markdown as safe interactive components", async ({
   context,
   page,
@@ -878,3 +863,19 @@ test("persists idle configuration immediately without overwriting the draft", as
     .toEqual(["configure", "send"]);
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
+
+async function startStreamingTask(page: Page, request: APIRequestContext) {
+  await installFakeWebSocket(page);
+  const snapshot = await captureCreatedChat(page);
+  await startNewTask(page, request);
+  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+  return { snapshot, chatId: String(snapshot.current?.chatId) };
+}
+
+function settleFrames(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}

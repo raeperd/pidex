@@ -1,50 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { fulfillJson, openTasks, rememberWorkspace, routeInput, rpcRequest } from "./support";
 
-async function openWorkspaceTemplate(request: APIRequestContext) {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const template = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
-  return {
-    bootstrap: bootstrap.result,
-    csrfToken: bootstrap.result.csrfToken,
-    template: template.result,
-  };
-}
-
-async function rememberOrderedProjects(request: APIRequestContext) {
-  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
-  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
-  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
-    request,
-    "system/bootstrap",
-    {},
-  );
-  const otherIds = remembered.result.recentWorkspaces
-    .map(({ id }) => id)
-    .filter((id) => id !== apps.id && id !== packages.id);
-  await rpcRequest(
-    request,
-    "workspaces/reorder",
-    { workspaceIds: [apps.id, packages.id, ...otherIds] },
-    csrfToken,
-  );
-}
-
-const projectLabels = (page: Page) =>
-  page
-    .getByRole("navigation", { name: "Projects" })
-    .getByRole("group")
-    .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
-
 test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
   await page.route("**/api/rpc/system/bootstrap", (route) =>
@@ -562,3 +518,48 @@ test("releases Add all controls when history reconciliation fails", async ({ pag
   await expect(page.getByRole("alert")).toContainText("Project history could not be refreshed");
   expect(bootstrapCalls).toBe(2);
 });
+
+async function openWorkspaceTemplate(request: APIRequestContext) {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const template = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  return {
+    bootstrap: bootstrap.result,
+    csrfToken: bootstrap.result.csrfToken,
+    template: template.result,
+  };
+}
+
+async function rememberOrderedProjects(request: APIRequestContext) {
+  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
+  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
+  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const otherIds = remembered.result.recentWorkspaces
+    .map(({ id }) => id)
+    .filter((id) => id !== apps.id && id !== packages.id);
+  await rpcRequest(
+    request,
+    "workspaces/reorder",
+    { workspaceIds: [apps.id, packages.id, ...otherIds] },
+    csrfToken,
+  );
+}
+
+function projectLabels(page: Page) {
+  return page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("group")
+    .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
+}
