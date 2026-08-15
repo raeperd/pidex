@@ -200,7 +200,7 @@
         </div>
       </details>
     {/if}
-    {#if latest}{@render toolCall(latest)}{/if}
+    {#if latest}{#key latest.id}{@render toolCall(latest)}{/key}{/if}
   </div>
 {/snippet}
 
