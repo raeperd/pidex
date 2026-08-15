@@ -296,24 +296,105 @@ export function makeMetadataStore(stateDir?: string) {
   }
 
   function acceptPrompt(input: ActionInput): ActionOutcome {
+    return recordAction(input, "prompt", (state) => {
+      if (state.run?.requiresAcknowledgement)
+        throw ActionProtocolError.make({
+          code: "interrupted_run",
+          message: "A crash-interrupted run must be acknowledged before starting new work",
+        });
+      if (state.run && (state.run.status === "accepted" || state.run.status === "running"))
+        throw ActionProtocolError.make({
+          code: "session_busy",
+          message: "A run is already active for this session",
+        });
+      const runId = randomUUID().replaceAll("-", "");
+      return {
+        runId,
+        status: "accepted",
+        sessionPatch: {
+          runId,
+          promptActionId: input.actionId,
+          runStatus: "accepted",
+          requiresAcknowledgement: false,
+        },
+      };
+    });
+  }
+
+  function acceptStop(input: ActionInput & { runId: string }): ActionOutcome {
+    return recordAction(input, "stop", (state) => {
+      if (!state.run || state.run.runId !== input.runId)
+        throw ActionProtocolError.make({
+          code: "run_mismatch",
+          message: "Stop no longer targets the active run",
+        });
+      if (state.run.status !== "accepted" && state.run.status !== "running")
+        throw ActionProtocolError.make({
+          code: "run_mismatch",
+          message: "The targeted run is no longer active",
+        });
+      return { runId: input.runId, status: "accepted", sessionPatch: { runStatus: "running" } };
+    });
+  }
+
+  function acceptRunMutation(
+    input: ActionInput & { runId: string; kind: "steer" | "follow-up" },
+  ): ActionOutcome {
+    return recordAction(input, input.kind, (state) => {
+      if (
+        !state.run ||
+        state.run.runId !== input.runId ||
+        (state.run.status !== "accepted" && state.run.status !== "running")
+      ) {
+        throw ActionProtocolError.make({
+          code: "run_mismatch",
+          message: "The queued instruction no longer targets an active run",
+        });
+      }
+      return { runId: input.runId, status: "accepted" };
+    });
+  }
+
+  function acceptSessionMutation(
+    input: ActionInput & { kind: "clear-queue" | "compact" | "config" | "dialog" | "rename" },
+  ): ActionOutcome {
+    return recordAction(input, input.kind, (state) => ({
+      runId: state.run?.runId ?? randomUUID().replaceAll("-", ""),
+      status: "accepted",
+    }));
+  }
+
+  function acknowledgeInterrupted(input: ActionInput): ActionOutcome {
+    return recordAction(input, "acknowledge", (state) => {
+      if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
+        throw ActionProtocolError.make({
+          code: "run_mismatch",
+          message: "There is no interrupted run awaiting acknowledgement",
+        });
+      return {
+        runId: state.run.runId,
+        status: "completed",
+        sessionPatch: { requiresAcknowledgement: false },
+      };
+    });
+  }
+
+  function recordAction(
+    input: ActionInput,
+    kind: ActionKind,
+    decide: (state: { revision: number; run?: RunOutcome }) => {
+      runId: string;
+      status: ActionStatus;
+      sessionPatch?: Partial<typeof sessionState.$inferInsert>;
+    },
+  ): ActionOutcome {
     return db.transaction(
       (tx) => {
-        const replay = findReplay(tx, input, "prompt");
+        const replay = findReplay(tx, input, kind);
         if (replay) return replay;
         const state = readSessionState(tx, input.sessionKey);
         assertCurrentRevision(state.revision, input.expectedRevision);
-        if (state.run?.requiresAcknowledgement)
-          throw ActionProtocolError.make({
-            code: "interrupted_run",
-            message: "A crash-interrupted run must be acknowledged before starting new work",
-          });
-        if (state.run && (state.run.status === "accepted" || state.run.status === "running"))
-          throw ActionProtocolError.make({
-            code: "session_busy",
-            message: "A run is already active for this session",
-          });
-
-        const runId = randomUUID().replaceAll("-", "");
+        const { runId, status, sessionPatch } = decide(state);
         const revision = state.revision + 1;
         const now = new Date().toISOString();
         tx.insert(actions)
@@ -321,223 +402,24 @@ export function makeMetadataStore(stateDir?: string) {
             actionId: input.actionId,
             clientId: input.clientId,
             sessionKey: input.sessionKey,
-            kind: "prompt",
+            kind,
             requestDigest: input.requestDigest,
             runId,
-            status: "accepted",
+            status,
             revision,
             createdAt: now,
             updatedAt: now,
           })
           .run();
         tx.update(sessionState)
-          .set({
-            revision,
-            runId,
-            promptActionId: input.actionId,
-            runStatus: "accepted",
-            requiresAcknowledgement: false,
-            updatedAt: now,
-          })
+          .set({ revision, updatedAt: now, ...sessionPatch })
           .where(eq(sessionState.sessionKey, input.sessionKey))
           .run();
         return {
           accepted: true,
           actionId: input.actionId,
           runId,
-          status: "accepted",
-          revision,
-          replayed: false,
-        };
-      },
-      { behavior: "immediate" },
-    );
-  }
-
-  function acceptStop(input: ActionInput & { runId: string }): ActionOutcome {
-    return db.transaction(
-      (tx) => {
-        const replay = findReplay(tx, input, "stop");
-        if (replay) return replay;
-        const state = readSessionState(tx, input.sessionKey);
-        assertCurrentRevision(state.revision, input.expectedRevision);
-        if (!state.run || state.run.runId !== input.runId)
-          throw ActionProtocolError.make({
-            code: "run_mismatch",
-            message: "Stop no longer targets the active run",
-          });
-        if (state.run.status !== "accepted" && state.run.status !== "running")
-          throw ActionProtocolError.make({
-            code: "run_mismatch",
-            message: "The targeted run is no longer active",
-          });
-
-        const revision = state.revision + 1;
-        const now = new Date().toISOString();
-        tx.insert(actions)
-          .values({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            sessionKey: input.sessionKey,
-            kind: "stop",
-            requestDigest: input.requestDigest,
-            runId: input.runId,
-            status: "accepted",
-            revision,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        tx.update(sessionState)
-          .set({ revision, runStatus: "running", updatedAt: now })
-          .where(eq(sessionState.sessionKey, input.sessionKey))
-          .run();
-        return {
-          accepted: true,
-          actionId: input.actionId,
-          runId: input.runId,
-          status: "accepted",
-          revision,
-          replayed: false,
-        };
-      },
-      { behavior: "immediate" },
-    );
-  }
-
-  function acceptRunMutation(
-    input: ActionInput & { runId: string; kind: "steer" | "follow-up" },
-  ): ActionOutcome {
-    return db.transaction(
-      (tx) => {
-        const replay = findReplay(tx, input, input.kind);
-        if (replay) return replay;
-        const state = readSessionState(tx, input.sessionKey);
-        assertCurrentRevision(state.revision, input.expectedRevision);
-        if (
-          !state.run ||
-          state.run.runId !== input.runId ||
-          (state.run.status !== "accepted" && state.run.status !== "running")
-        ) {
-          throw ActionProtocolError.make({
-            code: "run_mismatch",
-            message: "The queued instruction no longer targets an active run",
-          });
-        }
-        const revision = state.revision + 1;
-        const now = new Date().toISOString();
-        tx.insert(actions)
-          .values({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            sessionKey: input.sessionKey,
-            kind: input.kind,
-            requestDigest: input.requestDigest,
-            runId: input.runId,
-            status: "accepted",
-            revision,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        tx.update(sessionState)
-          .set({ revision, updatedAt: now })
-          .where(eq(sessionState.sessionKey, input.sessionKey))
-          .run();
-        return {
-          accepted: true,
-          actionId: input.actionId,
-          runId: input.runId,
-          status: "accepted",
-          revision,
-          replayed: false,
-        };
-      },
-      { behavior: "immediate" },
-    );
-  }
-
-  function acceptSessionMutation(
-    input: ActionInput & { kind: "clear-queue" | "compact" | "config" | "dialog" | "rename" },
-  ): ActionOutcome {
-    return db.transaction(
-      (tx) => {
-        const replay = findReplay(tx, input, input.kind);
-        if (replay) return replay;
-        const state = readSessionState(tx, input.sessionKey);
-        assertCurrentRevision(state.revision, input.expectedRevision);
-        const revision = state.revision + 1;
-        const actionRunId = state.run?.runId ?? randomUUID().replaceAll("-", "");
-        const now = new Date().toISOString();
-        tx.insert(actions)
-          .values({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            sessionKey: input.sessionKey,
-            kind: input.kind,
-            requestDigest: input.requestDigest,
-            runId: actionRunId,
-            status: "accepted",
-            revision,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        tx.update(sessionState)
-          .set({ revision, updatedAt: now })
-          .where(eq(sessionState.sessionKey, input.sessionKey))
-          .run();
-        return {
-          accepted: true,
-          actionId: input.actionId,
-          runId: actionRunId,
-          status: "accepted",
-          revision,
-          replayed: false,
-        };
-      },
-      { behavior: "immediate" },
-    );
-  }
-
-  function acknowledgeInterrupted(input: ActionInput): ActionOutcome {
-    return db.transaction(
-      (tx) => {
-        const replay = findReplay(tx, input, "acknowledge");
-        if (replay) return replay;
-        const state = readSessionState(tx, input.sessionKey);
-        assertCurrentRevision(state.revision, input.expectedRevision);
-        if (!state.run || !state.run.requiresAcknowledgement || state.run.status !== "interrupted")
-          throw ActionProtocolError.make({
-            code: "run_mismatch",
-            message: "There is no interrupted run awaiting acknowledgement",
-          });
-
-        const revision = state.revision + 1;
-        const now = new Date().toISOString();
-        tx.insert(actions)
-          .values({
-            actionId: input.actionId,
-            clientId: input.clientId,
-            sessionKey: input.sessionKey,
-            kind: "acknowledge",
-            requestDigest: input.requestDigest,
-            runId: state.run!.runId,
-            status: "completed",
-            revision,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        tx.update(sessionState)
-          .set({ revision, requiresAcknowledgement: false, updatedAt: now })
-          .where(eq(sessionState.sessionKey, input.sessionKey))
-          .run();
-        return {
-          accepted: true,
-          actionId: input.actionId,
-          runId: state.run.runId,
-          status: "completed",
+          status,
           revision,
           replayed: false,
         };
@@ -625,11 +507,16 @@ export function makeMetadataStore(stateDir?: string) {
       .run();
   }
 
+  function hasWorkspaceColumn(name: string) {
+    return (
+      sqlite
+        .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = ?")
+        .get(name) !== undefined
+    );
+  }
+
   function ensureWorkspaceSortOrder() {
-    const column = sqlite
-      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'sort_order'")
-      .get();
-    if (column) return;
+    if (hasWorkspaceColumn("sort_order")) return;
     sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
@@ -647,10 +534,7 @@ export function makeMetadataStore(stateDir?: string) {
   }
 
   function ensureWorkspaceListed() {
-    const column = sqlite
-      .prepare("SELECT name FROM pragma_table_info('workspaces') WHERE name = 'listed'")
-      .get();
-    if (column) return;
+    if (hasWorkspaceColumn("listed")) return;
     sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN listed INTEGER NOT NULL DEFAULT 1;
@@ -659,12 +543,7 @@ export function makeMetadataStore(stateDir?: string) {
   }
 
   function ensureWorkspaceSource() {
-    const column = sqlite
-      .prepare(
-        "SELECT name FROM pragma_table_info('workspaces') WHERE name = 'source_workspace_id'",
-      )
-      .get();
-    if (column) return;
+    if (hasWorkspaceColumn("source_workspace_id")) return;
     sqlite.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE workspaces ADD COLUMN source_workspace_id TEXT;
@@ -846,20 +725,30 @@ type MetadataDatabase = ReturnType<typeof createMetadataDatabase>;
 type MetadataTransaction = Parameters<Parameters<MetadataDatabase["transaction"]>[0]>[0];
 type MetadataExecutor = MetadataDatabase | MetadataTransaction;
 
+const actionStatuses = [
+  "accepted",
+  "running",
+  "completed",
+  "cancelled",
+  "failed",
+  "interrupted",
+] as const satisfies ReadonlyArray<ActionOutcome["status"]>;
 type ActionStatus = ActionOutcome["status"];
 type PersistedRunStatus = ActionStatus | "stopping";
 
-type ActionKind =
-  | "prompt"
-  | "stop"
-  | "steer"
-  | "follow-up"
-  | "clear-queue"
-  | "compact"
-  | "config"
-  | "dialog"
-  | "rename"
-  | "acknowledge";
+const actionKinds = [
+  "prompt",
+  "stop",
+  "steer",
+  "follow-up",
+  "clear-queue",
+  "compact",
+  "config",
+  "dialog",
+  "rename",
+  "acknowledge",
+] as const;
+type ActionKind = (typeof actionKinds)[number];
 
 const workspaces = sqliteTable(
   "workspaces",
@@ -913,39 +802,11 @@ const actions = sqliteTable(
 const workspaceRowSchema = createSelectSchema(workspaces);
 const taskRowSchema = createSelectSchema(tasks);
 const sessionStateRowSchema = createSelectSchema(sessionState, {
-  runStatus: Schema.NullOr(
-    Schema.Literals([
-      "accepted",
-      "running",
-      "completed",
-      "cancelled",
-      "failed",
-      "interrupted",
-      "stopping",
-    ]),
-  ),
+  runStatus: Schema.NullOr(Schema.Literals([...actionStatuses, "stopping"])),
 });
 const actionRowSchema = createSelectSchema(actions, {
-  kind: Schema.Literals([
-    "prompt",
-    "stop",
-    "steer",
-    "follow-up",
-    "clear-queue",
-    "compact",
-    "config",
-    "dialog",
-    "rename",
-    "acknowledge",
-  ]),
-  status: Schema.Literals([
-    "accepted",
-    "running",
-    "completed",
-    "cancelled",
-    "failed",
-    "interrupted",
-  ]),
+  kind: Schema.Literals([...actionKinds]),
+  status: Schema.Literals([...actionStatuses]),
 });
 
 const decodeWorkspaceRow = Schema.decodeUnknownSync(workspaceRowSchema);
