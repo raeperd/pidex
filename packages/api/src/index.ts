@@ -36,13 +36,15 @@ const modelSchema = v.object({
   name: boundedString(200),
   reasoning: v.boolean(),
 });
-const sessionSummarySchema = v.object({
+export const sessionStatusSchema = v.picklist(["running", "error", "idle"]);
+export const sessionSummarySchema = v.object({
   id: idSchema,
   name: v.optional(boundedString(300)),
   firstMessage: boundedString(500),
   createdAt: v.string(),
   modifiedAt: v.string(),
   messageCount: nonnegativeInteger(),
+  status: v.optional(sessionStatusSchema),
 });
 const workspaceSchema = v.object({
   id: idSchema,
@@ -343,6 +345,7 @@ export const pidexApiContract = {
 export type PidexApiContractClient = RouterContractClient<typeof pidexApiContract>;
 
 export type ModelInfo = v.InferOutput<typeof modelSchema>;
+export type SessionStatus = v.InferOutput<typeof sessionStatusSchema>;
 export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
 export type Workspace = v.InferOutput<typeof workspaceSchema>;
 export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;
