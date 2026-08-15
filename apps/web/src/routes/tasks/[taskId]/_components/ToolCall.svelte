@@ -21,6 +21,10 @@
     generic: "tool",
   } as const;
 
+  export function toolCallExpanded(override: boolean | undefined, status: string): boolean {
+    return override ?? status === "error";
+  }
+
   export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
     const kind = toolCallKind(name);
     const args = parseArguments(argumentSummary);
@@ -175,7 +179,8 @@
     children?: Snippet;
   } = $props();
 
-  let expanded = $derived(status === "error");
+  let expandedOverride = $state<boolean | undefined>(undefined);
+  let expanded = $derived(toolCallExpanded(expandedOverride, status));
   let header = $derived(toolCallHeader(name, argumentSummary));
   let normalizedOutput = $derived(toolCallOutputText(output));
   let preview = $derived(toolCallPreview(normalizedOutput));
@@ -256,7 +261,7 @@
       ]}
       aria-label={accessibleLabel}
       aria-expanded={expanded}
-      onclick={() => (expanded = !expanded)}
+      onclick={() => (expandedOverride = !expanded)}
     >
       {@render headerContent()}
     </button>

@@ -126,6 +126,17 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
+  let faviconHref = $derived(
+    snapshot?.runStatus === "error" || snapshot?.run?.requiresAcknowledgement
+      ? "/favicon-attention.svg"
+      : active
+        ? "/favicon-running.svg"
+        : "/favicon.svg",
+  );
+  $effect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
+    if (link) link.href = faviconHref;
+  });
   let configurationPending = $derived(
     Boolean(snapshot && configurationPendingTaskIds.includes(snapshot.taskId)),
   );
@@ -1380,7 +1391,7 @@
 <svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
 
 <svelte:head>
-  <title>Pidex</title>
+  <title>{currentTitle}</title>
   <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 

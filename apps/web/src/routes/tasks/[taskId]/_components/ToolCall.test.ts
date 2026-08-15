@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatToolDuration,
+  toolCallExpanded,
   toolCallHeader,
   toolCallOutputText,
   toolCallPreview,
@@ -83,5 +84,25 @@ describe("formatToolDuration", () => {
   it("reports one decimal of seconds", () => {
     expect(formatToolDuration(96)).toBe("0.1s");
     expect(formatToolDuration(12_340)).toBe("12.3s");
+  });
+});
+
+describe("toolCallExpanded", () => {
+  it("auto-expands on error with no user interaction", () => {
+    expect(toolCallExpanded(undefined, "error")).toBe(true);
+  });
+
+  it("stays collapsed for running or success with no user interaction", () => {
+    expect(toolCallExpanded(undefined, "running")).toBe(false);
+    expect(toolCallExpanded(undefined, "success")).toBe(false);
+  });
+
+  it("user expansion survives status change", () => {
+    expect(toolCallExpanded(true, "running")).toBe(true);
+    expect(toolCallExpanded(true, "success")).toBe(true);
+  });
+
+  it("user collapse of an errored call stays collapsed", () => {
+    expect(toolCallExpanded(false, "error")).toBe(false);
   });
 });
