@@ -72,7 +72,7 @@ const answer = 42;
   const transcriptBody = page.getByRole("log").locator(":scope > div");
   const userPrompt = page.getByRole("log").getByText("Inspect this repository", { exact: true });
   const assistantBody = page.locator(".markdown").filter({ hasText: "Rendered result" });
-  await expect(transcriptBody).toHaveCSS("max-width", "576px");
+  await expect(transcriptBody).toHaveCSS("max-width", "704px");
   await expect(transcriptBody).toHaveCSS("font-family", /DM Sans/);
   await expect(userPrompt).toHaveCSS("border-radius", "16px");
   await expect(userPrompt).toHaveCSS("font-family", /DM Sans/);
@@ -795,7 +795,9 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
   if (testInfo.project.name === "mobile") await contextMeter.focus();
   else await contextMeter.hover();
-  const contextDetails = page.getByRole("tooltip");
+  // Scoped: the sidebar's icon-button tooltips (collapse, search, etc.) are
+  // also role="tooltip" elements always present in the DOM.
+  const contextDetails = page.getByRole("tooltip").filter({ hasText: "Context Window" });
   await expect(contextDetails).toHaveCSS("opacity", "1");
   await expect(contextDetails).toContainText("Context Window");
   await expect(contextDetails).toContainText("34% · 87k/258k");

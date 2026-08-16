@@ -180,23 +180,35 @@
   <div class="markdown-codeblock__header">
     <span class="markdown-codeblock__title" title={title ?? language}>{title ?? language}</span>
     <span class="markdown-codeblock__actions">
-      <button
-        type="button"
-        class="markdown-codeblock__action"
-        aria-label={wrapped ? "Disable line wrap" : "Wrap lines"}
-        aria-pressed={wrapped}
-        onclick={() => (wrapped = !wrapped)}
-      >
-        <WrapText size={13} />
-      </button>
-      <button
-        type="button"
-        class="markdown-codeblock__action"
-        aria-label={copyState.copied ? "Copied" : "Copy code"}
-        onclick={() => void copyState.copy(code)}
-      >
-        {#if copyState.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
-      </button>
+      <span class="icon-tooltip relative inline-flex">
+        <button
+          type="button"
+          class="markdown-codeblock__action"
+          aria-label={wrapped ? "Disable line wrap" : "Wrap lines"}
+          aria-pressed={wrapped}
+          onclick={() => (wrapped = !wrapped)}
+        >
+          <WrapText size={13} />
+        </button>
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{wrapped ? "Disable line wrap" : "Wrap lines"}</span
+        >
+      </span>
+      <span class="icon-tooltip relative inline-flex">
+        <button
+          type="button"
+          class="markdown-codeblock__action"
+          aria-label={copyState.copied ? "Copied" : "Copy code"}
+          onclick={() => void copyState.copy(code)}
+        >
+          {#if copyState.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+        </button>
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{copyState.copied ? "Copied" : "Copy code"}</span
+        >
+      </span>
     </span>
   </div>
   <pre><code
