@@ -416,7 +416,7 @@
     const absolute = Math.abs(seconds);
     const [amount, unit] =
       absolute < 60
-        ? [seconds, "second"]
+        ? [0, "second"] // sub-minute labels would lie between 60s ticks; "now" is always honest
         : absolute < 3600
           ? [Math.round(seconds / 60), "minute"]
           : absolute < 86_400
