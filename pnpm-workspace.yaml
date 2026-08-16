@@ -20,9 +20,17 @@ packageExtensions:
       "@vitest/runner": 4.1.10
 
 catalog:
+  "@effect/platform-node": 4.0.0-beta.101
+  "@effect/vitest": 4.0.0-beta.101
+  "@orpc/client": 2.0.0-beta.21
+  "@orpc/contract": 2.0.0-beta.21
+  "@orpc/experimental-effect": 2.0.0-beta.21
+  "@orpc/server": 2.0.0-beta.21
   "@types/node": 24.12.4
   "@sveltejs/vite-plugin-svelte": 7.2.0
+  effect: 4.0.0-beta.101
   svelte: 5.56.7
   svelte-check: 4.7.3
   typescript: 7.0.2
   vite: 8.1.5
+  vitest: 4.1.10

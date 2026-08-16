@@ -12,20 +12,20 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
-    "@effect/platform-node": "4.0.0-beta.101",
-    "@orpc/experimental-effect": "2.0.0-beta.21",
-    "@orpc/server": "2.0.0-beta.21",
+    "@effect/platform-node": "catalog:",
+    "@orpc/experimental-effect": "catalog:",
+    "@orpc/server": "catalog:",
     "@pidex/api": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
-    "effect": "4.0.0-beta.101",
+    "effect": "catalog:",
     "ws": "8.18.3"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.101",
-    "@orpc/client": "2.0.0-beta.21",
+    "@effect/vitest": "catalog:",
+    "@orpc/client": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "8.18.1",
     "typescript": "catalog:",
-    "vitest": "4.1.10"
+    "vitest": "catalog:"
   }
 }
