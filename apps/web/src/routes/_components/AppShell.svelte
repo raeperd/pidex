@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { ChatSnapshot } from "@pidex/api";
   import type { ConnectionState } from "./AppShellConnection";
 
   const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat(undefined, {
@@ -15,6 +16,49 @@
     if (connection === "connected" || !delayElapsed) return undefined;
     return hasEverConnected ? "reconnecting" : "connecting";
   }
+
+  type SidebarStatus = "error" | "running" | "idle";
+
+  function statusFromLiveRunStatus(liveRunStatus: ChatSnapshot["runStatus"]): SidebarStatus {
+    if (
+      liveRunStatus === "running" ||
+      liveRunStatus === "stopping" ||
+      liveRunStatus === "compacting"
+    )
+      return "running";
+    return liveRunStatus === "error" ? "error" : "idle";
+  }
+
+  /**
+   * The live snapshot wins for the task the user has open — it reflects run_status events
+   * instantly, before the next listing refresh could ever catch up. Every other row has no
+   * live snapshot to read, so it falls back to whatever the server last reported.
+   */
+  function resolveTaskStatus(input: {
+    session: { id: string; status?: SidebarStatus };
+    liveTaskId: string | undefined;
+    liveRunStatus: ChatSnapshot["runStatus"] | undefined;
+  }): SidebarStatus {
+    if (input.liveTaskId === input.session.id && input.liveRunStatus !== undefined)
+      return statusFromLiveRunStatus(input.liveRunStatus);
+    return input.session.status ?? "idle";
+  }
+
+  /**
+   * error > running > idle: one priority table shared by every rollup consumer (the collapsed
+   * project dot, the favicon aggregate) so the worst thing happening always wins — a task that
+   * needs attention should never be masked by one that's merely still running, and a merely
+   * running task should never be masked by the many that are quietly idle. Mirrors paseo's
+   * STATUS_BUCKET_PRIORITY.
+   */
+  function rollupProjectStatus(statuses: Iterable<SidebarStatus>): SidebarStatus {
+    let sawRunning = false;
+    for (const status of statuses) {
+      if (status === "error") return "error";
+      if (status === "running") sawRunning = true;
+    }
+    return sawRunning ? "running" : "idle";
+  }
 </script>
 
 <script lang="ts">
@@ -25,7 +69,6 @@
   import {
     MAX_RECENT_WORKSPACES,
     type Bootstrap,
-    type ChatSnapshot,
     type ExtensionDialog,
     type ProjectCandidate,
     type RecentWorkspace,
@@ -165,13 +208,35 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
-  let faviconHref = $derived(
-    snapshot?.runStatus === "error" || snapshot?.run?.requiresAcknowledgement
-      ? "/favicon-attention.svg"
-      : active
-        ? "/favicon-running.svg"
-        : "/favicon.svg",
-  );
+  /** Every session from every project loaded into the cache, resolved through the same
+   * priority table the sidebar rows and rollup dots use — the favicon reflects the whole
+   * app's state, not just the open task, so a task running or erroring in another project
+   * still surfaces here. */
+  let knownSessionStatuses = $derived.by(() => {
+    const loaded =
+      workspace && !(workspace.id in workspaceCache)
+        ? { ...workspaceCache, [workspace.id]: workspace }
+        : workspaceCache;
+    return Object.values(loaded).flatMap((entry) =>
+      entry.sessions.map((session) =>
+        resolveTaskStatus({
+          session,
+          liveTaskId: snapshot?.taskId,
+          liveRunStatus: snapshot?.runStatus,
+        }),
+      ),
+    );
+  });
+  /** "Attention" folds in `requiresAcknowledgement` for the open task on top of the
+   * aggregate error rollup: a crash-interrupted run awaiting acknowledgement has no
+   * `runStatus` of its own to roll up (it reads as idle), but it is exactly the kind of
+   * thing the favicon exists to surface. */
+  let faviconHref = $derived.by(() => {
+    const aggregate = rollupProjectStatus(knownSessionStatuses);
+    if (aggregate === "error" || snapshot?.run?.requiresAcknowledgement)
+      return "/favicon-attention.svg";
+    return aggregate === "running" ? "/favicon-running.svg" : "/favicon.svg";
+  });
   $effect(() => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
     if (link) link.href = faviconHref;
@@ -726,12 +791,24 @@
           remember: false,
         });
   }
+  /**
+   * Per-workspace request counter so that when several refreshes for the same workspace are
+   * in flight at once (a run-status transition, a navigation, a poll tick can all fire close
+   * together), only the response to the most recently ISSUED request gets applied. Network
+   * responses can complete out of order: without this guard, an earlier request issued while
+   * a task was still running could resolve after a later one that correctly observed it had
+   * gone idle, silently reverting the fresher result. Mirrors `routeSequence` below.
+   */
+  let sessionRefreshSequence: Record<string, number> = {};
   async function refreshSessions(workspaceId = workspace?.id) {
     if (!workspaceId) return;
+    const sequence = (sessionRefreshSequence[workspaceId] ?? 0) + 1;
+    sessionRefreshSequence = { ...sessionRefreshSequence, [workspaceId]: sequence };
     try {
       const current = workspaceFor(workspaceId);
       if (!current) return;
       const sessions = await api.listSessions(workspaceId);
+      if (sessionRefreshSequence[workspaceId] !== sequence) return;
       const loaded = { ...current, sessions };
       workspaceCache = { ...workspaceCache, [workspaceId]: loaded };
       if (workspace?.id === workspaceId) workspace = loaded;
@@ -739,6 +816,30 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
+  let pollingSessionList = false;
+  /**
+   * `activateRoute`'s refresh is a one-shot snapshot of the task being left: if it settles
+   * afterward with nobody connected to its chat, that idle event is lost and the cached row
+   * stays stuck on "running" until some unrelated refresh happens to fire. While the active
+   * workspace's listing still shows a running task that isn't the one currently connected,
+   * poll modestly until none remain — bounded, guarded against overlap, and it stops itself
+   * the moment the listing catches up. A workspace-level event stream would make this
+   * unnecessary; that's out of scope here.
+   */
+  $effect(() => {
+    const activeWorkspace = workspace;
+    const openTaskId = snapshot?.taskId;
+    const hasOtherRunning = (activeWorkspace?.sessions ?? []).some(
+      (session) => session.status === "running" && session.id !== openTaskId,
+    );
+    if (!hasOtherRunning) return;
+    const timer = window.setInterval(() => {
+      if (pollingSessionList) return;
+      pollingSessionList = true;
+      void refreshSessions(activeWorkspace?.id).finally(() => (pollingSessionList = false));
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  });
   async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
     const text = submittedDraft.trim();
     if (!text) return;
@@ -869,6 +970,11 @@
     const sequence = ++routeSequence;
     persistDraft();
     chatConnection.close();
+    // The chat's WebSocket for the task we're leaving just closed, so if its run settles
+    // while we're gone, its idle run_status event never arrives and refreshSessions never
+    // fires for it. Captured now (before `snapshot` gets reassigned below) so the mitigation
+    // refresh below targets the task actually being left.
+    const departingWorkspaceId = snapshot?.workspaceId;
 
     if (!taskId) {
       snapshot = undefined;
@@ -876,6 +982,7 @@
       startMode = "local";
       routeLoading = false;
       chatLoading = false;
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
       return;
     }
 
@@ -908,6 +1015,14 @@
         routeLoading = false;
         chatLoading = false;
       }
+      // Fired last, after this navigation's own cache writes (adoptWorkspace/rememberWorkspace)
+      // have already landed: rememberWorkspace() can write back a workspace snapshot fetched
+      // before this refresh's response arrived (its "already cached, no need to refetch" fast
+      // path in workspaceById()), and firing this refresh any earlier let that later write
+      // silently revert the fresher status this refresh just fetched. Per-chat events alone
+      // can't keep the list live; this is a cheap mitigation, not the proper fix (a
+      // workspace-level event stream), which is out of scope here.
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
     }
   }
   async function workspaceById(workspaceId: string) {
@@ -1017,6 +1132,7 @@
       if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
     } else if (event.type === "run_status") {
+      const wasIdle = snapshot.runStatus === "idle";
       snapshot = {
         ...snapshot,
         runStatus: event.status,
@@ -1024,7 +1140,12 @@
         ...(event.run ? { run: event.run } : {}),
       };
       if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt();
-      if (event.status === "idle") void refreshSessions();
+      // A session only enters the sidebar listing via refreshSessions, which used to fire
+      // only when a run settles. Without also refreshing on the idle -> non-idle transition,
+      // a task created this session had no sidebar presence for its entire first run.
+      // `wasIdle` here already implies `event.status !== "idle"`: this branch of the OR only
+      // runs once the first has ruled that out.
+      if (event.status === "idle" || wasIdle) void refreshSessions();
     } else if (event.type === "queue")
       snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp };
     else if (event.type === "context_usage") snapshot = { ...snapshot, contextUsage: event.usage };
@@ -1600,6 +1721,17 @@
             {@const hiddenTasks = expanded
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
+            {@const projectRollup = expanded
+              ? "idle"
+              : rollupProjectStatus(
+                  matchingTasks.map((task) =>
+                    resolveTaskStatus({
+                      session: task,
+                      liveTaskId: snapshot?.taskId,
+                      liveRunStatus: snapshot?.runStatus,
+                    }),
+                  ),
+                )}
             <div
               class="relative mb-1 rounded-lg"
               role="group"
@@ -1642,6 +1774,13 @@
                     class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ui font-medium text-foreground"
                     >{projectLabel(project)}</strong
                   >
+                  {#if projectRollup !== "idle"}<span
+                      class={`size-1.5 flex-none rounded-full ${projectRollup === "error" ? "bg-danger" : "bg-primary animate-status-pulse"}`}
+                      aria-label={projectRollup === "error"
+                        ? "Task needs attention"
+                        : "Tasks running"}
+                      title={projectRollup === "error" ? "Task needs attention" : "Tasks running"}
+                    ></span>{/if}
                   {#if projectLoadingId === project.id}<span
                       class="flex-none font-mono text-meta leading-none tracking-wider text-faint max-[900px]:text-meta"
                       >•••</span
@@ -1678,6 +1817,11 @@
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
+                      {@const rowStatus = resolveTaskStatus({
+                        session: task,
+                        liveTaskId: snapshot?.taskId,
+                        liveRunStatus: snapshot?.runStatus,
+                      })}
                       <button
                         class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-ui text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
                         onclick={() => {
@@ -1696,11 +1840,16 @@
                             aria-label="Worktree"
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
-                        {#if current && active}<span
+                        {#if rowStatus === "running"}<span
                             class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
+                            title="Working"
                             ><i
                               class="size-1.5 animate-status-pulse rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
+                          >{:else if rowStatus === "error"}<span
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-danger max-[900px]:text-meta"
+                            title="Error"
+                            ><i class="size-1.5 rounded-full bg-current"></i>Error</span
                           >{:else}<time
                             class="flex-none font-mono text-meta leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time

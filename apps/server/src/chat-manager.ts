@@ -6,6 +6,7 @@ import type {
   RunOutcome,
   ServerEvent,
   SessionSummary,
+  TextItem,
   ToolOutputChunk,
   TranscriptItem,
   TranscriptPage,
@@ -75,7 +76,11 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function publicSession(workspaceId: string, info: AdapterSessionInfo) {
     return Effect.gen(function* () {
       const workspace = yield* getWorkspace(workspaceId);
-      const id = yield* metadata.rememberTask(workspaceId, workspace.path, nativeSessionKey(info));
+      const key = nativeSessionKey(info);
+      const id = yield* metadata.rememberTask(workspaceId, workspace.path, key);
+      const liveChatId = owners.get(key);
+      const liveChat = liveChatId ? chats.get(liveChatId) : undefined;
+      const persisted = liveChat ? undefined : (yield* metadata.sessionState(key)).run;
       return {
         id,
         ...(info.name ? { name: info.name } : {}),
@@ -83,6 +88,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         createdAt: info.createdAt,
         modifiedAt: info.modifiedAt,
         messageCount: info.messageCount,
+        status: resolveSessionStatus(liveChat?.runStatus, persisted),
       } satisfies SessionSummary;
     });
   }
@@ -92,9 +98,17 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       const info = yield* pi.inspectWorkspace(canonicalPath);
       const record = { id, path: canonicalPath, info };
       workspaces.set(id, record);
-      const sessions = yield* Effect.forEach(info.sessions, (session) =>
-        publicSession(id, session),
-      );
+      const listedKeys = new Set(info.sessions.map((session) => nativeSessionKey(session)));
+      const listed = yield* Effect.forEach(info.sessions, (session) => publicSession(id, session));
+      // Pi does not persist a session to disk until it holds an assistant reply, so a chat
+      // that just started (or is still on its first turn) has no entry in `info.sessions`
+      // yet — `inspectWorkspace` only ever sees what's on disk. Union in a summary
+      // synthesized from the live ChatRecord for any chat in this workspace that isn't
+      // listed yet, so a brand-new task has sidebar presence immediately instead of only
+      // once the model has replied.
+      const liveOnly = [...chats.values()]
+        .filter((chat) => chat.workspaceId === id && !listedKeys.has(chat.sessionKey))
+        .map(liveOnlySession);
       return {
         id,
         path: canonicalPath,
@@ -103,7 +117,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         protectedResourcesSkipped: info.protectedResourcesSkipped,
         resourceDiagnostics: info.resourceDiagnostics,
         models: info.models,
-        sessions,
+        sessions: [...liveOnly, ...listed],
         commands: info.commands,
       } satisfies Workspace;
     });
@@ -613,6 +627,50 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 }
 
 export type ChatManager = ReturnType<typeof makeChatManager>;
+
+/**
+ * Coarsens run state down to what the sidebar needs. A live chat always wins over persisted
+ * state (it is the more current source of truth); with no live chat, only a persisted failure
+ * or an unacknowledged crash-interrupted run counts as "error" — everything else the server
+ * knows (completed, cancelled, or an in-flight run left behind by a race) reads as idle rather
+ * than inventing a status the server cannot actually stand behind.
+ */
+export function resolveSessionStatus(
+  liveRunStatus: ChatSnapshot["runStatus"] | undefined,
+  persistedRun: RunOutcome | undefined,
+): "running" | "error" | "idle" {
+  if (liveRunStatus === "running" || liveRunStatus === "stopping" || liveRunStatus === "compacting")
+    return "running";
+  if (liveRunStatus === "error") return "error";
+  if (liveRunStatus === "idle") return "idle";
+  if (
+    persistedRun?.status === "failed" ||
+    (persistedRun?.status === "interrupted" && persistedRun.requiresAcknowledgement)
+  )
+    return "error";
+  return "idle";
+}
+
+/**
+ * Builds a SessionSummary for a live chat that Pi hasn't written to disk yet (no assistant
+ * reply landed, so `SessionManager.list()` doesn't know about it), from only what the
+ * in-memory ChatRecord actually knows — no invented timestamps beyond "now", no invented
+ * message content.
+ */
+function liveOnlySession(chat: ChatRecord): SessionSummary {
+  const firstUserItem = chat.items.find((item): item is TextItem => item.type === "user");
+  const now = new Date().toISOString();
+  return {
+    id: chat.taskId,
+    ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
+    firstMessage: (firstUserItem?.text ?? "").slice(0, 500),
+    createdAt: now,
+    modifiedAt: now,
+    messageCount: chat.items.filter((item) => item.type === "user" || item.type === "assistant")
+      .length,
+    status: resolveSessionStatus(chat.runStatus, undefined),
+  } satisfies SessionSummary;
+}
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
   const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } as ServerEvent;

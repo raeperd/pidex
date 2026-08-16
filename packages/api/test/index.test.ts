@@ -10,6 +10,7 @@ import {
   renameRequestSchema,
   safeParse,
   serverEventSchema,
+  sessionSummarySchema,
   wsClientMessageSchema,
 } from "../src/index.js";
 
@@ -134,5 +135,26 @@ describe("Pidex API schemas", () => {
         },
       }),
     ).toMatchObject({ success: true });
+  });
+
+  it("parses a session summary status as an optional coarse tri-state", () => {
+    const summary = {
+      id: "session_123",
+      firstMessage: "Fix the flaky test",
+      createdAt: "2026-08-05T00:00:00.000Z",
+      modifiedAt: "2026-08-05T00:00:00.000Z",
+      messageCount: 1,
+    };
+    for (const status of ["running", "error", "idle"] as const)
+      expect(safeParse(sessionSummarySchema, { ...summary, status })).toMatchObject({
+        success: true,
+        output: { status },
+      });
+    expect(safeParse(sessionSummarySchema, { ...summary, status: "stopping" })).toMatchObject({
+      success: false,
+    });
+    const missingStatus = safeParse(sessionSummarySchema, summary);
+    expect(missingStatus.success).toBe(true);
+    if (missingStatus.success) expect(missingStatus.output.status).toBeUndefined();
   });
 });

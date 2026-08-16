@@ -1,5 +1,14 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { fulfillJson, openTasks, rememberWorkspace, routeInput, rpcRequest } from "./support";
+import {
+  createTask,
+  fulfillJson,
+  installFakeWebSocket,
+  openTasks,
+  rememberWorkspace,
+  routeInput,
+  rpcRequest,
+  workspaceName,
+} from "./support";
 
 test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
@@ -140,6 +149,112 @@ test("groups worktree tasks under their source project", async ({ page, request 
   await openTasks(page);
   await expect(projects.getByRole("group")).toHaveCount(1);
   await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
+});
+
+test("keeps a departed task's sidebar status correct when session-list responses complete out of order", async ({
+  page,
+  request,
+}) => {
+  // Regression test for a race in AppShell's `refreshSessions()`: navigating away from a
+  // running task fires a listing refresh for its workspace, and the bounded polling
+  // mitigation can fire more while a task keeps running. These requests can complete in a
+  // different order than they were issued. Without a per-workspace sequence guard, whichever
+  // response happens to RESOLVE last wins the cache write -- so a slow, early-issued response
+  // that still says "running" can silently revert a faster, later-issued response that
+  // correctly observed the task had gone idle.
+  await installFakeWebSocket(page);
+  const { csrfToken, workspace, task: taskA } = await createTask(request, process.cwd());
+  const taskB = await rpcRequest<Record<string, unknown> & { taskId: string }>(
+    request,
+    "chats/create",
+    { workspaceId: workspace.id },
+    csrfToken,
+  );
+  const now = new Date().toISOString();
+  const sessionsWithTaskAStatus = (status: "running" | "idle") => [
+    {
+      id: String(taskA.taskId),
+      name: "Race task A",
+      firstMessage: "Race task A",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 1,
+      status,
+    },
+    {
+      id: String(taskB.taskId),
+      name: "Race task B",
+      firstMessage: "Race task B",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 1,
+      status: "idle",
+    },
+  ];
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    if (payload.json.id !== workspace.id) {
+      await route.fulfill({ response });
+      return;
+    }
+    await route.fulfill({
+      response,
+      json: { ...payload, json: { ...payload.json, sessions: sessionsWithTaskAStatus("idle") } },
+    });
+  });
+
+  let sessionsCalls = 0;
+  await page.route("**/api/rpc/workspaces/sessions", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (input.workspaceId !== workspace.id) {
+      await route.continue();
+      return;
+    }
+    sessionsCalls += 1;
+    if (sessionsCalls === 1) {
+      // Issued first (task A still reads "running" at this point) but slow to resolve --
+      // real network responses can complete out of issue order.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await fulfillJson(route, { sessions: sessionsWithTaskAStatus("running") });
+      return;
+    }
+    // Every later refresh is issued after task A actually went idle, and resolves promptly --
+    // and, without the sequence guard, would land and then be overwritten by call #1 above.
+    await fulfillJson(route, { sessions: sessionsWithTaskAStatus("idle") });
+  });
+
+  // Navigate via "/" and UI clicks (like every sibling test in this file), not a direct
+  // goto("/tasks/...") -- the latter races the app's own onMount project-restore against
+  // activateRoute's handling of the direct task route and can land on the wrong project.
+  await page.goto("/");
+  await openTasks(page);
+  const taskARow = page.getByRole("button", { name: /Race task A/ });
+  const taskBRow = page.getByRole("button", { name: /Race task B/ });
+  // The project may already be auto-restored and expanded (it's the workspace this whole
+  // e2e run operates in, so it's very likely the most-recently-remembered one) -- only expand
+  // it if it isn't already, since toggling an already-expanded project collapses it instead.
+  if (!(await taskBRow.isVisible()))
+    await page
+      .getByRole("button", { name: `Expand ${workspaceName}` })
+      .evaluate((button: HTMLButtonElement) => button.click());
+  await expect(taskBRow).toBeVisible();
+  await taskARow.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(taskA.taskId)}`);
+
+  // Navigate away from A (issues the slow call #1 for A's workspace), then bounce back and
+  // away again fast enough that calls #2 and #3 are both issued -- and resolved -- before
+  // call #1's artificial delay elapses.
+  await taskBRow.evaluate((button: HTMLButtonElement) => button.click());
+  await taskARow.evaluate((button: HTMLButtonElement) => button.click());
+  await taskBRow.evaluate((button: HTMLButtonElement) => button.click());
+
+  await expect.poll(() => sessionsCalls).toBeGreaterThanOrEqual(2);
+  // Give call #1's 400ms delay time to resolve after the faster calls already landed.
+  await page.waitForTimeout(500);
+  await expect(taskARow.getByText("Working")).toBeHidden();
+  await expect(taskARow.locator("time")).toBeVisible();
 });
 
 test("manually reorders projects and preserves their order after reload", async ({
