@@ -28,62 +28,7 @@ export class MetadataError extends Schema.TaggedErrorClass<MetadataError>()("Met
   cause: Schema.Defect(),
 }) {}
 
-export interface MetadataService {
-  readonly rememberWorkspace: (
-    canonicalPath: string,
-    sourceWorkspaceId?: string,
-  ) => Effect.Effect<string, MetadataError>;
-  readonly workspaceId: (canonicalPath: string) => Effect.Effect<string | undefined, MetadataError>;
-  readonly recent: () => Effect.Effect<
-    Array<{ id: string; path: string; sourceWorkspaceId?: string }>,
-    MetadataError
-  >;
-  readonly workspaceProjectId: (workspaceId: string) => Effect.Effect<string, MetadataError>;
-  readonly forgetWorkspace: (workspaceId: string) => Effect.Effect<void, MetadataError>;
-  readonly reorderWorkspaces: (
-    workspaceIds: ReadonlyArray<string>,
-  ) => Effect.Effect<void, MetadataError>;
-  readonly rememberTask: (
-    workspaceId: string,
-    workspacePath: string,
-    sessionKey: string,
-  ) => Effect.Effect<string, MetadataError>;
-  readonly task: (
-    id: string,
-  ) => Effect.Effect<
-    { id: string; workspaceId: string; workspacePath: string; sessionKey: string } | undefined,
-    MetadataError
-  >;
-  readonly sessionState: (
-    sessionKey: string,
-  ) => Effect.Effect<{ revision: number; run?: RunOutcome }, MetadataError>;
-  readonly acceptPrompt: (
-    input: ActionInput,
-  ) => Effect.Effect<ActionOutcome, MetadataError | ActionProtocolError>;
-  readonly acceptStop: (
-    input: ActionInput & { runId: string },
-  ) => Effect.Effect<ActionOutcome, MetadataError | ActionProtocolError>;
-  readonly acceptRunMutation: (
-    input: ActionInput & { runId: string; kind: "steer" | "follow-up" },
-  ) => Effect.Effect<ActionOutcome, MetadataError | ActionProtocolError>;
-  readonly acceptSessionMutation: (
-    input: ActionInput & {
-      kind: "clear-queue" | "compact" | "config" | "dialog" | "rename";
-    },
-  ) => Effect.Effect<ActionOutcome, MetadataError | ActionProtocolError>;
-  readonly acknowledgeInterrupted: (
-    input: ActionInput,
-  ) => Effect.Effect<ActionOutcome, MetadataError | ActionProtocolError>;
-  readonly markPromptStatus: (
-    sessionKey: string,
-    runId: string,
-    status: ActionStatus,
-  ) => Effect.Effect<void, MetadataError>;
-  readonly markActionStatus: (
-    actionId: string,
-    status: ActionStatus,
-  ) => Effect.Effect<void, MetadataError>;
-}
+export type MetadataService = ReturnType<typeof makeMetadataService>;
 
 export const Metadata = Context.Service<MetadataService>("@pidex/server/Metadata");
 
@@ -530,11 +475,7 @@ export function makeMetadataStore(stateDir?: string) {
 
   function addWorkspaceColumn(name: string, ddl: string) {
     if (hasWorkspaceColumn(name)) return;
-    sqlite.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE workspaces ADD COLUMN ${ddl};
-      COMMIT;
-    `);
+    sqlite.exec(`ALTER TABLE workspaces ADD COLUMN ${ddl};`);
   }
 
   function pruneWorkspaceHistory() {
@@ -615,7 +556,7 @@ function assertCurrentRevision(currentRevision: number, expectedRevision: number
     });
 }
 
-function makeMetadataService(store: MetadataStore): MetadataService {
+function makeMetadataService(store: MetadataStore) {
   const meta = <A extends unknown[], R>(op: string, f: (...a: A) => R) =>
     Effect.fn(`Metadata.${op}`)((...a: A) => attemptMetadata(op, () => f(...a)));
   const act = <A extends unknown[], R>(op: string, f: (...a: A) => R) =>

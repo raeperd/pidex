@@ -24,26 +24,21 @@ import {
 
 export async function createPidexServer() {
   const application = await createPidexApplication();
-  try {
-    const server = createServer((req, res) => void application.handleRequest(req, res));
-    server.on("upgrade", (req, socket, head) => {
-      if (!application.handleUpgrade(req, socket, head)) {
-        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-      }
-    });
-    return {
-      server,
-      close: async () => {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        await application.close();
-      },
-      manager: application.manager,
-    };
-  } catch (error) {
-    await application.close();
-    throw error;
-  }
+  const server = createServer((req, res) => void application.handleRequest(req, res));
+  server.on("upgrade", (req, socket, head) => {
+    if (!application.handleUpgrade(req, socket, head)) {
+      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+    }
+  });
+  return {
+    server,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await application.close();
+    },
+    manager: application.manager,
+  };
 }
 
 export async function createPidexApplication() {
@@ -51,9 +46,7 @@ export async function createPidexApplication() {
   try {
     const effectContext = await runtime.context();
     const manager = Context.get(effectContext, Chats);
-    const csrf = await runtime.runPromise(
-      attemptOperation("security.csrf", () => randomBytes(32).toString("base64url")),
-    );
+    const csrf = randomBytes(32).toString("base64url");
     const roots = await runtime.runPromise(allowedRoots());
     const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
     const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
@@ -93,24 +86,14 @@ export async function createPidexApplication() {
       try {
         await runtime.runPromise(validateRequest(req));
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
-        const { matched } = await runtime.runPromise(
-          attemptOperation("orpc.handle", () =>
-            apiHandler.handle(req, res, {
-              prefix: "/api/rpc",
-              context: { req, "effect/context": effectContext },
-            }),
-          ),
-        );
+        const { matched } = await apiHandler.handle(req, res, {
+          prefix: "/api/rpc",
+          context: { req, "effect/context": effectContext },
+        });
         if (matched) return;
         if (route.startsWith("/api/"))
-          await runtime.runPromise(
-            Effect.fail(
-              HttpError.make({ status: 404, code: "not_found", message: "API route not found" }),
-            ),
-          );
-        await runtime.runPromise(
-          attemptOperation("web.serve", () => serveWebApp(res, route, webRoot)),
-        );
+          throw HttpError.make({ status: 404, code: "not_found", message: "API route not found" });
+        serveWebApp(res, route, webRoot);
       } catch (error) {
         if (res.headersSent) return res.end();
         const protocolError = error instanceof HttpError ? error : undefined;

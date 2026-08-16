@@ -198,20 +198,20 @@ function runGit(cwd: string, args: string[], code: string, message: string) {
 }
 
 function rollbackWorktree(repositoryRoot: string, worktreeRoot: string, branch: string) {
-  return Effect.tryPromise(() =>
-    execFileAsync("git", ["worktree", "remove", "--force", worktreeRoot], {
-      cwd: repositoryRoot,
-      timeout: 120_000,
-    }),
+  return runGit(
+    repositoryRoot,
+    ["worktree", "remove", "--force", worktreeRoot],
+    "worktree_rollback_failed",
+    "Git could not roll back the worktree",
   ).pipe(
     Effect.andThen(
-      Effect.tryPromise(() =>
-        execFileAsync("git", ["branch", "-D", branch], {
-          cwd: repositoryRoot,
-          timeout: 120_000,
-        }),
-      ).pipe(Effect.catch(() => Effect.void)),
+      runGit(
+        repositoryRoot,
+        ["branch", "-D", branch],
+        "worktree_rollback_failed",
+        "Git could not roll back the worktree",
+      ).pipe(Effect.ignore),
     ),
-    Effect.catch(() => Effect.void),
+    Effect.ignore,
   );
 }

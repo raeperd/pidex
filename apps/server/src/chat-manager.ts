@@ -33,11 +33,7 @@ interface WorkspaceRecord {
   path: string;
   info: AdapterWorkspaceInfo;
 }
-type NativeSessionReference =
-  | Pick<EffectAdapterSession["state"], "nativeId" | "nativePath">
-  | Pick<AdapterSessionInfo, "nativeId" | "nativePath">;
-
-const nativeSessionKey = (session: NativeSessionReference) =>
+const nativeSessionKey = (session: { nativeId: string; nativePath?: string | undefined }) =>
   session.nativePath ?? session.nativeId;
 
 interface ChatRecord {
