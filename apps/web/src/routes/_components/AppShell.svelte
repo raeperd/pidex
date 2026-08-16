@@ -1802,17 +1802,15 @@
                     class="pointer-events-none absolute inset-y-0 left-3 z-1 border-l border-border-strong/60"
                     aria-hidden="true"
                   ></span>
-                  {#if projectLoadingId === project.id && !loaded}
+                  {#if (projectLoadingId === project.id && !loaded) || (loaded && shownTasks.length === 0)}
                     <p
                       class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
-                      Loading tasks…
-                    </p>
-                  {:else if loaded && shownTasks.length === 0}
-                    <p
-                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
-                    >
-                      {search ? "No matching tasks." : "No tasks yet."}
+                      {projectLoadingId === project.id && !loaded
+                        ? "Loading tasks…"
+                        : search
+                          ? "No matching tasks."
+                          : "No tasks yet."}
                     </p>
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
