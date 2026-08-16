@@ -475,11 +475,7 @@ export function makeMetadataStore(stateDir?: string) {
 
   function addWorkspaceColumn(name: string, ddl: string) {
     if (hasWorkspaceColumn(name)) return;
-    sqlite.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE workspaces ADD COLUMN ${ddl};
-      COMMIT;
-    `);
+    sqlite.exec(`ALTER TABLE workspaces ADD COLUMN ${ddl};`);
   }
 
   function pruneWorkspaceHistory() {

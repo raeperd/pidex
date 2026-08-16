@@ -157,31 +157,6 @@ function messageItems(input: TextItem): Array<TextItem | SkillItem> {
   return skill.userMessage ? [item, { ...input, text: skill.userMessage }] : [item];
 }
 
-function resolvedSessionDir(
-  cwd: string,
-  agentDir: string,
-  settings: SettingsManager,
-  override: string | undefined,
-): string | undefined {
-  if (override)
-    return path.resolve(
-      cwd,
-      override.replace(/^~(?=$|\/)/, agentDir.replace(/\/\.pi\/agent$/, "")),
-    );
-  return settings.getSessionDir();
-}
-
-function trustState(
-  cwd: string,
-  agentDir: string,
-  settings: SettingsManager,
-): { trusted: boolean | null; skipped: boolean } {
-  if (!hasTrustRequiringProjectResources(cwd)) return { trusted: true, skipped: false };
-  const saved = new ProjectTrustStore(agentDir).get(cwd);
-  const trusted = saved ?? (settings.getDefaultProjectTrust() === "always" ? true : null);
-  return { trusted, skipped: trusted !== true };
-}
-
 type ResourceDiagnostic = AdapterWorkspaceInfo["resourceDiagnostics"][number];
 const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic => ({
   level: type === "error" ? "error" : "warning",
@@ -467,7 +442,14 @@ export function makePiSdk(options: PiSdkOptions = {}) {
 
   async function services(cwd: string) {
     const settings = SettingsManager.create(cwd, agentDir);
-    const trust = trustState(cwd, agentDir, settings);
+    let trust: { trusted: boolean | null; skipped: boolean };
+    if (!hasTrustRequiringProjectResources(cwd)) {
+      trust = { trusted: true, skipped: false };
+    } else {
+      const saved = new ProjectTrustStore(agentDir).get(cwd);
+      const trusted = saved ?? (settings.getDefaultProjectTrust() === "always" ? true : null);
+      trust = { trusted, skipped: trusted !== true };
+    }
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
     await loader.reload({ resolveProjectTrust: async () => trust.trusted === true });
     const modelRuntime = await ModelRuntime.create({
@@ -475,17 +457,18 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       modelsPath: path.join(agentDir, "models.json"),
     });
     await modelRuntime.refresh({ allowNetwork: false });
+    const sessionDirOverride = options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR;
     return {
       settings,
       trust,
       loader,
       modelRuntime,
-      sessionDir: resolvedSessionDir(
-        cwd,
-        agentDir,
-        settings,
-        options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR,
-      ),
+      sessionDir: sessionDirOverride
+        ? path.resolve(
+            cwd,
+            sessionDirOverride.replace(/^~(?=$|\/)/, agentDir.replace(/\/\.pi\/agent$/, "")),
+          )
+        : settings.getSessionDir(),
     };
   }
 

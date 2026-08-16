@@ -6,7 +6,7 @@ import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex
 import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
-import { ActionProtocolError, attemptOperation, HttpError } from "./errors.js";
+import { ActionProtocolError, HttpError } from "./errors.js";
 import { requestDigest, type MetadataService } from "./metadata.js";
 import {
   createProjectWorktree,
@@ -76,7 +76,13 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
               }),
             );
         }
-        const id = yield* workspaceId(metadata, canonical, input.remember);
+        let id: string;
+        if (input.remember === false) {
+          const existing = yield* metadata.workspaceId(canonical);
+          id = existing ?? randomBytes(16).toString("hex");
+        } else {
+          id = yield* metadata.rememberWorkspace(canonical);
+        }
         return yield* manager.openWorkspace(id, canonical);
       }),
       createWorktree: workspaces.createWorktree.effect(function* (_, input) {
@@ -218,9 +224,7 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
       }),
       transcript: chats.transcript.effect(function* (_, input) {
         const chat = yield* manager.chat(input.chatId);
-        return yield* attemptOperation("chats.transcript", () =>
-          manager.transcriptPage(chat, input.before, input.limit),
-        );
+        return manager.transcriptPage(chat, input.before, input.limit);
       }),
       clearQueue: chats.clearQueue.effect(function* (_, input) {
         const chat = yield* manager.chat(input.chatId);
@@ -321,19 +325,6 @@ function actionInput(
     sessionKey: chat.sessionKey,
     requestDigest: requestDigest(digest),
   };
-}
-
-function workspaceId(metadata: MetadataService, canonical: string, remember: boolean | undefined) {
-  return Effect.gen(function* () {
-    if (remember === false) {
-      const existing = yield* metadata.workspaceId(canonical);
-      if (existing) return existing;
-      return yield* attemptOperation("workspace.ephemeralId", () =>
-        randomBytes(16).toString("hex"),
-      );
-    }
-    return yield* metadata.rememberWorkspace(canonical);
-  });
 }
 
 function recentWorkspaceRecords(metadata: MetadataService, managedWorktreeRoot: string) {
