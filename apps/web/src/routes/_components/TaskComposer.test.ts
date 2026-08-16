@@ -2,6 +2,7 @@ import type { ComponentProps } from "svelte";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import TaskComposer, {
+  composerAffordances,
   composerCommands,
   formatRunElapsed,
   nextSlashCommand,
@@ -72,6 +73,158 @@ describe("formatRunElapsed", () => {
     expect(formatRunElapsed(-500)).toBe("0s");
   });
 });
+
+describe("composerAffordances", () => {
+  it("labels the healthy idle composer", () => {
+    expect(composerAffordances(affordanceState())).toEqual({
+      placeholder: "Ask Pi to work on this project…",
+      sendLabel: "Send",
+    });
+  });
+
+  it("labels the healthy active composer for the stop button", () => {
+    expect(composerAffordances(affordanceState({ active: true }))).toEqual({
+      placeholder: "Draft your next message…",
+      sendLabel: "Stop",
+    });
+  });
+
+  it("labels a disconnected environment", () => {
+    expect(composerAffordances(affordanceState({ connection: "disconnected" }))).toEqual({
+      placeholder: "Draft locally while the host reconnects…",
+      sendLabel: "Environment disconnected",
+    });
+  });
+
+  it("labels a reconnecting environment the same as disconnected", () => {
+    expect(composerAffordances(affordanceState({ connection: "reconnecting" }))).toEqual({
+      placeholder: "Draft locally while the host reconnects…",
+      sendLabel: "Environment disconnected",
+    });
+  });
+
+  it("labels a run that requires acknowledgement", () => {
+    expect(composerAffordances(affordanceState({ requiresAcknowledgement: true }))).toEqual({
+      placeholder: "Acknowledge the interrupted run above to continue",
+      sendLabel: "Acknowledge the interrupted run above to continue",
+    });
+  });
+
+  it("labels an environment with no models", () => {
+    expect(composerAffordances(affordanceState({ hasModels: false }))).toEqual({
+      placeholder: "Run pi and /login to enable models",
+      sendLabel: "Run pi and /login to enable models",
+    });
+  });
+
+  it("labels a task being created", () => {
+    expect(composerAffordances(affordanceState({ creatingTask: true }))).toEqual({
+      placeholder: "Preparing worktree…",
+      sendLabel: "Preparing worktree",
+    });
+  });
+
+  it("labels a pending configuration change", () => {
+    expect(composerAffordances(affordanceState({ configurationPending: true }))).toEqual({
+      placeholder: "Saving configuration…",
+      sendLabel: "Saving configuration",
+    });
+  });
+
+  it("labels a pending compaction", () => {
+    expect(composerAffordances(affordanceState({ compactPending: true }))).toEqual({
+      placeholder: "Compacting session context…",
+      sendLabel: "Compacting context",
+    });
+  });
+
+  it("prioritizes disconnected over requiring acknowledgement", () => {
+    expect(
+      composerAffordances(
+        affordanceState({ connection: "disconnected", requiresAcknowledgement: true }),
+      ),
+    ).toEqual({
+      placeholder: "Draft locally while the host reconnects…",
+      sendLabel: "Environment disconnected",
+    });
+  });
+
+  it("prioritizes requiring acknowledgement over no models", () => {
+    expect(
+      composerAffordances(affordanceState({ requiresAcknowledgement: true, hasModels: false })),
+    ).toEqual({
+      placeholder: "Acknowledge the interrupted run above to continue",
+      sendLabel: "Acknowledge the interrupted run above to continue",
+    });
+  });
+
+  it("prioritizes no models over creating a task", () => {
+    expect(composerAffordances(affordanceState({ hasModels: false, creatingTask: true }))).toEqual({
+      placeholder: "Run pi and /login to enable models",
+      sendLabel: "Run pi and /login to enable models",
+    });
+  });
+
+  it("prioritizes creating a task over a pending configuration change", () => {
+    expect(
+      composerAffordances(affordanceState({ creatingTask: true, configurationPending: true })),
+    ).toEqual({
+      placeholder: "Preparing worktree…",
+      sendLabel: "Preparing worktree",
+    });
+  });
+
+  it("prioritizes a pending configuration change over a pending compaction", () => {
+    expect(
+      composerAffordances(affordanceState({ configurationPending: true, compactPending: true })),
+    ).toEqual({
+      placeholder: "Saving configuration…",
+      sendLabel: "Saving configuration",
+    });
+  });
+
+  it("still explains a pending compaction via the placeholder while a run is active", () => {
+    expect(composerAffordances(affordanceState({ compactPending: true, active: true }))).toEqual({
+      placeholder: "Compacting session context…",
+      sendLabel: "Stop",
+    });
+  });
+
+  it("keeps the stop button labeled Stop instead of borrowing a disabled-reason message", () => {
+    // The stop button is only ever disabled by a lost connection (see its
+    // `disabled={connection !== "connected"}` binding in the markup), so none of the send-side
+    // disabled reasons -- even one as prominent as requiresAcknowledgement -- should relabel it;
+    // an enabled, clickable control keeps its plain action name.
+    expect(
+      composerAffordances(affordanceState({ requiresAcknowledgement: true, active: true })),
+    ).toEqual({
+      placeholder: "Acknowledge the interrupted run above to continue",
+      sendLabel: "Stop",
+    });
+  });
+
+  it("reflects a non-default reason in the rendered send button", () => {
+    const body = renderComposer("", false, true, { connection: "disconnected" });
+
+    expect(body).toContain('aria-label="Environment disconnected"');
+    expect(body).toContain('title="Environment disconnected"');
+  });
+});
+
+function affordanceState(
+  overrides: Partial<Parameters<typeof composerAffordances>[0]> = {},
+): Parameters<typeof composerAffordances>[0] {
+  return {
+    active: false,
+    compactPending: false,
+    configurationPending: false,
+    connection: "connected",
+    creatingTask: false,
+    hasModels: true,
+    requiresAcknowledgement: false,
+    ...overrides,
+  };
+}
 
 describe("composerCommands", () => {
   it("combines native commands with commands discovered from Pi", () => {
@@ -246,6 +399,7 @@ function composerProps(
   draft: string,
   active: boolean,
   startModeEditable = true,
+  overrides: Partial<ComponentProps<typeof TaskComposer>> = {},
 ): ComponentProps<typeof TaskComposer> {
   return {
     active,
@@ -287,9 +441,16 @@ function composerProps(
     steeringCount: 0,
     stop: async () => {},
     taskId: "task-1",
+    ...overrides,
   };
 }
 
-function renderComposer(draft: string, active: boolean, startModeEditable = true) {
-  return render(TaskComposer, { props: composerProps(draft, active, startModeEditable) }).body;
+function renderComposer(
+  draft: string,
+  active: boolean,
+  startModeEditable = true,
+  overrides: Partial<ComponentProps<typeof TaskComposer>> = {},
+) {
+  return render(TaskComposer, { props: composerProps(draft, active, startModeEditable, overrides) })
+    .body;
 }

@@ -416,6 +416,11 @@ test("preserves edits made while slash compaction is pending", async ({
     status: "compacting",
     revision: Number(snapshot.current?.revision),
   });
+  // The compact request is still in flight (blocked on `compactionPending`) while the run is
+  // active, so the stop button is rendered -- but it is only ever disabled by a lost connection,
+  // so its label stays the plain action name "Stop" rather than borrowing the pending-compaction
+  // reason (that reason still drives the placeholder) -- see TaskComposer.svelte's
+  // `composerAffordances`.
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
@@ -457,7 +462,11 @@ test("preserves edits made while slash compaction is pending", async ({
       },
     });
     await prompt.fill("/compact");
-    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    // requiresAcknowledgement now outranks the default "Send" label in the disabled-reason
+    // cascade -- see TaskComposer.svelte's `composerAffordances`.
+    await expect(
+      page.getByRole("button", { name: "Acknowledge the interrupted run above to continue" }),
+    ).toBeDisabled();
     await prompt.press("Enter");
     await settleFrames(page);
     expect(compactRequests).toBe(2);
@@ -576,7 +585,10 @@ test("isolates pending task operations while navigating between tasks", async ({
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(firstTask.taskId)}`);
-  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  // The first task's compact request is still in flight (blocked on `compactionPending`), so the
+  // disabled-reason cascade labels the button with the pending-compaction reason instead of
+  // "Send" -- see TaskComposer.svelte's `composerAffordances`.
+  await expect(page.getByRole("button", { name: "Compacting context" })).toBeDisabled();
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await expect(prompt).toHaveValue("Message for the second task");
@@ -798,7 +810,10 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
   await expect(thinking).toBeDisabled();
   await prompt.fill("Draft while configuration is pending");
-  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  // The configure request is still in flight (blocked on `configurationPending`), so the
+  // disabled-reason cascade labels the button with the pending-configuration reason instead of
+  // "Send" -- see TaskComposer.svelte's `composerAffordances`.
+  await expect(page.getByRole("button", { name: "Saving configuration" })).toBeDisabled();
   if (testInfo.project.name !== "mobile") await prompt.press("Enter");
   expect(mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
   releaseConfiguration();

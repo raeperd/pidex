@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import type { ChatSnapshot, Workspace } from "@pidex/api";
+  import type { ConnectionState } from "./AppShellConnection";
 
   export const composerSurfaceClass =
     "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
@@ -108,6 +109,88 @@
     return instructions ? { instructions } : {};
   }
 
+  /**
+   * Cascades the composer's disabled-state reason into the textarea placeholder and the
+   * send/stop button's aria-label + title.
+   *
+   * The two outputs deliberately use different priority orders, because they label different
+   * things. `placeholder` is plain informational text about the whole composer, so it always
+   * surfaces the highest-priority reason, including while a run is `active`. `sendLabel` names
+   * the *currently rendered control* -- the send button while idle, the stop button while
+   * `active` -- so it must reflect what actually disables THAT control: the send button is
+   * blocked by any of the reasons below, but the stop button is only ever blocked by a lost
+   * connection (see its `disabled={connection !== "connected"}` binding). Labelling an enabled,
+   * clickable stop button with a disabled-reason message like "Compacting context" would be
+   * misleading, so once a run is `active` (and connected), its label is always the plain action
+   * name "Stop", regardless of any other reason still being true underneath it.
+   *
+   * `reason` below is checked in this order (first match wins), independent of `active`:
+   *
+   * 1. requiresAcknowledgement — blocks every submission path and needs a user action, so
+   *    it outranks the passive setup states below it.
+   * 2. no models — sending can never work regardless of any transient pending state.
+   * 3. creatingTask — the task's worktree does not exist yet; nothing else can be true
+   *    until it is.
+   * 4. configurationPending — a model/thinking-level change is being saved; a transient
+   *    wait that can only happen once the task exists.
+   * 5. compactPending — a context compaction is in flight.
+   *
+   * `connection` is checked before all of the above (a connection failure invalidates
+   * everything downstream: you cannot acknowledge, configure, or send while disconnected, and
+   * it is the one reason that also disables the stop button), and `active`/default idle apply
+   * once nothing above blocks (an empty draft intentionally gets no special-cased message: a
+   * disabled-but-labeled-"Send" button for an empty draft is expected UX).
+   */
+  export function composerAffordances(state: {
+    active: boolean;
+    compactPending: boolean;
+    configurationPending: boolean;
+    connection: ConnectionState;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } {
+    if (state.connection !== "connected") {
+      return {
+        placeholder: "Draft locally while the host reconnects…",
+        sendLabel: "Environment disconnected",
+      };
+    }
+    const reason = composerBlockedReason(state);
+    if (state.active) {
+      return { placeholder: reason?.placeholder ?? "Draft your next message…", sendLabel: "Stop" };
+    }
+    if (reason) return reason;
+    return { placeholder: "Ask Pi to work on this project…", sendLabel: "Send" };
+  }
+
+  function composerBlockedReason(state: {
+    compactPending: boolean;
+    configurationPending: boolean;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } | undefined {
+    if (state.requiresAcknowledgement) {
+      const reason = "Acknowledge the interrupted run above to continue";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (!state.hasModels) {
+      const reason = "Run pi and /login to enable models";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (state.creatingTask) {
+      return { placeholder: "Preparing worktree…", sendLabel: "Preparing worktree" };
+    }
+    if (state.configurationPending) {
+      return { placeholder: "Saving configuration…", sendLabel: "Saving configuration" };
+    }
+    if (state.compactPending) {
+      return { placeholder: "Compacting session context…", sendLabel: "Compacting context" };
+    }
+    return undefined;
+  }
+
   export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
     switch (status) {
       case "running":
@@ -159,7 +242,6 @@
   import type { ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
-  import type { ConnectionState } from "./AppShellConnection";
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
   import ComposerModelControls from "./ComposerModelControls.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
@@ -233,6 +315,17 @@
       creatingTask ||
       configurationPending ||
       compactPending,
+  );
+  let affordances = $derived(
+    composerAffordances({
+      active,
+      compactPending,
+      configurationPending,
+      connection,
+      creatingTask,
+      hasModels: models.length > 0,
+      requiresAcknowledgement,
+    }),
   );
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
@@ -490,11 +583,7 @@
       oninput={draftInput}
       onkeydown={keydown}
       rows="2"
-      placeholder={connection !== "connected"
-        ? "Draft locally while the host reconnects…"
-        : active
-          ? "Draft your next message…"
-          : "Ask Pi to work on this project…"}
+      placeholder={affordances.placeholder}
       aria-autocomplete="list"
       aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
       aria-activedescendant={selectedSuggestion
@@ -530,14 +619,16 @@
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
             onclick={stop}
             disabled={connection !== "connected"}
-            aria-label="Stop"><Icon name="stop" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="stop" /></button
           >
         {:else}
           <button
             class={composerSendButtonClass}
             onclick={submitDraft}
             disabled={idleSubmissionDisabled}
-            aria-label="Send"><Icon name="send" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="send" /></button
           >
         {/if}
       </div>
