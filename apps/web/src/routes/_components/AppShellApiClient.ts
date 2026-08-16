@@ -83,7 +83,7 @@ export function makePidexApiClient() {
     chatId: string,
     text: string,
     expectedRevision: number,
-    actionId = createActionId(),
+    actionId: string,
   ): Promise<ActionOutcome> {
     return client.chats.sendMessage({
       chatId,
@@ -95,17 +95,10 @@ export function makePidexApiClient() {
     });
   }
 
-  function abort(
-    chatId: string,
-    runId: string,
-    expectedRevision: number,
-    actionId = createActionId(),
-  ): Promise<ActionOutcome> {
+  function abort(chatId: string, runId: string, expectedRevision: number): Promise<ActionOutcome> {
     return client.chats.abort({
       chatId,
-      clientId,
-      actionId,
-      expectedRevision,
+      ...actionFields(expectedRevision),
       runId,
     });
   }
@@ -113,13 +106,10 @@ export function makePidexApiClient() {
   function acknowledgeInterrupted(
     chatId: string,
     expectedRevision: number,
-    actionId = createActionId(),
   ): Promise<ActionOutcome> {
     return client.chats.acknowledgeInterrupted({
       chatId,
-      clientId,
-      actionId,
-      expectedRevision,
+      ...actionFields(expectedRevision),
     });
   }
 

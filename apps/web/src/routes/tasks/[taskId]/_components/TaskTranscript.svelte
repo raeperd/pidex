@@ -50,19 +50,23 @@
     return `${phrases.slice(0, -1).join(", ")}, and ${phrases.at(-1)}`;
   }
 
+  type ScrollPosition = { scrollTop: number; scrollHeight: number; clientHeight: number };
+
+  function isNearBottom(position: ScrollPosition): boolean {
+    return position.scrollHeight - position.scrollTop - position.clientHeight < 96;
+  }
+
   export function resolveFollowing(
     following: boolean,
     event: { kind: "wheel" | "touchmove" | "scroll"; deltaY?: number },
-    position: { scrollTop: number; scrollHeight: number; clientHeight: number },
+    position: ScrollPosition,
   ): boolean {
-    const nearBottom = position.scrollHeight - position.scrollTop - position.clientHeight < 96;
     // A wheel event fires before the browser applies its scroll, so `position` can still read
     // "at the bottom" for an upward step that is about to move away from it: decide upward wheel
     // gestures by direction alone, not by this pre-scroll position.
     if (event.kind === "wheel" && (event.deltaY ?? 0) < 0) return false;
-    if (event.kind === "scroll") return following || nearBottom;
-    if (nearBottom) return true;
-    return false;
+    if (event.kind === "scroll") return following || isNearBottom(position);
+    return isNearBottom(position);
   }
 </script>
 
@@ -138,44 +142,17 @@
     following = true;
   }
 
-  function onScroll() {
+  function onScroll(event: Event) {
     if (!transcript) return;
-    nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
-    following = resolveFollowing(
-      following,
-      { kind: "scroll" },
-      {
-        scrollTop: transcript.scrollTop,
-        scrollHeight: transcript.scrollHeight,
-        clientHeight: transcript.clientHeight,
-      },
-    );
-  }
-
-  function onWheel(event: WheelEvent) {
-    if (!transcript) return;
-    following = resolveFollowing(
-      following,
-      { kind: "wheel", deltaY: event.deltaY },
-      {
-        scrollTop: transcript.scrollTop,
-        scrollHeight: transcript.scrollHeight,
-        clientHeight: transcript.clientHeight,
-      },
-    );
-  }
-
-  function onTouchMove() {
-    if (!transcript) return;
-    following = resolveFollowing(
-      following,
-      { kind: "touchmove" },
-      {
-        scrollTop: transcript.scrollTop,
-        scrollHeight: transcript.scrollHeight,
-        clientHeight: transcript.clientHeight,
-      },
-    );
+    const kind = event.type as "scroll" | "wheel" | "touchmove";
+    const deltaY = "deltaY" in event ? (event as WheelEvent).deltaY : undefined;
+    const position = {
+      scrollTop: transcript.scrollTop,
+      scrollHeight: transcript.scrollHeight,
+      clientHeight: transcript.clientHeight,
+    };
+    if (kind === "scroll") nearBottom = isNearBottom(position);
+    following = resolveFollowing(following, { kind, deltaY }, position);
   }
 </script>
 
@@ -219,7 +196,7 @@
     aria-label={`Skill loaded: ${item.name}`}
   >
     <summary
-      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary"
     >
       <span class="font-bold text-primary-text">[skill]</span>
       <strong class="font-semibold text-foreground">{item.name}</strong>
@@ -243,7 +220,7 @@
     {#if previous.length > 0}
       <details class="group/tool-history">
         <summary
-          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
+          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary"
         >
           <span class="transition-transform duration-150 group-open/tool-history:rotate-90"
             ><Icon name="chevron" size={12} /></span
@@ -267,8 +244,8 @@
   class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
   bind:this={transcript}
   onscroll={onScroll}
-  onwheel={onWheel}
-  ontouchmove={onTouchMove}
+  onwheel={onScroll}
+  ontouchmove={onScroll}
   role="log"
   aria-live="polite"
   aria-relevant="additions text"

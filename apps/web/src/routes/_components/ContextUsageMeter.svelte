@@ -166,7 +166,7 @@
       />
       <circle
         class={[
-          "context-meter__progress fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          "context-meter__progress fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out]",
           overloaded ? "context-meter__progress--danger stroke-danger" : "stroke-current",
         ]}
         cx="12"
@@ -209,7 +209,7 @@
     >
       <span
         class={[
-          "context-meter__bar-fill block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          "context-meter__bar-fill block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out]",
           overloaded ? "context-meter__bar-fill--danger bg-danger" : "bg-primary",
         ]}
         style:width={`${normalizedPercent}%`}

@@ -12,6 +12,16 @@
     "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0";
   export const composerSendButtonClass =
     "inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none";
+
+  export function autoGrowComposerTextarea(element: HTMLTextAreaElement): void {
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 210)}px`;
+  }
+
+  export function isDesktopEnterSubmit(event: KeyboardEvent): boolean {
+    return event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches;
+  }
+
   export type ComposerCommand = Workspace["commands"][number];
 
   export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
@@ -367,8 +377,7 @@
 
   export function resize() {
     if (!promptInput) return;
-    promptInput.style.height = "auto";
-    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
+    autoGrowComposerTextarea(promptInput);
   }
 
   const attachPromptInput: Attachment<HTMLTextAreaElement> = (element) => {
@@ -437,9 +446,9 @@
       completeCommand(selectedSuggestion);
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
+    if (isDesktopEnterSubmit(event)) {
       event.preventDefault();
-      if (active || compactPending || idleSubmissionDisabled) return;
+      if (active || idleSubmissionDisabled) return;
       void submitDraft();
     }
   }
@@ -532,7 +541,7 @@
           <button
             class="inline-flex h-7 items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-control font-medium text-muted enabled:hover:bg-secondary enabled:hover:text-foreground disabled:cursor-default disabled:opacity-70"
             onclick={() => (startMenuOpen = !startMenuOpen)}
-            disabled={!startModeEditable || active || creatingTask}
+            disabled={!startModeEditable || creatingTask}
             aria-label={`Start in ${startModeLabel}`}
             aria-haspopup="menu"
             aria-expanded={startMenuOpen}

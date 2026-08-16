@@ -1572,7 +1572,7 @@
 </svelte:head>
 
 <div
-  class={`grid h-dvh w-full overflow-hidden ${sidebarResizing || mobileViewport.current ? "" : "transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"} ${sidebarResizing ? "cursor-col-resize select-none" : ""}`}
+  class={`grid h-dvh w-full overflow-hidden ${sidebarResizing || mobileViewport.current ? "" : "transition-[grid-template-columns] duration-200 ease-out"} ${sidebarResizing ? "cursor-col-resize select-none" : ""}`}
   style:grid-template-columns={mobileViewport.current
     ? "minmax(0, 1fr)"
     : `${sidebarCollapsed ? 0 : sidebarWidth}px minmax(0, 1fr)`}
@@ -1587,7 +1587,7 @@
 
   <aside
     id="tasks-drawer"
-    class={`relative z-20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:-translate-x-4 min-[901px]:opacity-0" : "min-[901px]:translate-x-0 min-[901px]:opacity-100"} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    class={`relative z-20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-[transform,opacity] duration-200 ease-out max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:-translate-x-4 min-[901px]:opacity-0" : "min-[901px]:translate-x-0 min-[901px]:opacity-100"} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Tasks"
     inert={(sidebarCollapsed && !mobileViewport.current) || (mobileViewport.current && !drawerOpen)}
   >
@@ -1802,17 +1802,15 @@
                     class="pointer-events-none absolute inset-y-0 left-3 z-1 border-l border-border-strong/60"
                     aria-hidden="true"
                   ></span>
-                  {#if projectLoadingId === project.id && !loaded}
+                  {#if (projectLoadingId === project.id && !loaded) || (loaded && shownTasks.length === 0)}
                     <p
                       class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
-                      Loading tasks…
-                    </p>
-                  {:else if loaded && shownTasks.length === 0}
-                    <p
-                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
-                    >
-                      {search ? "No matching tasks." : "No tasks yet."}
+                      {projectLoadingId === project.id && !loaded
+                        ? "Loading tasks…"
+                        : search
+                          ? "No matching tasks."
+                          : "No tasks yet."}
                     </p>
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}

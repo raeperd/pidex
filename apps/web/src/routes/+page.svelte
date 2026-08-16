@@ -6,11 +6,13 @@
   import HostUnavailable from "./_components/HostUnavailable.svelte";
   import Icon from "./_components/Icon.svelte";
   import {
+    autoGrowComposerTextarea,
     composerControlsClass,
     composerFooterClass,
     composerSendButtonClass,
     composerSurfaceClass,
     composerTextareaClass,
+    isDesktopEnterSubmit,
   } from "./_components/TaskComposer.svelte";
 
   interface StarterState {
@@ -70,13 +72,12 @@
 
   function draftInput(input: HTMLTextAreaElement) {
     updateStarter({ draft: input.value });
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 210)}px`;
+    autoGrowComposerTextarea(input);
   }
 
   function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
+    if (isDesktopEnterSubmit(event)) {
       event.preventDefault();
       void send();
     }
@@ -85,7 +86,7 @@
 
 {#if context.shell.bootstrapError && !context.shell.bootstrap}
   <section
-    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
   >
     <HostUnavailable />
   </section>
