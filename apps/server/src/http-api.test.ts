@@ -18,7 +18,7 @@ import {
 } from "@pidex/api";
 import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPidexServer } from "./main.js";
 
 const execFileAsync = promisify(execFile);
@@ -61,13 +61,6 @@ describe.sequential("HTTP API endpoints", () => {
   let chatId: string;
   let httpUrl: string;
   let websocketUrl: string;
-  const originalEnvironment = preserveEnvironment([
-    "PIDEX_PROJECT_ROOTS",
-    "PIDEX_STATE_DIR",
-    "PI_CODING_AGENT_DIR",
-    "PI_CODING_AGENT_SESSION_DIR",
-    "WORKSPACE_ROOTS",
-  ]);
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
@@ -104,11 +97,11 @@ describe.sequential("HTTP API endpoints", () => {
     );
     workspacePath = await realpath(workspacePath);
 
-    process.env.PIDEX_PROJECT_ROOTS = tempRoot;
-    process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
-    process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
-    process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
-    process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
+    vi.stubEnv("PIDEX_PROJECT_ROOTS", tempRoot);
+    vi.stubEnv("PIDEX_STATE_DIR", path.join(tempRoot, "state"));
+    vi.stubEnv("PI_CODING_AGENT_DIR", path.join(tempRoot, "agent"));
+    vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
+    vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
 
     app = await createPidexServer();
     await listen(app);
@@ -128,7 +121,7 @@ describe.sequential("HTTP API endpoints", () => {
     try {
       await app?.close();
     } finally {
-      restoreEnvironment(originalEnvironment);
+      vi.unstubAllEnvs();
       if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
     }
   });
@@ -773,18 +766,4 @@ async function rawRpcResult(response: Response) {
   if (!payload || typeof payload !== "object" || !("json" in payload))
     throw new Error("Expected an oRPC JSON envelope");
   return payload.json;
-}
-
-function preserveEnvironment<const Key extends string>(keys: readonly Key[]) {
-  return Object.fromEntries(keys.map((key) => [key, process.env[key]])) as Record<
-    Key,
-    string | undefined
-  >;
-}
-
-function restoreEnvironment(environment: Record<string, string | undefined>) {
-  for (const [key, value] of Object.entries(environment)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
 }
