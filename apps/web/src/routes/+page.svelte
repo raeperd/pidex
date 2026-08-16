@@ -85,7 +85,7 @@
 
 {#if context.shell.bootstrapError && !context.shell.bootstrap}
   <section
-    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
   >
     <HostUnavailable />
   </section>

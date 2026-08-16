@@ -196,7 +196,7 @@
     aria-label={`Skill loaded: ${item.name}`}
   >
     <summary
-      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary"
     >
       <span class="font-bold text-primary-text">[skill]</span>
       <strong class="font-semibold text-foreground">{item.name}</strong>
@@ -220,7 +220,7 @@
     {#if previous.length > 0}
       <details class="group/tool-history">
         <summary
-          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
+          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary"
         >
           <span class="transition-transform duration-150 group-open/tool-history:rotate-90"
             ><Icon name="chevron" size={12} /></span
