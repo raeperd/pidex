@@ -319,6 +319,14 @@ describe("slashCommandSuggestions", () => {
     expect(body).toContain('aria-label="Start in Work locally"');
   });
 
+  it("shows shared local state for a non-Git project", () => {
+    const body = renderComposer("", false, true, { worktreeSupport: "unsupported" });
+
+    expect(body).toContain("Shared local folder");
+    expect(body).toContain('aria-label="Initialize Git"');
+    expect(body).not.toContain("New worktree");
+  });
+
   it("hides commands that cannot be expanded during active delivery", () => {
     expect(renderComposer("/", true)).not.toContain('role="listbox"');
   });
@@ -420,6 +428,7 @@ function composerProps(
     creatingTask: false,
     draft,
     followUpCount: 0,
+    initializeGit: async () => {},
     models: [
       {
         id: "openai/gpt-5.6-sol",
@@ -441,6 +450,7 @@ function composerProps(
     steeringCount: 0,
     stop: async () => {},
     taskId: "task-1",
+    worktreeSupport: "supported",
     ...overrides,
   };
 }

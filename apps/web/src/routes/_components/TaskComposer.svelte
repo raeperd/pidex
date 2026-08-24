@@ -249,7 +249,7 @@
 </script>
 
 <script lang="ts">
-  import type { ContextUsage } from "@pidex/api";
+  import type { ChatSnapshot, ContextUsage, WorktreeSupport, Workspace } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
@@ -271,6 +271,7 @@
     creatingTask,
     draft = $bindable(),
     followUpCount,
+    initializeGit,
     models,
     persistDraft,
     projectName,
@@ -285,6 +286,7 @@
     steeringCount,
     stop,
     taskId,
+    worktreeSupport,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
@@ -298,6 +300,7 @@
     creatingTask: boolean;
     draft: string;
     followUpCount: number;
+    initializeGit: () => Promise<void>;
     models: Workspace["models"];
     persistDraft: () => void;
     projectName: string;
@@ -313,6 +316,7 @@
     stop: () => Promise<void>;
     /** Identifies the task whose run is being timed, so switching between two already-active tasks restarts the elapsed clock. */
     taskId: string;
+    worktreeSupport: WorktreeSupport;
   } = $props();
 
   let promptInput: HTMLTextAreaElement | undefined;
@@ -515,9 +519,11 @@
         <span class="mx-1 h-3.5 w-px flex-none bg-border" aria-hidden="true"></span>
         <StartModeSelector
           editable={startModeEditable && !active}
+          {initializeGit}
           mode={startMode}
           pending={creatingTask}
           select={setStartMode}
+          {worktreeSupport}
         />
       </div>
     {/if}
