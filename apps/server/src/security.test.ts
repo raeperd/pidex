@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { canonicalWorkspace, HttpError, isDescendant, parsePort, safeError } from "./security.js";
+import { HttpError } from "./errors.js";
+import { canonicalWorkspace, isDescendant, parsePort, safeError } from "./security.js";
 
 describe("local security", () => {
   it.effect("rejects path-prefix traps and symlink escapes", () =>

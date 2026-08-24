@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { basename } from "node:path";
-import { emitServerEvent, installFakeWebSocket, openTasks, rpcRequest } from "./support";
+import {
+  emitServerEvent,
+  fulfillJson,
+  installFakeWebSocket,
+  makeChatSnapshot,
+  openTasks,
+  rpcRequest,
+  workspaceName,
+} from "./support";
 
 test("scales mobile task and composer targets while preserving responsive density", async ({
   page,
@@ -8,7 +15,6 @@ test("scales mobile task and composer targets while preserving responsive densit
 }, testInfo) => {
   const mobile = testInfo.project.name === "mobile";
   const workspacePath = process.cwd();
-  const workspaceName = basename(workspacePath);
   const longTaskName =
     "Investigate an intentionally long task title that must truncate without overflowing";
   const longModelName = "An intentionally long model label for responsive overflow verification";
@@ -30,9 +36,21 @@ test("scales mobile task and composer targets while preserving responsive densit
     { path: workspacePath, remember: false },
     bootstrap.result.csrfToken,
   );
+  // A literal model fixture, not a copy of the machine's real detected models: this test's
+  // composer/model assertions need a model to be present (the disabled-reason cascade otherwise
+  // labels the send button "Run pi and /login to enable models" instead of "Send" -- see
+  // TaskComposer.svelte's `composerAffordances`), and relying on the real, unmocked
+  // `system/bootstrap`/`workspaces/open` responses made this test's model count depend on
+  // whether the CI runner (unlike a developer machine) has `pi` logged in with a provider.
+  const modelFixture = {
+    id: "e2e/mobile-model",
+    provider: "e2e",
+    name: longModelName,
+    reasoning: true,
+  };
   const workspaceFixture = {
     ...opened.result,
-    models: opened.result.models.map((model) => ({ ...model, name: longModelName })),
+    models: [modelFixture],
     sessions: [
       {
         id: "task_mobile_readability",
@@ -51,50 +69,27 @@ test("scales mobile task and composer targets while preserving responsive densit
     path: workspacePath,
   });
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: [{ id: opened.result.id, path: workspacePath }],
-          projectCandidates: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap.result,
+      recentWorkspaces: [{ id: opened.result.id, path: workspacePath }],
+      projectCandidates: [],
     });
   });
-  await page.route("**/api/rpc/workspaces/open", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: workspaceFixture },
-    }),
-  );
+  await page.route("**/api/rpc/workspaces/open", (route) => fulfillJson(route, workspaceFixture));
   await page.route("**/api/rpc/chats/create", async (route) => {
     createdSnapshot = {
       chatId: "chat_mobile_readability",
       revision: 0,
     };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...createdSnapshot,
-          workspaceId: opened.result.id,
-          taskId: "new_task_mobile_readability",
-          runStatus: "idle",
-          model: opened.result.models[0]?.id,
-          thinkingLevel: "high",
-          items: [],
-          transcriptStart: 0,
-          transcriptTotal: 0,
-          steeringQueue: [],
-          followUpQueue: [],
-          stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
-        },
-      },
-    });
+    await fulfillJson(
+      route,
+      makeChatSnapshot({
+        ...createdSnapshot,
+        workspaceId: opened.result.id,
+        taskId: "new_task_mobile_readability",
+        model: modelFixture.id,
+      }),
+    );
   });
 
   await page.goto("/");
@@ -143,7 +138,10 @@ test("scales mobile task and composer targets while preserving responsive densit
   await expect(prompt).toBeVisible();
   await prompt.fill("Keep compact controls readable on narrow screens");
 
-  const model = page.getByLabel("Model");
+  // `exact: true` avoids an accessible-name collision with the composer's disabled-reason
+  // cascade, whose "no models" message text ("Run pi and /login to enable models") otherwise
+  // substring-matches "Model" -- see TaskComposer.svelte's `composerAffordances`.
+  const model = page.getByLabel("Model", { exact: true });
   const send = page.getByRole("button", { name: "Send" });
   await expect(model).toHaveCSS("font-size", "12px");
   await expect(model).toHaveCSS("white-space", "nowrap");

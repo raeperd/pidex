@@ -29,12 +29,17 @@ export function createViteConfig(
       tailwindcss(),
       sveltekit(),
     ],
+    // pnpm injects @pidex/api into node_modules, so Vite would prebundle it and
+    // keep serving the stale copy after `pnpm --filter @pidex/api build`. Serve
+    // it unbundled and watch it so rebuilds reach the browser.
+    optimizeDeps: { exclude: ["@pidex/api"] },
   };
   if (development)
     config.server = {
       host: "127.0.0.1",
       port: parsePort(environment.PORT),
       strictPort: false,
+      watch: { ignored: ["!**/node_modules/@pidex/api/**"] },
     };
   return config;
 }

@@ -13,8 +13,8 @@
     "@fontsource-variable/dm-sans": "5.2.8",
     "@fontsource/jetbrains-mono": "5.2.8",
     "@lucide/svelte": "1.26.0",
-    "@orpc/client": "2.0.0-beta.21",
-    "@orpc/contract": "2.0.0-beta.21",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
     "@pidex/api": "workspace:*",
     "entities": "8.0.0",
     "marked": "17.0.1",
@@ -30,6 +30,6 @@
     "tailwindcss": "4.3.3",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vite": "catalog:",
-    "vitest": "4.1.10"
+    "vitest": "catalog:"
   }
 }

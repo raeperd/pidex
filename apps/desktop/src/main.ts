@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
 import { randomBytes } from "node:crypto";
 import { authGrantSchema, healthSchema, safeParse, type PidexApiContractClient } from "@pidex/api";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
@@ -140,7 +140,7 @@ const createWindow = Effect.fn("desktop.window.create")(function* (targetUrl: st
         height: 820,
         minWidth: 320,
         minHeight: 560,
-        backgroundColor: "#181b18",
+        backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#fafafa",
         ...(process.platform === "darwin"
           ? {
               titleBarStyle: "hiddenInset",

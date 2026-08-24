@@ -193,20 +193,18 @@ export async function createPidexApplication(options: PidexServerOptions) {
         );
         if (matched) return;
         if (route.startsWith("/api/"))
-          await runtime.runPromise(
-            Effect.fail(
-              HttpError.make({ status: 404, code: "not_found", message: "API route not found" }),
-            ),
-          );
-        await runtime.runPromise(
-          attemptOperation("web.serve", () => serveWebApp(res, route, webRoot)),
-        );
+          throw HttpError.make({ status: 404, code: "not_found", message: "API route not found" });
+        serveWebApp(res, route, webRoot);
       } catch (error) {
         if (res.headersSent) return res.end();
         const protocolError = error instanceof HttpError ? error : undefined;
-        json(res, protocolError?.status ?? 500, {
-          error: { code: protocolError?.code ?? "internal_error", message: safeError(error) },
-        });
+        res.statusCode = protocolError?.status ?? 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(
+          JSON.stringify({
+            error: { code: protocolError?.code ?? "internal_error", message: safeError(error) },
+          }),
+        );
       }
     };
     const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
@@ -387,7 +385,6 @@ function rejectUpgrade(socket: Duplex) {
   socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
   socket.destroy();
 }
-
 const main = Effect.scoped(
   Effect.gen(function* () {
     const port = yield* Effect.try({

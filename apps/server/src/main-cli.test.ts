@@ -19,8 +19,8 @@ it("starts the standalone server without a desktop supervisor or fd3", async () 
   const port = await availablePort();
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "pidex-standalone-"));
   directories.add(stateDirectory);
-  const child = spawn(process.execPath, ["--import=tsx", "main.ts"], {
-    cwd: import.meta.dirname,
+  const child = spawn(process.execPath, [path.resolve(import.meta.dirname, "../dist/main.js")], {
+    cwd: path.resolve(import.meta.dirname, "../../.."),
     env: {
       ...process.env,
       PORT: String(port),

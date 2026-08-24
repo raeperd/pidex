@@ -37,24 +37,18 @@
   }
 
   function showOnHover(event: PointerEvent) {
-    if (event.pointerType === "touch") return;
-    positionDetails(event.currentTarget);
-    hovered = true;
-    dismissed = false;
-  }
-
-  function hideAfterHover() {
-    hovered = false;
+    if (event.pointerType !== "touch") revealDetails(event.currentTarget, "hover");
   }
 
   function showOnFocus(event: FocusEvent) {
-    positionDetails(event.currentTarget);
-    focused = true;
-    dismissed = false;
+    revealDetails(event.currentTarget, "focus");
   }
 
-  function hideAfterFocus() {
-    focused = false;
+  function revealDetails(target: EventTarget | null, via: "hover" | "focus") {
+    positionDetails(target);
+    if (via === "hover") hovered = true;
+    else focused = true;
+    dismissed = false;
   }
 
   function closeDetails() {
@@ -149,7 +143,7 @@
 <svelte:window onresize={handleWindowResize} />
 <svelte:document onpointerdown={handleDocumentPointerDown} onkeydown={handleDocumentKeydown} />
 
-<div class="context-meter relative inline-flex flex-none" data-context-meter={componentId}>
+<div class="relative inline-flex flex-none" data-context-meter={componentId}>
   <button
     class="context-meter__trigger inline-grid size-8 place-items-center rounded-[999px] border-0 border-none bg-transparent text-primary transition-[background-color] duration-[140ms] ease-[ease] hover:bg-secondary focus-visible:bg-secondary"
     type="button"
@@ -159,9 +153,9 @@
     aria-expanded={expanded}
     onclick={toggleDetails}
     onfocus={showOnFocus}
-    onblur={hideAfterFocus}
+    onblur={() => (focused = false)}
     onpointerenter={showOnHover}
-    onpointerleave={hideAfterHover}
+    onpointerleave={() => (hovered = false)}
   >
     <svg class="size-4.5 [rotate:-90deg]" viewBox="0 0 24 24" aria-hidden="true">
       <circle
@@ -172,7 +166,7 @@
       />
       <circle
         class={[
-          "context-meter__progress fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          "context-meter__progress fill-none [stroke-linecap:round] [stroke-width:3] transition-[stroke-dashoffset] duration-500 ease-[ease-out]",
           overloaded ? "context-meter__progress--danger stroke-danger" : "stroke-current",
         ]}
         cx="12"
@@ -186,7 +180,7 @@
 
   <div
     class={[
-      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-control text-muted shadow-[0_18px_48px_rgb(0_0_0/24%)] transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
+      "context-meter__popover absolute right-0 bottom-[calc(100%+0.625rem)] z-20 grid box-border w-[min(16rem,calc(100vw-2rem))] gap-2.5 rounded-xl border border-border bg-[color-mix(in_srgb,var(--card)_96%,transparent)] p-3 text-control text-muted shadow-popover transition-[opacity,translate] duration-[120ms] ease-[ease] motion-reduce:transition-none",
       expanded
         ? "pointer-events-auto opacity-100 [translate:var(--context-popover-shift,0)_0] delay-150"
         : "pointer-events-none opacity-0 [translate:var(--context-popover-shift,0)_0.25rem] delay-0",
@@ -199,17 +193,11 @@
   >
     <div class="flex items-center justify-between gap-3">
       <strong class="font-semibold text-muted">Context Window</strong>
-      {#if percentageLabel}
-        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
-          >{percentageLabel} · {formatTokens(usage.tokens)}/{formatTokens(
-            usage.contextWindow,
-          )}</span
-        >
-      {:else}
-        <span class="font-mono text-meta whitespace-nowrap tabular-nums"
-          >{formatTokens(usage.tokens)}/{formatTokens(usage.contextWindow)}</span
-        >
-      {/if}
+      <span class="font-mono text-meta whitespace-nowrap tabular-nums"
+        >{percentageLabel ? `${percentageLabel} · ` : ""}{formatTokens(usage.tokens)}/{formatTokens(
+          usage.contextWindow,
+        )}</span
+      >
     </div>
     <div
       class="h-1.5 overflow-hidden rounded-[999px] bg-[color-mix(in_srgb,var(--faint)_18%,transparent)]"
@@ -221,7 +209,7 @@
     >
       <span
         class={[
-          "context-meter__bar-fill block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out] motion-reduce:transition-none",
+          "context-meter__bar-fill block h-full rounded-[inherit] transition-[width] duration-500 ease-[ease-out]",
           overloaded ? "context-meter__bar-fill--danger bg-danger" : "bg-primary",
         ]}
         style:width={`${normalizedPercent}%`}

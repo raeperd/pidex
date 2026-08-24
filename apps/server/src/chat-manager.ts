@@ -6,6 +6,7 @@ import type {
   RunOutcome,
   ServerEvent,
   SessionSummary,
+  TextItem,
   ToolOutputChunk,
   TranscriptItem,
   TranscriptPage,
@@ -18,6 +19,7 @@ import type {
   AdapterEvent,
   AdapterSession,
   AdapterSessionInfo,
+  AdapterToolOutput,
   AdapterWorkspaceInfo,
   EffectAdapterSession,
 } from "./adapter.js";
@@ -31,16 +33,7 @@ interface WorkspaceRecord {
   path: string;
   info: AdapterWorkspaceInfo;
 }
-interface ToolResource {
-  id: string;
-  text: string;
-  sourceTruncated: boolean;
-}
-type NativeSessionReference =
-  | Pick<EffectAdapterSession["state"], "nativeId" | "nativePath">
-  | Pick<AdapterSessionInfo, "nativeId" | "nativePath">;
-
-const nativeSessionKey = (session: NativeSessionReference) =>
+const nativeSessionKey = (session: { nativeId: string; nativePath?: string | undefined }) =>
   session.nativePath ?? session.nativeId;
 
 interface ChatRecord {
@@ -57,7 +50,7 @@ interface ChatRecord {
   steering: string[];
   followUp: string[];
   extensionDialog: ExtensionDialog | undefined;
-  resources: Map<string, ToolResource>;
+  resources: Map<string, AdapterToolOutput>;
   eventId: number;
   events: ServerEvent[];
   sockets: Set<WebSocket>;
@@ -79,7 +72,11 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function publicSession(workspaceId: string, info: AdapterSessionInfo) {
     return Effect.gen(function* () {
       const workspace = yield* getWorkspace(workspaceId);
-      const id = yield* metadata.rememberTask(workspaceId, workspace.path, nativeSessionKey(info));
+      const key = nativeSessionKey(info);
+      const id = yield* metadata.rememberTask(workspaceId, workspace.path, key);
+      const liveChatId = owners.get(key);
+      const liveChat = liveChatId ? chats.get(liveChatId) : undefined;
+      const persisted = liveChat ? undefined : (yield* metadata.sessionState(key)).run;
       return {
         id,
         ...(info.name ? { name: info.name } : {}),
@@ -87,6 +84,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         createdAt: info.createdAt,
         modifiedAt: info.modifiedAt,
         messageCount: info.messageCount,
+        status: resolveSessionStatus(liveChat?.runStatus, persisted),
       } satisfies SessionSummary;
     });
   }
@@ -96,9 +94,17 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       const info = yield* pi.inspectWorkspace(canonicalPath);
       const record = { id, path: canonicalPath, info };
       workspaces.set(id, record);
-      const sessions = yield* Effect.forEach(info.sessions, (session) =>
-        publicSession(id, session),
-      );
+      const listedKeys = new Set(info.sessions.map((session) => nativeSessionKey(session)));
+      const listed = yield* Effect.forEach(info.sessions, (session) => publicSession(id, session));
+      // Pi does not persist a session to disk until it holds an assistant reply, so a chat
+      // that just started (or is still on its first turn) has no entry in `info.sessions`
+      // yet — `inspectWorkspace` only ever sees what's on disk. Union in a summary
+      // synthesized from the live ChatRecord for any chat in this workspace that isn't
+      // listed yet, so a brand-new task has sidebar presence immediately instead of only
+      // once the model has replied.
+      const liveOnly = [...chats.values()]
+        .filter((chat) => chat.workspaceId === id && !listedKeys.has(chat.sessionKey))
+        .map(liveOnlySession);
       return {
         id,
         path: canonicalPath,
@@ -107,7 +113,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         protectedResourcesSkipped: info.protectedResourcesSkipped,
         resourceDiagnostics: info.resourceDiagnostics,
         models: info.models,
-        sessions,
+        sessions: [...liveOnly, ...listed],
         commands: info.commands,
       } satisfies Workspace;
     });
@@ -357,12 +363,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         chat.abortRequested = false;
         chat.runStatus = "idle";
         broadcastRun(chat);
-        const stats = yield* chat.session.getStats();
-        broadcast(chat, {
-          type: "session",
-          ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
-          stats,
-        });
+        yield* broadcastSession(chat);
       });
     return Effect.sync(() => handleImmediate(chat, event));
   }
@@ -442,12 +443,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         return yield* Effect.fail(
           applicationError("chats.startPrompt", new Error("A run is already active")),
         );
-      chat.run = {
+      const runState = (status: "running" | "failed") => ({
         runId: outcome.runId,
         actionId: outcome.actionId,
-        status: "running",
+        status,
         requiresAcknowledgement: false,
-      };
+      });
+      chat.run = runState("running");
       chat.runStatus = "running";
       yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "running");
       broadcastRun(chat);
@@ -455,12 +457,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "failed");
-            chat.run = {
-              runId: outcome.runId,
-              actionId: outcome.actionId,
-              status: "failed",
-              requiresAcknowledgement: false,
-            };
+            chat.run = runState("failed");
             chat.runStatus = "error";
             handleNotice(chat, { level: "error", text: safeError(error) });
             broadcastRun(chat);
@@ -478,14 +475,10 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     outcome: ActionOutcome,
   ) {
     return Effect.gen(function* () {
-      chat.revision = Math.max(chat.revision, outcome.revision);
-      if (outcome.replayed) return outcome;
-      const deliveryEffect =
-        delivery === "steer" ? chat.session.steer(text) : chat.session.followUp(text);
-      yield* deliveryEffect.pipe(
-        Effect.andThen(metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
+      yield* settleAction(chat, outcome, () =>
+        delivery === "steer" ? chat.session.steer(text) : chat.session.followUp(text),
       );
+      if (outcome.replayed) return outcome;
       broadcastRun(chat);
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
     });
@@ -502,10 +495,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       chat.abortRequested = true;
       chat.runStatus = "stopping";
       broadcastRun(chat);
-      yield* chat.session.abort().pipe(
-        Effect.andThen(metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
-      );
+      yield* settleAction(chat, outcome, () => chat.session.abort());
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
     });
   }
@@ -521,14 +511,24 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     outcome: ActionOutcome,
     work: () => Effect.Effect<T, E, R>,
   ) {
+    return settleAction(chat, outcome, work).pipe(
+      Effect.tap(() => Effect.sync(() => outcome.replayed || broadcastRun(chat))),
+      Effect.tapError(() => Effect.sync(() => broadcastRun(chat))),
+    );
+  }
+
+  /** Shared action protocol: bump the revision, replay without effects, then run and record. */
+  function settleAction<T, E, R>(
+    chat: ChatRecord,
+    outcome: ActionOutcome,
+    work: () => Effect.Effect<T, E, R>,
+  ) {
     return Effect.gen(function* () {
       chat.revision = Math.max(chat.revision, outcome.revision);
       if (outcome.replayed) return undefined;
       return yield* work().pipe(
         Effect.tap(() => metadata.markActionStatus(outcome.actionId, "completed")),
-        Effect.tap(() => Effect.sync(() => broadcastRun(chat))),
         Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),
-        Effect.tapError(() => Effect.sync(() => broadcastRun(chat))),
       );
     });
   }
@@ -536,12 +536,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) {
     return Effect.gen(function* () {
       yield* chat.session.configure(input);
-      const stats = yield* chat.session.getStats();
-      broadcast(chat, {
-        type: "session",
-        ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
-        stats,
-      });
+      yield* broadcastSession(chat);
       const contextUsage = chat.session.state.contextUsage;
       if (contextUsage) broadcast(chat, { type: "context_usage", usage: contextUsage });
     });
@@ -549,8 +544,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function rename(chat: ChatRecord, name: string) {
     return Effect.gen(function* () {
       yield* chat.session.rename(name);
+      yield* broadcastSession(chat, name);
+    });
+  }
+  function broadcastSession(chat: ChatRecord, name = chat.session.state.sessionName) {
+    return Effect.gen(function* () {
       const stats = yield* chat.session.getStats();
-      broadcast(chat, { type: "session", name, stats });
+      broadcast(chat, { type: "session", ...(name ? { name } : {}), stats });
     });
   }
   function compact(chat: ChatRecord, instructions?: string) {
@@ -595,7 +595,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   }
 
   return {
-    pi,
     openWorkspace,
     workspace: getWorkspace,
     markWorkspaceDisposable,
@@ -606,7 +605,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     resume,
     chat: getChat,
     snapshot,
-    sendSnapshot,
     connect,
     startPrompt,
     deliverDuringRun,
@@ -615,7 +613,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     toolOutput,
     transcriptPage,
     performMutation,
-    clear,
+    clear: (chat: ChatRecord) => chat.session.clearQueue(),
     configure,
     rename,
     compact,
@@ -625,6 +623,50 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 }
 
 export type ChatManager = ReturnType<typeof makeChatManager>;
+
+/**
+ * Coarsens run state down to what the sidebar needs. A live chat always wins over persisted
+ * state (it is the more current source of truth); with no live chat, only a persisted failure
+ * or an unacknowledged crash-interrupted run counts as "error" — everything else the server
+ * knows (completed, cancelled, or an in-flight run left behind by a race) reads as idle rather
+ * than inventing a status the server cannot actually stand behind.
+ */
+export function resolveSessionStatus(
+  liveRunStatus: ChatSnapshot["runStatus"] | undefined,
+  persistedRun: RunOutcome | undefined,
+): "running" | "error" | "idle" {
+  if (liveRunStatus === "running" || liveRunStatus === "stopping" || liveRunStatus === "compacting")
+    return "running";
+  if (liveRunStatus === "error") return "error";
+  if (liveRunStatus === "idle") return "idle";
+  if (
+    persistedRun?.status === "failed" ||
+    (persistedRun?.status === "interrupted" && persistedRun.requiresAcknowledgement)
+  )
+    return "error";
+  return "idle";
+}
+
+/**
+ * Builds a SessionSummary for a live chat that Pi hasn't written to disk yet (no assistant
+ * reply landed, so `SessionManager.list()` doesn't know about it), from only what the
+ * in-memory ChatRecord actually knows — no invented timestamps beyond "now", no invented
+ * message content.
+ */
+function liveOnlySession(chat: ChatRecord): SessionSummary {
+  const firstUserItem = chat.items.find((item): item is TextItem => item.type === "user");
+  const now = new Date().toISOString();
+  return {
+    id: chat.taskId,
+    ...(chat.session.state.sessionName ? { name: chat.session.state.sessionName } : {}),
+    firstMessage: (firstUserItem?.text ?? "").slice(0, 500),
+    createdAt: now,
+    modifiedAt: now,
+    messageCount: chat.items.filter((item) => item.type === "user" || item.type === "assistant")
+      .length,
+    status: resolveSessionStatus(chat.runStatus, undefined),
+  } satisfies SessionSummary;
+}
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
   const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } as ServerEvent;
@@ -682,8 +724,4 @@ function transcriptPage(
     start--;
   }
   return { items: chat.items.slice(start, before), start, total: chat.items.length };
-}
-
-function clear(chat: ChatRecord) {
-  return chat.session.clearQueue();
 }
