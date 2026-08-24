@@ -88,10 +88,10 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         return yield* manager.openWorkspace(id, canonical);
       }),
       initializeGit: workspaces.initializeGit.effect(function* (_, input) {
-        const manager = yield* Chats;
-        const workspace = yield* manager.workspace(input.workspaceId);
+        const workspaceManager = yield* Chats;
+        const workspace = yield* workspaceManager.workspace(input.workspaceId);
         yield* initializeProjectGit(workspace.path);
-        return yield* manager.openWorkspace(workspace.id, workspace.path);
+        return yield* workspaceManager.openWorkspace(workspace.id, workspace.path);
       }),
       createWorktree: workspaces.createWorktree.effect(function* (_, input) {
         const source = yield* manager.workspace(input.workspaceId);

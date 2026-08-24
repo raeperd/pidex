@@ -249,7 +249,7 @@
 </script>
 
 <script lang="ts">
-  import type { ChatSnapshot, ContextUsage, WorktreeSupport, Workspace } from "@pidex/api";
+  import type { ContextUsage, WorktreeSupport } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
