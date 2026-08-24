@@ -15,7 +15,6 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { ResponseValidationLinkPlugin } from "@orpc/contract/plugins";
 
-type Delivery = "normal" | "steer" | "follow-up";
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
 
 export function makePidexApiClient() {
@@ -83,33 +82,23 @@ export function makePidexApiClient() {
   function sendMessage(
     chatId: string,
     text: string,
-    delivery: Delivery,
     expectedRevision: number,
-    runId?: string,
-    actionId = createActionId(),
+    actionId: string,
   ): Promise<ActionOutcome> {
     return client.chats.sendMessage({
       chatId,
-      clientId: clientId,
+      clientId,
       actionId,
       expectedRevision,
       text,
-      delivery,
-      ...(runId ? { runId } : {}),
+      delivery: "normal",
     });
   }
 
-  function abort(
-    chatId: string,
-    runId: string,
-    expectedRevision: number,
-    actionId = createActionId(),
-  ): Promise<ActionOutcome> {
+  function abort(chatId: string, runId: string, expectedRevision: number): Promise<ActionOutcome> {
     return client.chats.abort({
       chatId,
-      clientId: clientId,
-      actionId,
-      expectedRevision,
+      ...actionFields(expectedRevision),
       runId,
     });
   }
@@ -117,13 +106,10 @@ export function makePidexApiClient() {
   function acknowledgeInterrupted(
     chatId: string,
     expectedRevision: number,
-    actionId = createActionId(),
   ): Promise<ActionOutcome> {
     return client.chats.acknowledgeInterrupted({
       chatId,
-      clientId: clientId,
-      actionId,
-      expectedRevision,
+      ...actionFields(expectedRevision),
     });
   }
 
@@ -193,7 +179,7 @@ export function makePidexApiClient() {
   }
 
   function actionFields(expectedRevision: number) {
-    return { clientId: clientId, actionId: createActionId(), expectedRevision };
+    return { clientId, actionId: createActionId(), expectedRevision };
   }
   return {
     createActionId,

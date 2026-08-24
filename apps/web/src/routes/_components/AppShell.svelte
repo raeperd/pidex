@@ -1,3 +1,66 @@
+<script lang="ts" module>
+  import type { ChatSnapshot } from "@pidex/api";
+  import type { ConnectionState } from "./AppShellConnection";
+
+  const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat(undefined, {
+    numeric: "auto",
+    style: "narrow",
+  });
+
+  /** `"disconnected"` (offline) is gated the same as `"reconnecting"` — a uniform delay, no special case. */
+  function connectionBanner(
+    connection: ConnectionState,
+    hasEverConnected: boolean,
+    delayElapsed: boolean,
+  ): "connecting" | "reconnecting" | undefined {
+    if (connection === "connected" || !delayElapsed) return undefined;
+    return hasEverConnected ? "reconnecting" : "connecting";
+  }
+
+  type SidebarStatus = "error" | "running" | "idle";
+
+  function statusFromLiveRunStatus(liveRunStatus: ChatSnapshot["runStatus"]): SidebarStatus {
+    if (
+      liveRunStatus === "running" ||
+      liveRunStatus === "stopping" ||
+      liveRunStatus === "compacting"
+    )
+      return "running";
+    return liveRunStatus === "error" ? "error" : "idle";
+  }
+
+  /**
+   * The live snapshot wins for the task the user has open — it reflects run_status events
+   * instantly, before the next listing refresh could ever catch up. Every other row has no
+   * live snapshot to read, so it falls back to whatever the server last reported.
+   */
+  function resolveTaskStatus(input: {
+    session: { id: string; status?: SidebarStatus };
+    liveTaskId: string | undefined;
+    liveRunStatus: ChatSnapshot["runStatus"] | undefined;
+  }): SidebarStatus {
+    if (input.liveTaskId === input.session.id && input.liveRunStatus !== undefined)
+      return statusFromLiveRunStatus(input.liveRunStatus);
+    return input.session.status ?? "idle";
+  }
+
+  /**
+   * error > running > idle: one priority table shared by every rollup consumer (the collapsed
+   * project dot, the favicon aggregate) so the worst thing happening always wins — a task that
+   * needs attention should never be masked by one that's merely still running, and a merely
+   * running task should never be masked by the many that are quietly idle. Mirrors paseo's
+   * STATUS_BUCKET_PRIORITY.
+   */
+  function rollupProjectStatus(statuses: Iterable<SidebarStatus>): SidebarStatus {
+    let sawRunning = false;
+    for (const status of statuses) {
+      if (status === "error") return "error";
+      if (status === "running") sawRunning = true;
+    }
+    return sawRunning ? "running" : "idle";
+  }
+</script>
+
 <script lang="ts">
   import { onMount, tick, untrack, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
@@ -6,7 +69,6 @@
   import {
     MAX_RECENT_WORKSPACES,
     type Bootstrap,
-    type ChatSnapshot,
     type ExtensionDialog,
     type ProjectCandidate,
     type RecentWorkspace,
@@ -19,7 +81,7 @@
     makePidexApiClient,
     type PidexApiClient,
   } from "./AppShellApiClient";
-  import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
+  import { makeChatConnection } from "./AppShellConnection";
   import {
     createTaskViewControllerRegistry,
     provideAppShellContext,
@@ -30,6 +92,7 @@
   } from "./AppShellContext.svelte";
   import Icon from "./Icon.svelte";
   import { makeTaskSnapshotCache, taskPath } from "./TaskNavigationState";
+  import Toast from "./Toast.svelte";
 
   const TASK_PREVIEW_COUNT = 6;
   const SIDEBAR_WIDTH_STORAGE_KEY = "pidex:sidebar-width";
@@ -37,6 +100,21 @@
   const MIN_SIDEBAR_WIDTH = 120;
   const MAX_SIDEBAR_WIDTH = 480;
   const usesIntegratedTitleBar = window.pidexDesktop?.usesIntegratedTitleBar ?? false;
+  const bannerClass = (tone: string, text: string) =>
+    `z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border ${tone} px-3 py-2 text-control ${text}`;
+  const warningBannerClass = bannerClass("border-warning/25 bg-warning/10", "text-warning-text");
+  const bannerActionClass =
+    "flex-none rounded-lg border border-current px-2 py-1.5 text-meta font-semibold";
+  const shellIconButtonClass =
+    "place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground";
+  const appDialogClass =
+    "app-dialog m-auto max-h-[calc(100dvh-28px)] rounded-2xl border border-border bg-card p-0 text-foreground shadow-modal";
+  const dialogSecondaryButtonClass =
+    "min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground";
+  const dialogPrimaryButtonClass =
+    "min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground";
+  const dialogInputClass =
+    "w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
   interface StarterPrompt {
     readonly configuration: ChatConfiguration;
@@ -59,6 +137,12 @@
   let searchOpen = $state(false);
   let connection = $state<ConnectionState>("disconnected");
   let error = $state("");
+  let toast = $state("");
+  // Bumped on every toast report, including a repeat of the same text: `toast = $state("")`
+  // assigning an identical string is a no-op to Svelte's reactivity, so without a distinguishing
+  // key the second occurrence of an already-showing message would neither re-present nor restart
+  // the auto-dismiss timer. `{#key toastOccurrence}` around <Toast> forces a fresh instance.
+  let toastOccurrence = $state(0);
   let bootstrapError = $state("");
   let drawerOpen = $state(false);
   let sidebarCollapsed = $state(false);
@@ -78,13 +162,13 @@
   let appliedRoute = $state("");
   let routeSequence = 0;
   let retryingConnection = $state(false);
+  let hasEverConnected = $state(false);
+  let connectionBannerDelayElapsed = $state(false);
   let loadingEarlier = $state(false);
   let startMode = $state<TaskStartMode>("local");
   let configurationPendingTaskIds = $state.raw<string[]>([]);
   let compactPendingTaskIds = $state.raw<string[]>([]);
-  let pendingPrompt = $state.raw<
-    { actionId: string; text: string; delivery: "normal" | "steer" | "follow-up" } | undefined
-  >();
+  let pendingPrompt = $state.raw<{ actionId: string; text: string } | undefined>();
   let toolTimings = $state.raw<Record<string, TaskToolTiming>>({});
   let toolElapsedNow = $state(Date.now());
   let toolOutputs = $state.raw<Record<string, TaskToolOutput>>({});
@@ -124,6 +208,39 @@
   let active = $derived(
     Boolean(snapshot && snapshot.runStatus !== "idle" && snapshot.runStatus !== "error"),
   );
+  /** Every session from every project loaded into the cache, resolved through the same
+   * priority table the sidebar rows and rollup dots use — the favicon reflects the whole
+   * app's state, not just the open task, so a task running or erroring in another project
+   * still surfaces here. */
+  let knownSessionStatuses = $derived.by(() => {
+    const loaded =
+      workspace && !(workspace.id in workspaceCache)
+        ? { ...workspaceCache, [workspace.id]: workspace }
+        : workspaceCache;
+    return Object.values(loaded).flatMap((entry) =>
+      entry.sessions.map((session) =>
+        resolveTaskStatus({
+          session,
+          liveTaskId: snapshot?.taskId,
+          liveRunStatus: snapshot?.runStatus,
+        }),
+      ),
+    );
+  });
+  /** "Attention" folds in `requiresAcknowledgement` for the open task on top of the
+   * aggregate error rollup: a crash-interrupted run awaiting acknowledgement has no
+   * `runStatus` of its own to roll up (it reads as idle), but it is exactly the kind of
+   * thing the favicon exists to surface. */
+  let faviconHref = $derived.by(() => {
+    const aggregate = rollupProjectStatus(knownSessionStatuses);
+    if (aggregate === "error" || snapshot?.run?.requiresAcknowledgement)
+      return "/favicon-attention.svg";
+    return aggregate === "running" ? "/favicon-running.svg" : "/favicon.svg";
+  });
+  $effect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
+    if (link) link.href = faviconHref;
+  });
   let configurationPending = $derived(
     Boolean(snapshot && configurationPendingTaskIds.includes(snapshot.taskId)),
   );
@@ -136,16 +253,34 @@
   let taskHasNoTranscript = $derived(
     Boolean(snapshot && snapshot.transcriptTotal === 0 && snapshot.items.length === 0),
   );
+  let banner = $derived(
+    connectionBanner(connection, hasEverConnected, connectionBannerDelayElapsed),
+  );
   let hasTopBanner = $derived(
     Boolean(
       error ||
-      (snapshot && connection !== "connected" && !routeLoading) ||
+      (snapshot && banner && !routeLoading) ||
       snapshot?.run?.requiresAcknowledgement ||
       workspace?.protectedResourcesSkipped ||
       workspace?.resourceDiagnostics.length ||
       (workspace && workspace.models.length === 0),
     ),
   );
+  let snapshotChatId = $derived(snapshot?.chatId);
+  /** Delay-gates the connection banner so a blip shorter than ~1.5s never flashes it. */
+  $effect(() => {
+    if (connection === "connected") {
+      hasEverConnected = true;
+      connectionBannerDelayElapsed = false;
+      return;
+    }
+    const timer = window.setTimeout(() => (connectionBannerDelayElapsed = true), 1_500);
+    return () => window.clearTimeout(timer);
+  });
+  $effect(() => {
+    void snapshotChatId;
+    hasEverConnected = false;
+  });
   let selectedModel = $derived(snapshot?.model ?? "");
   let selectedThinkingLevel = $derived(snapshot?.thinkingLevel ?? "medium");
   let startModeEditable = $derived(
@@ -172,8 +307,7 @@
       (entry) => !sourceWorkspaceId(entry) && projectName(entry.path) === name,
     );
     if (duplicates.length < 2) return name;
-    const isWorktree = project.worktree || /[\\/]\.codex[\\/]worktrees[\\/]/.test(project.path);
-    return isWorktree ? `${name} · worktree` : `${name} · local`;
+    return project.worktree ? `${name} · worktree` : `${name} · local`;
   }
   function workspaceIsWorktree(workspaceId: string) {
     return bootstrap?.recentWorkspaces.some(
@@ -229,6 +363,17 @@
   });
   function projectAdded(candidate: ProjectCandidate) {
     return Boolean(bootstrap?.recentWorkspaces.some((project) => project.path === candidate.path));
+  }
+  const projectTileClasses = [
+    "border-primary/15 bg-primary/10 text-primary-text",
+    "border-purple-500/20 bg-purple-500/10 text-purple-500",
+    "border-emerald-500/20 bg-emerald-500/10 text-emerald-500",
+  ];
+  /* Hash the name so a project keeps its tile color while the list is filtered or reordered. */
+  function projectTileClass(name: string) {
+    let hash = 0;
+    for (const character of name) hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 9973;
+    return projectTileClasses[hash % projectTileClasses.length];
   }
   let currentTitle = $derived.by(() => {
     if (!snapshot) return workspace?.name ?? "Pidex";
@@ -335,17 +480,21 @@
     const absolute = Math.abs(seconds);
     const [amount, unit] =
       absolute < 60
-        ? [seconds, "second"]
+        ? [0, "second"] // sub-minute labels would lie between 60s ticks; "now" is always honest
         : absolute < 3600
           ? [Math.round(seconds / 60), "minute"]
           : absolute < 86_400
             ? [Math.round(seconds / 3600), "hour"]
             : [Math.round(seconds / 86_400), "day"];
-    return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" }).format(
-      amount,
-      unit as Intl.RelativeTimeFormatUnit,
-    );
+    return RELATIVE_TIME_FORMAT.format(amount, unit as Intl.RelativeTimeFormatUnit);
   };
+  function reportError(cause: unknown, fallback: string) {
+    error = cause instanceof Error ? cause.message : fallback;
+  }
+  function reportToast(cause: unknown, fallback: string) {
+    toast = cause instanceof Error ? cause.message : fallback;
+    toastOccurrence += 1;
+  }
   async function loadBootstrap() {
     try {
       bootstrapError = "";
@@ -469,7 +618,7 @@
       } catch {
         bootstrap = { ...bootstrap, recentWorkspaces: previous };
       }
-      error = cause instanceof Error ? cause.message : "Project order could not be saved";
+      reportToast(cause, "Project order could not be saved");
     } finally {
       projectOrderSaving = false;
     }
@@ -516,13 +665,7 @@
               expand: false,
               remember: false,
             });
-      }
-      if (activate) {
-        chatConnection.close();
-        workspace = loaded;
-        projectPath = loaded.path;
-        startMode = workspaceIsWorktree(loaded.id) ? "worktree" : "local";
-        localStorage.setItem("pidex:last-project", loaded.path);
+        adoptWorkspace(loaded);
         snapshot = undefined;
         draft = "";
         if (options.closeDrawer ?? true) drawerOpen = false;
@@ -534,12 +677,19 @@
       }
       return loaded;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not open project";
+      reportToast(cause, "Could not open project");
       return undefined;
     } finally {
       if (activate) projectLoading = false;
       projectLoadingId = "";
     }
+  }
+  function adoptWorkspace(loaded: Workspace, mode?: TaskStartMode) {
+    chatConnection.close();
+    workspace = loaded;
+    projectPath = loaded.path;
+    startMode = mode ?? (workspaceIsWorktree(loaded.id) ? "worktree" : "local");
+    localStorage.setItem("pidex:last-project", loaded.path);
   }
   async function loadSourceWorkspace(project: RecentWorkspace) {
     const sourceId = sourceWorkspaceId(project);
@@ -606,7 +756,7 @@
         if (loaded) projectDialogElement?.close();
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not open the folder picker";
+      reportToast(cause, "Could not open the folder picker");
     }
   }
   async function approveProjectTrust() {
@@ -623,7 +773,7 @@
       workspace = loaded;
       rememberWorkspace(loaded, false);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Project trust could not be saved";
+      reportToast(cause, "Project trust could not be saved");
     }
   }
   async function toggleProject(project: RecentWorkspace) {
@@ -640,12 +790,24 @@
           remember: false,
         });
   }
+  /**
+   * Per-workspace request counter so that when several refreshes for the same workspace are
+   * in flight at once (a run-status transition, a navigation, a poll tick can all fire close
+   * together), only the response to the most recently ISSUED request gets applied. Network
+   * responses can complete out of order: without this guard, an earlier request issued while
+   * a task was still running could resolve after a later one that correctly observed it had
+   * gone idle, silently reverting the fresher result. Mirrors `routeSequence` below.
+   */
+  let sessionRefreshSequence: Record<string, number> = {};
   async function refreshSessions(workspaceId = workspace?.id) {
     if (!workspaceId) return;
+    const sequence = (sessionRefreshSequence[workspaceId] ?? 0) + 1;
+    sessionRefreshSequence = { ...sessionRefreshSequence, [workspaceId]: sequence };
     try {
       const current = workspaceFor(workspaceId);
       if (!current) return;
       const sessions = await api.listSessions(workspaceId);
+      if (sessionRefreshSequence[workspaceId] !== sequence) return;
       const loaded = { ...current, sessions };
       workspaceCache = { ...workspaceCache, [workspaceId]: loaded };
       if (workspace?.id === workspaceId) workspace = loaded;
@@ -653,6 +815,30 @@
       /* The live chat remains usable if metadata refresh fails. */
     }
   }
+  let pollingSessionList = false;
+  /**
+   * `activateRoute`'s refresh is a one-shot snapshot of the task being left: if it settles
+   * afterward with nobody connected to its chat, that idle event is lost and the cached row
+   * stays stuck on "running" until some unrelated refresh happens to fire. While the active
+   * workspace's listing still shows a running task that isn't the one currently connected,
+   * poll modestly until none remain — bounded, guarded against overlap, and it stops itself
+   * the moment the listing catches up. A workspace-level event stream would make this
+   * unnecessary; that's out of scope here.
+   */
+  $effect(() => {
+    const activeWorkspace = workspace;
+    const openTaskId = snapshot?.taskId;
+    const hasOtherRunning = (activeWorkspace?.sessions ?? []).some(
+      (session) => session.status === "running" && session.id !== openTaskId,
+    );
+    if (!hasOtherRunning) return;
+    const timer = window.setInterval(() => {
+      if (pollingSessionList) return;
+      pollingSessionList = true;
+      void refreshSessions(activeWorkspace?.id).finally(() => (pollingSessionList = false));
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  });
   async function startTask(submittedDraft: string, configuration: ChatConfiguration) {
     const text = submittedDraft.trim();
     if (!text) return;
@@ -695,21 +881,14 @@
         else await disposeCreatedTask(created);
         return;
       }
-      chatConnection.close();
-      workspace = taskWorkspace;
-      projectPath = taskWorkspace.path;
-      startMode = worktree
-        ? "worktree"
-        : workspaceIsWorktree(taskWorkspace.id)
-          ? "worktree"
-          : "local";
+      adoptWorkspace(taskWorkspace, worktree ? "worktree" : undefined);
       rememberWorkspace(taskWorkspace, worktree === undefined);
-      localStorage.setItem("pidex:last-project", taskWorkspace.path);
       snapshot = created;
       draft = starterPrompt?.draft ?? "";
       await afterChat(draft, !starterPrompt, !starterPrompt);
       if (sequence !== routeSequence) {
-        await disposeCreatedTask(created);
+        if (worktree) await disposeCreatedWorktree(worktree, created);
+        else await disposeCreatedTask(created);
         return;
       }
       const path = taskPath(created.taskId);
@@ -730,7 +909,7 @@
       }
       if (worktree && (!created || snapshot?.chatId !== created.chatId))
         await disposeCreatedWorktree(worktree, created);
-      error = cause instanceof Error ? cause.message : "Could not create task";
+      reportToast(cause, "Could not create task");
     } finally {
       if (sequence === routeSequence) chatLoading = false;
     }
@@ -758,39 +937,29 @@
       error = "";
       chatLoading = true;
       worktree = await api.createWorktree(source.id);
+      const createdWorktree = worktree;
       created = await api.createChat(worktree.id);
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
+      const createdChat = created;
+      const abandon = async () => {
+        await disposeCreatedWorktree(createdWorktree, createdChat);
         return false;
-      }
+      };
+      if (sequence !== routeSequence) return abandon();
       persistDraft();
       const refreshedBootstrap = await api.bootstrap();
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (sequence !== routeSequence) return abandon();
       bootstrap = refreshedBootstrap;
       rememberWorkspace(worktree, false);
-      chatConnection.close();
-      workspace = worktree;
-      projectPath = worktree.path;
-      localStorage.setItem("pidex:last-project", worktree.path);
+      adoptWorkspace(worktree, "worktree");
       snapshot = created;
-      startMode = "worktree";
       const configured = await configure({
         ...(previousSnapshot.model ? { model: previousSnapshot.model } : {}),
         thinkingLevel: previousSnapshot.thinkingLevel,
       });
-      if (!configured) throw new Error(error || "Could not configure worktree");
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (!configured) throw new Error(toast || "Could not configure worktree");
+      if (sequence !== routeSequence) return abandon();
       await afterChat(initialDraft, true);
-      if (sequence !== routeSequence) {
-        await disposeCreatedWorktree(worktree, created);
-        return false;
-      }
+      if (sequence !== routeSequence) return abandon();
       const path = taskPath(created.taskId);
       appliedRoute = path;
       await goto(path, { replaceState: true });
@@ -803,7 +972,7 @@
       projectPath = source.path;
       localStorage.setItem("pidex:last-project", source.path);
       snapshot = previousSnapshot;
-      error = cause instanceof Error ? cause.message : "Could not create worktree";
+      reportToast(cause, "Could not create worktree");
       return false;
     } finally {
       if (sequence === routeSequence) chatLoading = false;
@@ -818,14 +987,16 @@
       /* Cleanup is best-effort; the original task remains usable if removal fails. */
     }
   }
-  function navigateToTask(taskId: string) {
-    if (!chatLoading) void goto(taskPath(taskId));
-  }
   async function activateRoute(path: string, taskId: string) {
     appliedRoute = path;
     const sequence = ++routeSequence;
     persistDraft();
     chatConnection.close();
+    // The chat's WebSocket for the task we're leaving just closed, so if its run settles
+    // while we're gone, its idle run_status event never arrives and refreshSessions never
+    // fires for it. Captured now (before `snapshot` gets reassigned below) so the mitigation
+    // refresh below targets the task actually being left.
+    const departingWorkspaceId = snapshot?.workspaceId;
 
     if (!taskId) {
       snapshot = undefined;
@@ -833,6 +1004,7 @@
       startMode = "local";
       routeLoading = false;
       chatLoading = false;
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
       return;
     }
 
@@ -854,21 +1026,25 @@
       const target = await workspaceById(resumed.workspaceId);
       if (sequence !== routeSequence) return;
       if (!target) throw new Error("The project for this task is no longer available");
-      workspace = target;
-      projectPath = target.path;
-      startMode = workspaceIsWorktree(target.id) ? "worktree" : "local";
+      adoptWorkspace(target);
       rememberWorkspace(target);
-      localStorage.setItem("pidex:last-project", target.path);
       snapshot = resumed;
       await afterChat();
     } catch (cause) {
-      if (sequence === routeSequence)
-        error = cause instanceof Error ? cause.message : "Task could not be opened";
+      if (sequence === routeSequence) reportError(cause, "Task could not be opened");
     } finally {
       if (sequence === routeSequence) {
         routeLoading = false;
         chatLoading = false;
       }
+      // Fired last, after this navigation's own cache writes (adoptWorkspace/rememberWorkspace)
+      // have already landed: rememberWorkspace() can write back a workspace snapshot fetched
+      // before this refresh's response arrived (its "already cached, no need to refetch" fast
+      // path in workspaceById()), and firing this refresh any earlier let that later write
+      // silently revert the fresher status this refresh just fetched. Per-chat events alone
+      // can't keep the list live; this is a cheap mitigation, not the proper fix (a
+      // workspace-level event stream), which is out of scope here.
+      if (departingWorkspaceId) void refreshSessions(departingWorkspaceId);
     }
   }
   async function workspaceById(workspaceId: string) {
@@ -978,6 +1154,7 @@
       if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
     } else if (event.type === "run_status") {
+      const wasIdle = snapshot.runStatus === "idle";
       snapshot = {
         ...snapshot,
         runStatus: event.status,
@@ -985,7 +1162,12 @@
         ...(event.run ? { run: event.run } : {}),
       };
       if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt();
-      if (event.status === "idle") void refreshSessions();
+      // A session only enters the sidebar listing via refreshSessions, which used to fire
+      // only when a run settles. Without also refreshing on the idle -> non-idle transition,
+      // a task created this session had no sidebar presence for its entire first run.
+      // `wasIdle` here already implies `event.status !== "idle"`: this branch of the OR only
+      // runs once the first has ruled that out.
+      if (event.status === "idle" || wasIdle) void refreshSessions();
     } else if (event.type === "queue")
       snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp };
     else if (event.type === "context_usage") snapshot = { ...snapshot, contextUsage: event.usage };
@@ -1043,11 +1225,8 @@
   }
   async function submitPrompt(text: string, submittedDraft: string) {
     if (!snapshot) return;
-    const matching =
-      pendingPrompt?.text === text && pendingPrompt.delivery === "normal"
-        ? pendingPrompt
-        : undefined;
-    pendingPrompt = matching ?? { actionId: api.createActionId(), text, delivery: "normal" };
+    const matching = pendingPrompt?.text === text ? pendingPrompt : undefined;
+    pendingPrompt = matching ?? { actionId: api.createActionId(), text };
     localStorage.setItem(pendingKey(), JSON.stringify(pendingPrompt));
     const clearedSubmittedDraft = draft === submittedDraft;
     if (clearedSubmittedDraft) {
@@ -1059,9 +1238,7 @@
       const outcome = await api.sendMessage(
         snapshot.chatId,
         text,
-        "normal",
         snapshot.revision,
-        undefined,
         pendingPrompt.actionId,
       );
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
@@ -1072,7 +1249,7 @@
         persistDraft();
         void tick().then(taskViews.resizeComposer);
       }
-      error = cause instanceof Error ? cause.message : "Prompt rejected";
+      reportToast(cause, "Prompt rejected");
     }
   }
   async function stop() {
@@ -1081,7 +1258,7 @@
       const outcome = await api.abort(snapshot.chatId, snapshot.run.runId, snapshot.revision);
       snapshot = { ...snapshot, revision: Math.max(snapshot.revision, outcome.revision) };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Stop failed";
+      reportToast(cause, "Stop failed");
     }
   }
   async function clearQueue() {
@@ -1089,7 +1266,7 @@
     try {
       snapshot = await api.clearQueue(snapshot.chatId, snapshot.revision);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not clear queued instructions";
+      reportToast(cause, "Could not clear queued instructions");
     }
   }
   async function configure(patch: ChatConfiguration) {
@@ -1104,7 +1281,7 @@
       if (snapshot?.chatId === chatId) snapshot = configured;
       return true;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Configuration failed";
+      reportToast(cause, "Configuration failed");
       return false;
     } finally {
       configurationPendingTaskIds = configurationPendingTaskIds.filter(
@@ -1124,7 +1301,7 @@
       renameDialogElement?.close();
       await refreshSessions();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Rename failed";
+      reportToast(cause, "Rename failed");
     }
   }
   async function compact(instructions?: string) {
@@ -1141,7 +1318,7 @@
       return true;
     } catch (cause) {
       if (snapshot?.chatId !== chatId) return false;
-      error = cause instanceof Error ? cause.message : "Compaction failed";
+      reportToast(cause, "Compaction failed");
       return false;
     } finally {
       compactPendingTaskIds = compactPendingTaskIds.filter(
@@ -1160,7 +1337,7 @@
       );
       dialogElement?.close();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Extension response failed";
+      reportToast(cause, "Extension response failed");
     }
   }
   async function acknowledgeInterrupted() {
@@ -1173,7 +1350,7 @@
         run: { ...snapshot.run, requiresAcknowledgement: false },
       };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not acknowledge interrupted run";
+      reportToast(cause, "Could not acknowledge interrupted run");
     }
   }
   async function loadToolOutput(item: ToolItem) {
@@ -1232,7 +1409,7 @@
         transcriptTotal: transcriptPage.total,
       };
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Earlier messages could not be loaded";
+      reportToast(cause, "Earlier messages could not be loaded");
     } finally {
       loadingEarlier = false;
     }
@@ -1253,7 +1430,7 @@
         routeReady = true;
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "The Pidex host is still unavailable";
+      reportError(cause, "The Pidex host is still unavailable");
     } finally {
       retryingConnection = false;
     }
@@ -1263,7 +1440,7 @@
   }
   async function focusSearch() {
     searchOpen = true;
-    if (matchMedia("(max-width: 900px)").matches) drawerOpen = true;
+    if (mobileViewport.current) drawerOpen = true;
     await tick();
     searchInput?.focus();
     searchInput?.select();
@@ -1288,8 +1465,11 @@
   }
   function collapseSidebarAtDefaultWidth() {
     sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void collapseSidebar();
+  }
+  function persistSidebarWidth() {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }
   function startSidebarResize(event: PointerEvent) {
     if (mobileViewport.current || sidebarCollapsed || event.button !== 0) return;
@@ -1313,7 +1493,7 @@
   function finishSidebarResize() {
     if (!sidebarResizing) return;
     sidebarResizing = false;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function resizeSidebarWithKeyboard(event: KeyboardEvent) {
@@ -1337,12 +1517,12 @@
           ? MAX_SIDEBAR_WIDTH
           : sidebarWidth + (event.key === "ArrowLeft" ? -step : step),
     );
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function resetSidebarWidth() {
     sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    persistSidebarWidth();
     void tick().then(taskViews.resizeComposer);
   }
   function finishSidebarTransition(event: TransitionEvent) {
@@ -1374,12 +1554,6 @@
     }
     if (document.activeElement === searchInput) taskViews.focusComposer();
   }
-  function wentOffline() {
-    chatConnection.disconnect();
-  }
-  function cameOnline() {
-    if (snapshot) chatConnection.reconnect();
-  }
   onMount(() => {
     projectPath = localStorage.getItem("pidex:last-project") ?? "";
     const savedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
@@ -1406,15 +1580,21 @@
   });
 </script>
 
-<svelte:window onkeydown={globalKeydown} onoffline={wentOffline} ononline={cameOnline} />
+<svelte:window
+  onkeydown={globalKeydown}
+  onoffline={() => chatConnection.disconnect()}
+  ononline={() => {
+    if (snapshot) chatConnection.reconnect();
+  }}
+/>
 
 <svelte:head>
-  <title>Pidex</title>
+  <title>{currentTitle}</title>
   <meta name="description" content="Private local Pi dashboard" />
 </svelte:head>
 
 <div
-  class={`grid h-dvh w-full overflow-hidden ${sidebarResizing || mobileViewport.current ? "" : "transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"} ${sidebarResizing ? "cursor-col-resize select-none" : ""}`}
+  class={`grid h-dvh w-full overflow-hidden ${sidebarResizing || mobileViewport.current ? "" : "transition-[grid-template-columns] duration-200 ease-out"} ${sidebarResizing ? "cursor-col-resize select-none" : ""}`}
   style:grid-template-columns={mobileViewport.current
     ? "minmax(0, 1fr)"
     : `${sidebarCollapsed ? 0 : sidebarWidth}px minmax(0, 1fr)`}
@@ -1429,7 +1609,7 @@
 
   <aside
     id="tasks-drawer"
-    class={`relative z-20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:-translate-x-4 min-[901px]:opacity-0" : "min-[901px]:translate-x-0 min-[901px]:opacity-100"} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
+    class={`relative z-20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-sidebar px-2 text-foreground shadow-[18px_0_50px_rgb(0_0_0/18%)] transition-[transform,opacity] duration-200 ease-out max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:left-0 max-[900px]:w-[min(88vw,320px)] ${sidebarCollapsed ? "min-[901px]:-translate-x-4 min-[901px]:opacity-0" : "min-[901px]:translate-x-0 min-[901px]:opacity-100"} ${drawerOpen ? "max-[900px]:translate-x-0" : "max-[900px]:-translate-x-[102%]"}`}
     aria-label="Tasks"
     inert={(sidebarCollapsed && !mobileViewport.current) || (mobileViewport.current && !drawerOpen)}
   >
@@ -1458,16 +1638,22 @@
     <div
       class={`flex items-center gap-2 pr-1 ${usesIntegratedTitleBar ? "window-drag-region h-13 min-h-13 pl-20" : "min-h-14 pt-2 pb-1.5 pl-2"}`}
     >
-      <button
-        class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
-        bind:this={collapseSidebarButton}
-        aria-label="Collapse sidebar"
-        aria-controls="tasks-drawer"
-        aria-expanded="true"
-        onclick={collapseSidebar}
-      >
-        <Icon name="sidebar-collapse" />
-      </button>
+      <span class="icon-tooltip relative inline-flex max-[900px]:hidden">
+        <button
+          class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground"
+          bind:this={collapseSidebarButton}
+          aria-label="Collapse sidebar"
+          aria-controls="tasks-drawer"
+          aria-expanded="true"
+          onclick={collapseSidebar}
+        >
+          <Icon name="sidebar-collapse" />
+        </button>
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-left"
+          role="tooltip">Collapse sidebar</span
+        >
+      </span>
       <a class="flex min-w-0 flex-1 items-center gap-2" href="/" aria-label="Pidex home">
         {#if usesIntegratedTitleBar}
           <img
@@ -1482,16 +1668,21 @@
           >LOCAL</span
         >
       </a>
-      <button
-        class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
-        onclick={toggleSearch}
-        aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
-        aria-expanded={searchOpen}
-        aria-keyshortcuts="Meta+K Control+K"
-        title={searchOpen ? "Close search" : "Search (⌘K)"}
-      >
-        <Icon name={searchOpen ? "x" : "search"} />
-      </button>
+      <span class="icon-tooltip relative inline-flex">
+        <button
+          class={`inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:size-10 ${searchOpen ? "bg-sidebar-hover text-foreground" : ""}`}
+          onclick={toggleSearch}
+          aria-label={searchOpen ? "Close search" : "Search projects and tasks"}
+          aria-expanded={searchOpen}
+          aria-keyshortcuts="Meta+K Control+K"
+        >
+          <Icon name={searchOpen ? "x" : "search"} />
+        </button>
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+          role="tooltip">{searchOpen ? "Close search" : "Search (⌘K)"}</span
+        >
+      </span>
     </div>
 
     {#if searchOpen}
@@ -1540,10 +1731,8 @@
           </div>
         {:else}
           {#each visibleProjects as project (project.id)}
-            {@const loaded =
-              workspaceCache[project.id] ?? (workspace?.id === project.id ? workspace : undefined)}
-            {@const expanded =
-              expandedProjectIds.includes(project.id) || Boolean(search.trim() && loaded)}
+            {@const loaded = workspaceFor(project.id)}
+            {@const expanded = projectExpanded(project.id) || Boolean(search.trim() && loaded)}
             {@const matchingTasks = tasksFor(project)}
             {@const sessionLimit = search.trim()
               ? matchingTasks.length
@@ -1554,6 +1743,17 @@
             {@const hiddenTasks = expanded
               ? Math.max(0, matchingTasks.length - shownTasks.length)
               : 0}
+            {@const projectRollup = expanded
+              ? "idle"
+              : rollupProjectStatus(
+                  matchingTasks.map((task) =>
+                    resolveTaskStatus({
+                      session: task,
+                      liveTaskId: snapshot?.taskId,
+                      liveRunStatus: snapshot?.runStatus,
+                    }),
+                  ),
+                )}
             <div
               class="relative mb-1 rounded-lg"
               role="group"
@@ -1596,6 +1796,13 @@
                     class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ui font-medium text-foreground"
                     >{projectLabel(project)}</strong
                   >
+                  {#if projectRollup !== "idle"}<span
+                      class={`size-1.5 flex-none rounded-full ${projectRollup === "error" ? "bg-danger" : "bg-primary animate-status-pulse"}`}
+                      aria-label={projectRollup === "error"
+                        ? "Task needs attention"
+                        : "Tasks running"}
+                      title={projectRollup === "error" ? "Task needs attention" : "Tasks running"}
+                    ></span>{/if}
                   {#if projectLoadingId === project.id}<span
                       class="flex-none font-mono text-meta leading-none tracking-wider text-faint max-[900px]:text-meta"
                       >•••</span
@@ -1617,24 +1824,29 @@
                     class="pointer-events-none absolute inset-y-0 left-3 z-1 border-l border-border-strong/60"
                     aria-hidden="true"
                   ></span>
-                  {#if projectLoadingId === project.id && !loaded}
+                  {#if (projectLoadingId === project.id && !loaded) || (loaded && shownTasks.length === 0)}
                     <p
                       class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
                     >
-                      Loading tasks…
-                    </p>
-                  {:else if loaded && shownTasks.length === 0}
-                    <p
-                      class="m-0 h-9 py-2 pr-2 pl-[22px] text-ui text-faint max-[900px]:h-10 max-[900px]:py-2.5"
-                    >
-                      {search ? "No matching tasks." : "No tasks yet."}
+                      {projectLoadingId === project.id && !loaded
+                        ? "Loading tasks…"
+                        : search
+                          ? "No matching tasks."
+                          : "No tasks yet."}
                     </p>
                   {:else if loaded}
                     {#each shownTasks as task (task.id)}
                       {@const current = routeTaskId === task.id}
+                      {@const rowStatus = resolveTaskStatus({
+                        session: task,
+                        liveTaskId: snapshot?.taskId,
+                        liveRunStatus: snapshot?.runStatus,
+                      })}
                       <button
                         class={`group/task mb-0.5 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border-0 py-0 pr-2.5 pl-[22px] text-left text-ui text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:h-10 disabled:cursor-not-allowed disabled:opacity-40 ${current ? "bg-sidebar-active text-foreground shadow-sm" : "bg-transparent"}`}
-                        onclick={() => navigateToTask(task.id)}
+                        onclick={() => {
+                          if (!chatLoading) void goto(taskPath(task.id));
+                        }}
                         disabled={chatLoading && !routeLoading}
                         title={task.name ?? task.firstMessage}
                       >
@@ -1648,11 +1860,16 @@
                             aria-label="Worktree"
                             title="Worktree"><Icon name="worktree" size={14} /></span
                           >{/if}
-                        {#if current && active}<span
-                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-sky-500 max-[900px]:text-meta"
+                        {#if rowStatus === "running"}<span
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-primary-text max-[900px]:text-meta"
+                            title="Working"
                             ><i
-                              class="size-1.5 rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
+                              class="size-1.5 animate-status-pulse rounded-full bg-current shadow-[0_0_0_3px_color-mix(in_srgb,currentColor_12%,transparent)]"
                             ></i>Working</span
+                          >{:else if rowStatus === "error"}<span
+                            class="inline-flex flex-none items-center gap-1 text-meta font-semibold text-danger max-[900px]:text-meta"
+                            title="Error"
+                            ><i class="size-1.5 rounded-full bg-current"></i>Error</span
                           >{:else}<time
                             class="flex-none font-mono text-meta leading-none text-faint tabular-nums"
                             datetime={task.modifiedAt}>{relativeTime(task.modifiedAt)}</time
@@ -1681,25 +1898,25 @@
     class="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background"
     inert={mobileViewport.current && drawerOpen}
   >
-    {#if isNewTask}
-      {#if usesIntegratedTitleBar}<div
-          class="window-drag-region absolute inset-x-0 top-0 z-8 h-8"
-          aria-hidden="true"
-        ></div>{/if}
-      {#if sidebarCollapsed}
-        <button
-          class={`absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
-          bind:this={expandSidebarButton}
-          aria-label="Expand sidebar"
-          aria-controls="tasks-drawer"
-          aria-expanded="false"
-          onclick={expandSidebar}
-        >
-          <Icon name="sidebar-expand" size={19} />
-        </button>
-      {/if}
+    {#snippet expandSidebarControl(buttonClass: string)}
       <button
-        class={`menu-button absolute top-2.5 z-9 hidden size-8.5 place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`}
+        class={`${buttonClass} icon-tooltip`}
+        bind:this={expandSidebarButton}
+        aria-label="Expand sidebar"
+        aria-controls="tasks-drawer"
+        aria-expanded="false"
+        onclick={expandSidebar}
+      >
+        <Icon name="sidebar-expand" size={19} />
+        <span
+          class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-left"
+          role="tooltip">Expand sidebar</span
+        >
+      </button>
+    {/snippet}
+    {#snippet openTasksControl(buttonClass: string)}
+      <button
+        class={buttonClass}
         aria-label="Open tasks"
         aria-expanded={drawerOpen}
         aria-controls="tasks-drawer"
@@ -1707,47 +1924,53 @@
       >
         <Icon name="menu" size={19} />
       </button>
+    {/snippet}
+    {#if isNewTask}
+      {#if usesIntegratedTitleBar}<div
+          class="window-drag-region absolute inset-x-0 top-0 z-8 h-8"
+          aria-hidden="true"
+        ></div>{/if}
+      {#if sidebarCollapsed}
+        {@render expandSidebarControl(
+          `absolute top-2.5 z-9 hidden size-8.5 ${shellIconButtonClass} min-[901px]:inline-grid ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+        )}
+      {/if}
+      {@render openTasksControl(
+        `menu-button absolute top-2.5 z-9 hidden size-8.5 ${shellIconButtonClass} max-[900px]:inline-grid max-[900px]:size-10 ${usesIntegratedTitleBar ? "left-20" : "left-2.5"}`,
+      )}
     {:else}
       <header
         class={`z-8 flex flex-none items-center gap-3 border-b border-border/70 bg-background/90 px-4.5 backdrop-blur-xl max-[900px]:px-2.5 ${usesIntegratedTitleBar ? `window-drag-region h-13 min-h-13 py-0 ${sidebarCollapsed ? "pl-20" : "max-[900px]:pl-20"}` : "min-h-14 py-1.5 max-[560px]:min-h-13"}`}
       >
         {#if sidebarCollapsed}
-          <button
-            class="inline-grid size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:hidden"
-            bind:this={expandSidebarButton}
-            aria-label="Expand sidebar"
-            aria-controls="tasks-drawer"
-            aria-expanded="false"
-            onclick={expandSidebar}
-          >
-            <Icon name="sidebar-expand" size={19} />
-          </button>
+          {@render expandSidebarControl(
+            `relative inline-grid size-8.5 flex-none ${shellIconButtonClass} max-[900px]:hidden`,
+          )}
         {/if}
-        <button
-          class="menu-button hidden size-8.5 flex-none place-items-center rounded-lg border-0 bg-transparent text-muted transition-colors hover:bg-sidebar-hover hover:text-foreground max-[900px]:inline-grid max-[900px]:size-10"
-          aria-label="Open tasks"
-          aria-expanded={drawerOpen}
-          aria-controls="tasks-drawer"
-          onclick={() => (drawerOpen = true)}
-        >
-          <Icon name="menu" size={19} />
-        </button>
+        {@render openTasksControl(
+          `menu-button hidden size-8.5 flex-none ${shellIconButtonClass} max-[900px]:inline-grid max-[900px]:size-10`,
+        )}
         <div class="min-w-0 flex-1">
           <strong
-            class="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tracking-tight"
+            class="block overflow-hidden text-ellipsis whitespace-nowrap text-ui font-semibold tracking-tight"
             >{currentTitle}</strong
           >
         </div>
         {#if snapshot}
           <div class="flex gap-1">
-            <button
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
-              onclick={openRename}
-              disabled={active}
-              aria-label="Rename"
-              title="Rename task"
-              ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
-            >
+            <span class="icon-tooltip relative inline-flex">
+              <button
+                class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-control font-medium text-muted hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-9 max-[900px]:justify-center max-[900px]:p-0"
+                onclick={openRename}
+                disabled={active}
+                aria-label="Rename"
+                ><Icon name="rename" /><span class="max-[900px]:hidden">Rename</span></button
+              >
+              <span
+                class="icon-tooltip-bubble icon-tooltip-bubble--below icon-tooltip-bubble--align-right"
+                role="tooltip">Rename task</span
+              >
+            </span>
           </div>
         {/if}
       </header>
@@ -1756,10 +1979,7 @@
     {#if isNewTask && hasTopBanner}<div class="h-13 flex-none" aria-hidden="true"></div>{/if}
 
     {#if error}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger"
-        role="alert"
-      >
+      <div class={bannerClass("border-danger/25 bg-danger/10", "text-danger")} role="alert">
         <span>{error}</span><button
           class="grid rounded p-1 text-inherit"
           aria-label="Dismiss error"
@@ -1767,55 +1987,40 @@
         >
       </div>
     {/if}
-    {#if snapshot && connection !== "connected" && !routeLoading}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs text-muted"
-        role="status"
-      >
+    {#if snapshot && banner && !routeLoading}
+      <div class={bannerClass("border-primary/25 bg-primary/8", "text-muted")} role="status">
         <span class="leading-relaxed"
-          ><strong>Host unavailable.</strong> Your task remains on the desktop; drafts will not be submitted
-          while disconnected.</span
+          >{#if banner === "connecting"}<strong>Connecting…</strong> Waiting for the desktop host.{:else}<strong
+              >Reconnecting…</strong
+            > Your task remains on the desktop; drafts will not be submitted while disconnected.{/if}</span
         ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold disabled:opacity-40"
+          class={`${bannerActionClass} disabled:opacity-40`}
           onclick={retryConnection}
           disabled={retryingConnection}>{retryingConnection ? "Retrying…" : "Retry"}</button
         >
       </div>
     {/if}
     {#if snapshot?.run?.requiresAcknowledgement}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="alert"
-      >
+      <div class={warningBannerClass} role="alert">
         <span class="leading-relaxed"
           ><strong>Run interrupted.</strong> The host cannot prove whether this run completed before it
           stopped. Review the Pi transcript, then acknowledge before sending new work.</span
-        ><button
-          class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
-          onclick={acknowledgeInterrupted}>Acknowledge</button
-        >
+        ><button class={bannerActionClass} onclick={acknowledgeInterrupted}>Acknowledge</button>
       </div>
     {/if}
     {#if workspace?.protectedResourcesSkipped}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="status"
-      >
+      <div class={warningBannerClass} role="status">
         <span
           >Project resources requiring trust were skipped. {window.pidexDesktop
             ? "Review the project before loading them."
             : "Open Pidex Desktop or Pi locally to review trust."}</span
-        >{#if window.pidexDesktop}<button
-            class="flex-none border border-current px-2 py-1.5 text-meta font-semibold"
-            onclick={approveProjectTrust}>Review & trust</button
+        >{#if window.pidexDesktop}<button class={bannerActionClass} onclick={approveProjectTrust}
+            >Review & trust</button
           >{/if}
       </div>
     {/if}
     {#if workspace?.resourceDiagnostics.length}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-        role="status"
-      >
+      <div class={warningBannerClass} role="status">
         <span
           ><strong>Pi resource warning.</strong>
           {workspace.resourceDiagnostics[0]?.message}{#if workspace.resourceDiagnostics.length > 1}
@@ -1824,20 +2029,43 @@
       </div>
     {/if}
     {#if workspace && workspace.models.length === 0}
-      <div
-        class="z-6 mx-4.5 mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning"
-      >
+      <div class={warningBannerClass}>
         No authenticated models are available. Run <code>pi</code> and use <code>/login</code> locally.
       </div>
     {/if}
+
+    {#key toastOccurrence}
+      <Toast message={toast} ondismiss={() => (toast = "")} />
+    {/key}
 
     {@render children()}
   </main>
 </div>
 
+{#snippet dialogHeader(
+  icon: "folder-plus" | "rename" | "activity",
+  titleId: string,
+  title: string,
+  description?: string,
+)}
+  <div class="mb-4.5 flex items-start gap-3">
+    <div
+      class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
+    >
+      <Icon name={icon} />
+    </div>
+    <div>
+      <h2 class="m-0 text-heading font-semibold" id={titleId}>{title}</h2>
+      {#if description}<p class="mt-1 mb-0 text-control leading-relaxed text-muted">
+          {description}
+        </p>{/if}
+    </div>
+  </div>
+{/snippet}
+
 <dialog
   bind:this={projectDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(560px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class={[appDialogClass, "w-[min(560px,calc(100vw-28px))]"]}
   aria-labelledby="project-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1845,21 +2073,14 @@
   }}
 >
   <form class="p-5 pb-3.5" method="dialog" onsubmit={(event) => event.preventDefault()}>
-    <div class="mb-4.5 flex items-start gap-3">
-      <div
-        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-      >
-        <Icon name="folder-plus" />
-      </div>
-      <div>
-        <h2 class="m-0 text-heading font-semibold" id="project-dialog-title">Add a project</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Choose by project name. Folder paths stay out of the main workspace UI.
-        </p>
-      </div>
-    </div>
+    {@render dialogHeader(
+      "folder-plus",
+      "project-dialog-title",
+      "Add a project",
+      "Choose by project name. Folder paths stay out of the main workspace UI.",
+    )}
     <label
-      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary/55 focus-within:text-muted"
+      class="m-0 flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-background px-3 text-faint focus-within:border-primary focus-within:text-muted"
     >
       <Icon name="search" size={15} />
       <input
@@ -1898,7 +2119,7 @@
           >
         </div>
       {:else}
-        {#each availableProjects as candidate, candidateIndex (candidate.path)}
+        {#each availableProjects as candidate (candidate.path)}
           <button
             type="button"
             class="flex min-h-13 w-full items-center gap-3 rounded-lg border-0 bg-transparent px-2 py-2 text-left text-foreground hover:bg-secondary disabled:opacity-40"
@@ -1907,7 +2128,7 @@
             aria-label={`${projectAdded(candidate) ? "Open" : "Add"} ${candidate.name}`}
           >
             <span
-              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${candidateIndex % 3 === 1 ? "border-purple-500/20 bg-purple-500/10 text-purple-500" : candidateIndex % 3 === 2 ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500" : "border-primary/15 bg-primary/10 text-primary"}`}
+              class={`grid size-8 flex-none place-items-center rounded-lg border text-control font-bold ${projectTileClass(candidate.name)}`}
               >{candidate.name.slice(0, 1).toUpperCase()}</span
             >
             <span class="grid min-w-0 flex-1 gap-1"
@@ -1918,7 +2139,7 @@
               ></span
             >
             <span
-              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary" : "text-muted"}`}
+              class={`min-w-10 text-right text-meta font-semibold ${projectAdded(candidate) ? "text-primary-text" : "text-muted"}`}
               >{projectAdded(candidate) ? "Open" : "Add"}</span
             >
           </button>
@@ -1934,7 +2155,7 @@
           ><Icon name="folder" size={14} /> Browse another folder</button
         >{/if}
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground disabled:opacity-40"
+        class={`${dialogSecondaryButtonClass} disabled:opacity-40`}
         type="button"
         onclick={() => projectDialogElement?.close()}
         disabled={projectBatchLoading}>Done</button
@@ -1945,7 +2166,7 @@
 
 <dialog
   bind:this={renameDialogElement}
-  class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+  class={[appDialogClass, "w-[min(460px,calc(100vw-28px))]"]}
   aria-labelledby="rename-dialog-title"
   oncancel={(event) => {
     event.preventDefault();
@@ -1960,35 +2181,23 @@
       void rename();
     }}
   >
-    <div class="mb-4.5 flex items-start gap-3">
-      <div
-        class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-      >
-        <Icon name="rename" />
-      </div>
-      <div>
-        <h2 class="m-0 text-heading font-semibold" id="rename-dialog-title">Rename task</h2>
-        <p class="mt-1 mb-0 text-xs leading-relaxed text-muted">
-          Give this task a concise, memorable name.
-        </p>
-      </div>
-    </div>
+    {@render dialogHeader(
+      "rename",
+      "rename-dialog-title",
+      "Rename task",
+      "Give this task a concise, memorable name.",
+    )}
     <label class="mb-1.5 block text-control font-medium text-muted" for="session-name"
       >Task name</label
     >
-    <input
-      class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
-      id="session-name"
-      bind:value={renameValue}
-      autocomplete="off"
-    />
+    <input class={dialogInputClass} id="session-name" bind:value={renameValue} autocomplete="off" />
     <div class="mt-5 flex justify-end gap-2">
       <button
-        class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
+        class={dialogSecondaryButtonClass}
         type="button"
         onclick={() => renameDialogElement?.close()}>Cancel</button
       ><button
-        class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground disabled:opacity-40"
+        class={`${dialogPrimaryButtonClass} disabled:opacity-40`}
         type="submit"
         disabled={!renameValue.trim()}>Save name</button
       >
@@ -1999,7 +2208,7 @@
 {#if snapshot?.extensionDialog}
   <dialog
     bind:this={dialogElement}
-    class="app-dialog m-auto max-h-[calc(100dvh-28px)] w-[min(460px,calc(100vw-28px))] rounded-2xl border border-border bg-card p-0 text-foreground shadow-[0_24px_90px_rgb(0_0_0/28%)]"
+    class={[appDialogClass, "w-[min(460px,calc(100vw-28px))]"]}
     aria-labelledby="extension-dialog-title"
     oncancel={(event) => {
       event.preventDefault();
@@ -2014,28 +2223,14 @@
         void answerDialog(snapshot!.extensionDialog!);
       }}
     >
-      <div class="mb-4.5 flex items-start gap-3">
-        <div
-          class="grid size-8.5 flex-none place-items-center rounded-xl border border-border bg-secondary text-muted"
-        >
-          <Icon name="activity" />
-        </div>
-        <div>
-          <h2 class="m-0 text-heading font-semibold" id="extension-dialog-title">
-            {snapshot.extensionDialog.title}
-          </h2>
-          {#if snapshot.extensionDialog.message}<p
-              class="mt-1 mb-0 text-xs leading-relaxed text-muted"
-            >
-              {snapshot.extensionDialog.message}
-            </p>{/if}
-        </div>
-      </div>
+      {@render dialogHeader(
+        "activity",
+        "extension-dialog-title",
+        snapshot.extensionDialog.title,
+        snapshot.extensionDialog.message,
+      )}
       {#if snapshot.extensionDialog.kind === "select"}
-        <select
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
-          bind:value={dialogValue}
-          aria-label="Response"
+        <select class={dialogInputClass} bind:value={dialogValue} aria-label="Response"
           >{#each snapshot.extensionDialog.options ?? [] as option (option)}<option value={option}
               >{option}</option
             >{/each}</select
@@ -2049,14 +2244,11 @@
           /> Confirm</label
         >
       {:else if snapshot.extensionDialog.kind === "editor"}
-        <textarea
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
-          bind:value={dialogValue}
-          aria-label="Response"
-          rows="8"></textarea>
+        <textarea class={dialogInputClass} bind:value={dialogValue} aria-label="Response" rows="8"
+        ></textarea>
       {:else}
         <input
-          class="w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground outline-none"
+          class={dialogInputClass}
           bind:value={dialogValue}
           aria-label="Response"
           placeholder={snapshot.extensionDialog.placeholder}
@@ -2064,13 +2256,10 @@
       {/if}
       <div class="mt-5 flex justify-end gap-2">
         <button
-          class="min-h-8.5 rounded-lg border border-border bg-card px-3 text-control font-medium text-muted hover:text-foreground"
+          class={dialogSecondaryButtonClass}
           type="button"
           onclick={() => answerDialog(snapshot!.extensionDialog!, true)}>Cancel</button
-        ><button
-          class="min-h-8.5 rounded-lg border border-primary bg-primary px-3 text-control font-medium text-primary-foreground"
-          type="submit">Continue</button
-        >
+        ><button class={dialogPrimaryButtonClass} type="submit">Continue</button>
       </div>
     </form>
   </dialog>

@@ -1,5 +1,26 @@
 <script lang="ts" module>
-  import type { Workspace } from "@pidex/api";
+  import type { ChatSnapshot, Workspace } from "@pidex/api";
+  import type { ConnectionState } from "./AppShellConnection";
+
+  export const composerSurfaceClass =
+    "relative mx-auto w-full max-w-transcript overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]";
+  export const composerTextareaClass =
+    "block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-ui leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base";
+  export const composerFooterClass =
+    "flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2";
+  export const composerControlsClass =
+    "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0";
+  export const composerSendButtonClass =
+    "inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none";
+
+  export function autoGrowComposerTextarea(element: HTMLTextAreaElement): void {
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 210)}px`;
+  }
+
+  export function isDesktopEnterSubmit(event: KeyboardEvent): boolean {
+    return event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches;
+  }
 
   export type ComposerCommand = Workspace["commands"][number];
 
@@ -78,10 +99,6 @@
     return query === normalizedText ? score - 100 : score;
   }
 
-  export function completeSlashCommand(command: ComposerCommand): string {
-    return `/${command.name} `;
-  }
-
   export function nextSlashCommand(
     commands: ComposerCommand[],
     current: ComposerCommand | undefined,
@@ -95,11 +112,123 @@
     return commands[(currentIndex + direction + commands.length) % commands.length];
   }
 
-  export function parseCompactCommand(draft: string): { instructions?: string } | undefined {
+  function parseCompactCommand(draft: string): { instructions?: string } | undefined {
     const match = /^\/compact(?:\s+(.*?))?\s*$/s.exec(draft);
     if (!match) return undefined;
     const instructions = match[1]?.trim();
     return instructions ? { instructions } : {};
+  }
+
+  /**
+   * Cascades the composer's disabled-state reason into the textarea placeholder and the
+   * send/stop button's aria-label + title.
+   *
+   * The two outputs deliberately use different priority orders, because they label different
+   * things. `placeholder` is plain informational text about the whole composer, so it always
+   * surfaces the highest-priority reason, including while a run is `active`. `sendLabel` names
+   * the *currently rendered control* -- the send button while idle, the stop button while
+   * `active` -- so it must reflect what actually disables THAT control: the send button is
+   * blocked by any of the reasons below, but the stop button is only ever blocked by a lost
+   * connection (see its `disabled={connection !== "connected"}` binding). Labelling an enabled,
+   * clickable stop button with a disabled-reason message like "Compacting context" would be
+   * misleading, so once a run is `active` (and connected), its label is always the plain action
+   * name "Stop", regardless of any other reason still being true underneath it.
+   *
+   * `reason` below is checked in this order (first match wins), independent of `active`:
+   *
+   * 1. requiresAcknowledgement — blocks every submission path and needs a user action, so
+   *    it outranks the passive setup states below it.
+   * 2. no models — sending can never work regardless of any transient pending state.
+   * 3. creatingTask — the task's worktree does not exist yet; nothing else can be true
+   *    until it is.
+   * 4. configurationPending — a model/thinking-level change is being saved; a transient
+   *    wait that can only happen once the task exists.
+   * 5. compactPending — a context compaction is in flight.
+   *
+   * `connection` is checked before all of the above (a connection failure invalidates
+   * everything downstream: you cannot acknowledge, configure, or send while disconnected, and
+   * it is the one reason that also disables the stop button), and `active`/default idle apply
+   * once nothing above blocks (an empty draft intentionally gets no special-cased message: a
+   * disabled-but-labeled-"Send" button for an empty draft is expected UX).
+   */
+  export function composerAffordances(state: {
+    active: boolean;
+    compactPending: boolean;
+    configurationPending: boolean;
+    connection: ConnectionState;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } {
+    if (state.connection !== "connected") {
+      return {
+        placeholder: "Draft locally while the host reconnects…",
+        sendLabel: "Environment disconnected",
+      };
+    }
+    const reason = composerBlockedReason(state);
+    if (state.active) {
+      return { placeholder: reason?.placeholder ?? "Draft your next message…", sendLabel: "Stop" };
+    }
+    if (reason) return reason;
+    return { placeholder: "Ask Pi to work on this project…", sendLabel: "Send" };
+  }
+
+  function composerBlockedReason(state: {
+    compactPending: boolean;
+    configurationPending: boolean;
+    creatingTask: boolean;
+    hasModels: boolean;
+    requiresAcknowledgement: boolean;
+  }): { placeholder: string; sendLabel: string } | undefined {
+    if (state.requiresAcknowledgement) {
+      const reason = "Acknowledge the interrupted run above to continue";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (!state.hasModels) {
+      const reason = "Run pi and /login to enable models";
+      return { placeholder: reason, sendLabel: reason };
+    }
+    if (state.creatingTask) {
+      return { placeholder: "Preparing worktree…", sendLabel: "Preparing worktree" };
+    }
+    if (state.configurationPending) {
+      return { placeholder: "Saving configuration…", sendLabel: "Saving configuration" };
+    }
+    if (state.compactPending) {
+      return { placeholder: "Compacting session context…", sendLabel: "Compacting context" };
+    }
+    return undefined;
+  }
+
+  export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
+    switch (status) {
+      case "running":
+        return "Working";
+      case "stopping":
+        return "Stopping";
+      case "compacting":
+        return "Compacting context";
+      default:
+        return "Idle";
+    }
+  }
+
+  export function queueSummary(steeringCount: number, followUpCount: number): string {
+    const parts: string[] = [];
+    if (steeringCount > 0) parts.push(`${steeringCount} steering`);
+    if (followUpCount > 0) parts.push(`${followUpCount} follow-up`);
+    return parts.length > 0 ? `${parts.join(" · ")} queued` : "";
+  }
+
+  export function formatRunElapsed(elapsedMs: number): string {
+    const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
   }
 
   export async function submitComposerDraft(
@@ -120,19 +249,14 @@
 </script>
 
 <script lang="ts">
-  import type { ChatSnapshot, ContextUsage } from "@pidex/api";
+  import type { ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
-  import type { ConnectionState } from "./AppShellConnection";
   import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
+  import ComposerModelControls from "./ComposerModelControls.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
   import StartModeSelector from "./StartModeSelector.svelte";
-
-  const composerSelectLabelClass =
-    "flex h-7.5 min-w-0 flex-none items-center gap-1.5 overflow-hidden rounded-lg pl-2 text-muted transition-colors duration-[140ms] hover:bg-secondary hover:text-foreground focus-within:bg-secondary focus-within:text-foreground max-[560px]:h-9 max-[560px]:gap-1 max-[560px]:pl-1.5";
-  const composerSelectClass =
-    "h-full max-w-44 min-w-0 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap border-0 border-none bg-transparent pr-5 text-control font-semibold text-inherit outline-none disabled:cursor-not-allowed disabled:opacity-42 max-[560px]:pr-3.5 max-[560px]:text-control [@supports(appearance:base-select)]:flex [@supports(appearance:base-select)]:items-center [@supports(appearance:base-select)]:gap-1.5 [@supports(appearance:base-select)]:pr-1.5 [@supports(appearance:base-select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:[appearance:base-select] [@supports(appearance:base-select)]:[&::picker(select)]:max-h-[min(22rem,calc(100dvh-2rem))] [@supports(appearance:base-select)]:[&::picker(select)]:overflow-y-auto [@supports(appearance:base-select)]:[&::picker(select)]:[position-area:block-start_span-inline-end] [@supports(appearance:base-select)]:[&::picker(select)]:[position-try-fallbacks:flip-block] [@supports(appearance:base-select)]:[&::picker(select)]:mb-2 [@supports(appearance:base-select)]:[&::picker(select)]:rounded-xl [@supports(appearance:base-select)]:[&::picker(select)]:border [@supports(appearance:base-select)]:[&::picker(select)]:border-border-strong [@supports(appearance:base-select)]:[&::picker(select)]:bg-card [@supports(appearance:base-select)]:[&::picker(select)]:p-1 [@supports(appearance:base-select)]:[&::picker(select)]:text-foreground [@supports(appearance:base-select)]:[&::picker(select)]:shadow-[0_18px_48px_rgb(0_0_0/24%)] [@supports(appearance:base-select)]:[&::picker(select)]:[scrollbar-width:thin] [@supports(appearance:base-select)]:[&::picker-icon]:size-3 [@supports(appearance:base-select)]:[&::picker-icon]:ml-0.5 [@supports(appearance:base-select)]:[&::picker-icon]:text-faint [@supports(appearance:base-select)]:[&::picker-icon]:transition-[rotate] [@supports(appearance:base-select)]:[&::picker-icon]:duration-[140ms] [@supports(appearance:base-select)]:[&::picker-icon]:ease-[ease] [@supports(appearance:base-select)]:[&:open::picker-icon]:rotate-180 [@supports(appearance:base-select)]:[&_option]:flex [@supports(appearance:base-select)]:[&_option]:min-h-8 [@supports(appearance:base-select)]:[&_option]:items-center [@supports(appearance:base-select)]:[&_option]:rounded-lg [@supports(appearance:base-select)]:[&_option]:px-2 [@supports(appearance:base-select)]:[&_option]:py-[0.45rem] [@supports(appearance:base-select)]:[&_option]:text-xs [@supports(appearance:base-select)]:[&_option]:font-medium [@supports(appearance:base-select)]:[&_option]:text-muted [@supports(appearance:base-select)]:[&_option]:cursor-pointer [@supports(appearance:base-select)]:[&_option:hover]:bg-secondary [@supports(appearance:base-select)]:[&_option:hover]:text-foreground [@supports(appearance:base-select)]:[&_option:focus-visible]:bg-secondary [@supports(appearance:base-select)]:[&_option:focus-visible]:text-foreground [@supports(appearance:base-select)]:[&_option:checked]:bg-[color-mix(in_srgb,var(--primary)_12%,var(--secondary))] [@supports(appearance:base-select)]:[&_option:checked]:font-[650] [@supports(appearance:base-select)]:[&_option:checked]:text-foreground [@supports(appearance:base-select)]:[&_option::checkmark]:order-1 [@supports(appearance:base-select)]:[&_option::checkmark]:ml-auto [@supports(appearance:base-select)]:[&_option::checkmark]:text-primary";
 
   let {
     active,
@@ -160,6 +284,7 @@
     startModeEditable,
     steeringCount,
     stop,
+    taskId,
   }: {
     active: boolean;
     clearQueue: () => Promise<void>;
@@ -186,6 +311,8 @@
     startModeEditable: boolean;
     steeringCount: number;
     stop: () => Promise<void>;
+    /** Identifies the task whose run is being timed, so switching between two already-active tasks restarts the elapsed clock. */
+    taskId: string;
   } = $props();
 
   let promptInput: HTMLTextAreaElement | undefined;
@@ -198,6 +325,17 @@
       configurationPending ||
       compactPending,
   );
+  let affordances = $derived(
+    composerAffordances({
+      active,
+      compactPending,
+      configurationPending,
+      connection,
+      creatingTask,
+      hasModels: models.length > 0,
+      requiresAcknowledgement,
+    }),
+  );
   const componentId = $props.id();
   const commandListId = `${componentId}-commands`;
   let commandCatalog = $derived(composerCommands(commands));
@@ -207,6 +345,30 @@
     commandSuggestions.find((command) => command.name === selectedCommandName) ??
       commandSuggestions[0],
   );
+  let runStartedAt = $state<number>();
+  let runNow = $state(Date.now());
+  let statusLabel = $derived(runStatusLabel(runStatus));
+  let elapsedLabel = $derived(
+    runStartedAt === undefined ? undefined : formatRunElapsed(runNow - runStartedAt),
+  );
+  let queueLabel = $derived(queueSummary(steeringCount, followUpCount));
+
+  /**
+   * Times the run in the client, the way `recordToolTiming` times tools: no start timestamp is on
+   * the wire. Also depends on `taskId` so navigating directly between two already-active tasks
+   * restarts the clock instead of carrying over the previous task's start time.
+   */
+  $effect(() => {
+    void taskId;
+    if (active) runStartedAt = Date.now();
+    else runStartedAt = undefined;
+  });
+
+  $effect(() => {
+    if (!active) return;
+    const interval = window.setInterval(() => (runNow = Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  });
 
   export function focus() {
     promptInput?.focus();
@@ -214,8 +376,7 @@
 
   export function resize() {
     if (!promptInput) return;
-    promptInput.style.height = "auto";
-    promptInput.style.height = `${Math.min(promptInput.scrollHeight, 210)}px`;
+    autoGrowComposerTextarea(promptInput);
   }
 
   const attachPromptInput: Attachment<HTMLTextAreaElement> = (element) => {
@@ -231,7 +392,7 @@
   }
 
   function completeCommand(command: ComposerCommand) {
-    draft = completeSlashCommand(command);
+    draft = `/${command.name} `;
     selectedCommandName = "";
     persistDraft();
     resize();
@@ -241,20 +402,6 @@
   async function updateConfiguration(patch: TaskConfigurationPatch) {
     if (configurationPending || active || creatingTask || connection !== "connected") return;
     await configure(patch);
-  }
-
-  function updateThinkingLevel(value: string) {
-    if (
-      value !== "off" &&
-      value !== "minimal" &&
-      value !== "low" &&
-      value !== "medium" &&
-      value !== "high" &&
-      value !== "xhigh" &&
-      value !== "max"
-    )
-      return;
-    void updateConfiguration({ thinkingLevel: value });
   }
 
   async function moveCommandSelection(direction: -1 | 1) {
@@ -298,9 +445,9 @@
       completeCommand(selectedSuggestion);
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches) {
+    if (isDesktopEnterSubmit(event)) {
       event.preventDefault();
-      if (active || compactPending || idleSubmissionDisabled) return;
+      if (active || idleSubmissionDisabled) return;
       void submitDraft();
     }
   }
@@ -309,27 +456,26 @@
 <footer
   class="relative z-7 flex-none bg-[linear-gradient(to_bottom,transparent_0,var(--background)_20px,var(--background)_100%)] px-5 pt-2.5 pb-[max(9px,env(safe-area-inset-bottom))] max-[900px]:px-2.5 max-[560px]:px-2 max-[560px]:pt-2 max-[560px]:pb-[max(7px,env(safe-area-inset-bottom))]"
 >
-  {#if active}
-    <div
-      class="mx-auto flex w-full max-w-3xl items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint"
-    >
-      <span class="flex items-center gap-1.5"
-        ><span class="size-1.5 animate-pulse rounded-full bg-primary"></span>{runStatus} · {steeringCount}
-        steer · {followUpCount} follow-up</span
-      >
-      {#if steeringCount + followUpCount > 0}<button
-          class="border-0 bg-transparent p-0 text-meta text-primary"
-          onclick={clearQueue}>Clear queues</button
-        >{/if}
-    </div>
-  {/if}
   <div
-    class="relative mx-auto w-full max-w-3xl overflow-visible rounded-composer border border-border-strong bg-[color-mix(in_srgb,var(--card)_96%,transparent)] shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] transition-[border-color,box-shadow,background-color] duration-[160ms] focus-within:border-[color-mix(in_srgb,var(--primary)_78%,var(--border-strong))] focus-within:shadow-[0_16px_40px_-22px_rgb(24_24_27/55%),0_0_0_3px_color-mix(in_srgb,var(--primary)_9%,transparent)] dark:bg-[color-mix(in_srgb,var(--card)_92%,transparent)] dark:shadow-[inset_0_1px_rgb(255_255_255/3%)] dark:focus-within:shadow-[inset_0_1px_rgb(255_255_255/3%),0_0_0_3px_color-mix(in_srgb,var(--primary)_11%,transparent)]"
-    data-testid="chat-composer"
+    class={[
+      "mx-auto flex w-full max-w-transcript min-h-6 items-center justify-between gap-2.5 px-2 pb-2 text-meta text-faint",
+      !active && "invisible",
+    ]}
   >
+    <span class="flex items-center gap-1.5"
+      ><span class="size-1.5 animate-status-pulse rounded-full bg-primary"
+      ></span>{statusLabel}{#if elapsedLabel}{" "}for
+        <span class="font-mono tabular-nums">{elapsedLabel}</span>{/if}{#if queueLabel}{" "}· {queueLabel}{/if}</span
+    >
+    {#if steeringCount + followUpCount > 0}<button
+        class="border-0 bg-transparent p-0 text-meta text-primary-text"
+        onclick={clearQueue}>Clear queues</button
+      >{/if}
+  </div>
+  <div class={composerSurfaceClass} data-testid="chat-composer">
     {#if commandSuggestions.length > 0}
       <div
-        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-[0_18px_48px_rgb(0_0_0/24%)]"
+        class="absolute right-0 bottom-[calc(100%+0.5rem)] left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-popover"
         id={commandListId}
         role="listbox"
         aria-label="Commands"
@@ -346,7 +492,7 @@
             aria-selected={command === selectedSuggestion}
             onclick={() => completeCommand(command)}
           >
-            <span class="w-30 flex-none font-mono text-xs font-medium text-primary"
+            <span class="w-30 flex-none font-mono text-control font-medium text-primary-text"
               >/{command.name}</span
             >
             <span class="min-w-0 text-control text-muted"
@@ -376,17 +522,13 @@
       </div>
     {/if}
     <textarea
-      class="block min-h-16 max-h-52 w-full resize-none border-0 border-none bg-transparent px-4.5 pt-4 pb-2 text-sm leading-[1.5] text-foreground outline-none placeholder:text-faint max-[560px]:min-h-18 max-[560px]:px-3.5 max-[560px]:pt-3.5 max-[560px]:pb-1.5 max-[560px]:text-base"
+      class={composerTextareaClass}
       {@attach attachPromptInput}
       bind:value={draft}
       oninput={draftInput}
       onkeydown={keydown}
       rows="2"
-      placeholder={connection !== "connected"
-        ? "Draft locally while the host reconnects…"
-        : active
-          ? "Draft your next message…"
-          : "Ask Pi to work on this project…"}
+      placeholder={affordances.placeholder}
       aria-autocomplete="list"
       aria-controls={commandSuggestions.length > 0 ? commandListId : undefined}
       aria-activedescendant={selectedSuggestion
@@ -396,54 +538,24 @@
       aria-haspopup="listbox"
       role="combobox"
       aria-label="Prompt"></textarea>
-    <div
-      class="flex min-h-11.5 min-w-0 items-center justify-between gap-2.5 pt-0.5 pr-2.5 pb-2.5 pl-3 max-[560px]:min-h-12 max-[560px]:items-end max-[560px]:pr-1.75 max-[560px]:pb-1.75 max-[560px]:pl-2"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[560px]:gap-0"
-      >
-        <label class={composerSelectLabelClass}>
-          <select
-            class={[
-              composerSelectClass,
-              "max-[560px]:w-36 max-[560px]:max-w-36 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-56",
-            ]}
-            aria-label="Model"
-            value={selectedModel}
-            onchange={(event) => void updateConfiguration({ model: event.currentTarget.value })}
-            disabled={!models.length ||
-              active ||
-              creatingTask ||
-              configurationPending ||
-              connection !== "connected"}
-          >
-            {#each models as model (model.id)}<option value={model.id}>{model.name}</option>{/each}
-          </select>
-        </label>
-        <span class="mx-0.5 h-4 w-px flex-none bg-border max-[560px]:mx-0" aria-hidden="true"
-        ></span>
-        <label class={composerSelectLabelClass}>
-          <span
-            class="grid w-4 flex-none place-items-center text-current max-[560px]:hidden"
-            aria-hidden="true"><Icon name="activity" size={14} /></span
-          >
-          <select
-            class={[
-              composerSelectClass,
-              "max-[560px]:max-w-27 [@supports(appearance:base-select)]:[&::picker(select)]:min-w-36",
-            ]}
-            aria-label="Thinking level"
-            value={selectedThinkingLevel}
-            onchange={(event) => updateThinkingLevel(event.currentTarget.value)}
-            disabled={active || creatingTask || configurationPending || connection !== "connected"}
-          >
-            <option value="off">Off</option><option value="minimal">Minimal</option><option
-              value="low">Low</option
-            ><option value="medium">Medium</option><option value="high">High</option><option
-              value="xhigh">Extra high</option
-            ><option value="max">Max</option>
-          </select>
-        </label>
+    <div class={composerFooterClass}>
+      <div class={composerControlsClass}>
+        <ComposerModelControls
+          {models}
+          {selectedModel}
+          thinkingLevel={selectedThinkingLevel}
+          modelDisabled={!models.length ||
+            active ||
+            creatingTask ||
+            configurationPending ||
+            connection !== "connected"}
+          thinkingDisabled={active ||
+            creatingTask ||
+            configurationPending ||
+            connection !== "connected"}
+          onModel={(model) => void updateConfiguration({ model })}
+          onThinking={(thinkingLevel) => void updateConfiguration({ thinkingLevel })}
+        />
       </div>
       <div class="flex min-w-0 flex-none items-center gap-1">
         {#if contextUsage}<ContextUsageMeter usage={contextUsage} />{/if}
@@ -452,14 +564,16 @@
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
             onclick={stop}
             disabled={connection !== "connected"}
-            aria-label="Stop"><Icon name="stop" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="stop" /></button
           >
         {:else}
           <button
-            class="inline-grid size-8.5 flex-none place-items-center rounded-full border-0 border-none bg-primary text-primary-foreground shadow-[0_4px_12px_color-mix(in_srgb,var(--primary)_24%,transparent)] transition-[background-color,box-shadow,transform,opacity] duration-[140ms] hover:not-disabled:-translate-y-px hover:not-disabled:bg-primary-hover hover:not-disabled:shadow-[0_6px_16px_color-mix(in_srgb,var(--primary)_34%,transparent)] active:not-disabled:translate-y-0 max-[900px]:size-10 disabled:cursor-not-allowed disabled:opacity-35 disabled:shadow-none"
+            class={composerSendButtonClass}
             onclick={submitDraft}
             disabled={idleSubmissionDisabled}
-            aria-label="Send"><Icon name="send" /></button
+            aria-label={affordances.sendLabel}
+            title={affordances.sendLabel}><Icon name="send" /></button
           >
         {/if}
       </div>

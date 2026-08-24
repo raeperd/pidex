@@ -8,7 +8,6 @@
   --color-sidebar-active: var(--sidebar-active);
   --color-card: var(--card);
   --color-secondary: var(--secondary);
-  --color-secondary-hover: var(--secondary-hover);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-border: var(--border);
@@ -16,9 +15,10 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
-  --color-success: var(--success);
+  --color-primary-text: var(--primary-text);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
   --font-sans:
     "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, monospace;
@@ -37,7 +37,31 @@
   --text-display: 1.875rem;
   --text-display--line-height: 2.25rem;
   --radius-composer: 1rem;
-  --container-transcript: 36rem;
+  --container-transcript: 44rem;
+  /* Elevation scale: raised (tooltips, floating chips), popover (menus), modal (dialogs). */
+  --shadow-raised: 0 4px 16px rgb(0 0 0 / 14%);
+  --shadow-popover: 0 18px 48px rgb(0 0 0 / 24%);
+  --shadow-modal: 0 24px 90px rgb(0 0 0 / 28%);
+  /* Duty-cycled status indicator: a stepped ramp with a long hold, so the
+     compositor updates a handful of discrete frames per cycle instead of
+     every vsync. Used by "in progress" dots instead of the free-running
+     Tailwind animate-pulse. */
+  --animate-status-pulse: status-pulse 2s infinite;
+  @keyframes status-pulse {
+    0%,
+    40% {
+      opacity: 1;
+      animation-timing-function: steps(6);
+    }
+    50%,
+    90% {
+      opacity: 0.5;
+      animation-timing-function: steps(6);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
 }
 
 :root {
@@ -56,7 +80,6 @@
   --sidebar-active: #fff;
   --card: #fff;
   --secondary: #f1f1f2;
-  --secondary-hover: #e9e9eb;
   --muted: #71717a;
   --faint: #a1a1aa;
   --border: #e4e4e7;
@@ -64,14 +87,14 @@
   --primary: #6a9fcc;
   --primary-hover: #5b90bb;
   --primary-foreground: #09090b;
-  --success: #16a36a;
-  --danger: #dc4c4c;
+  /* Darker primary for text on light surfaces; #6a9fcc itself is ~2.8:1 on the background. */
+  --primary-text: #386f9f;
+  --danger: #c73e3e;
   --warning: #b7791f;
+  /* Darker warning for small text on tinted surfaces; --warning stays for borders and tints. */
+  --warning-text: #8a5a12;
   --shadow: 0 18px 45px rgb(24 24 27 / 8%), 0 2px 6px rgb(24 24 27 / 4%);
   --mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, monospace;
-  --tool-pending: #e8e8f0;
-  --tool-success: #e8f0e8;
-  --tool-error: #f0e8e8;
   --tool-argument: #2f7f76;
 }
 
@@ -138,6 +161,58 @@
 .app-dialog::backdrop {
   background: rgb(9 9 11 / 58%);
   backdrop-filter: blur(3px);
+}
+
+/* Shared icon-button tooltip. Mark the hover/focus boundary (a wrapper span,
+   or the trigger element itself) with .icon-tooltip and give it a child
+   .icon-tooltip-bubble; positioning (relative/absolute) stays on the trigger's
+   own classes so this works whether the trigger is a plain wrapper or an
+   already-positioned element. Appears on hover and keyboard focus. */
+.icon-tooltip:hover .icon-tooltip-bubble,
+.icon-tooltip:focus-within .icon-tooltip-bubble {
+  opacity: 1;
+}
+
+.icon-tooltip-bubble {
+  pointer-events: none;
+  position: absolute;
+  bottom: calc(100% + 0.375rem);
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+  border-radius: 0.375rem;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  padding: 0.25rem 0.5rem;
+  color: var(--foreground);
+  font-size: var(--text-meta);
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  box-shadow: var(--shadow-raised);
+  transition: opacity 100ms;
+}
+
+/* For triggers near the top of the window, where a tooltip above would be
+   clipped by the sidebar/header's overflow-hidden. */
+.icon-tooltip-bubble--below {
+  top: calc(100% + 0.375rem);
+  bottom: auto;
+}
+
+/* For triggers near the left/right edge of an overflow-hidden ancestor
+   (sidebar, header), where a centered bubble wider than the trigger would
+   spill past the edge and get clipped. Anchors the bubble's edge to the
+   trigger's edge instead of centering it. */
+.icon-tooltip-bubble--align-left {
+  left: 0;
+  transform: none;
+}
+
+.icon-tooltip-bubble--align-right {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 
 summary::-webkit-details-marker {
@@ -351,7 +426,7 @@ summary::-webkit-details-marker {
 }
 
 .markdown a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-underline-offset: 3px;
 }
 
@@ -377,17 +452,16 @@ summary::-webkit-details-marker {
     --sidebar-active: #1a1a1d;
     --card: #111113;
     --secondary: #1a1a1d;
-    --secondary-hover: #232327;
     --muted: #a1a1aa;
     --faint: #7f7f89;
     --border: rgb(255 255 255 / 7%);
     --border-strong: rgb(255 255 255 / 13%);
     --primary: #6a9fcc;
     --primary-hover: #78add8;
+    --primary-text: #7fb2dd;
+    --danger: #dc4c4c;
+    --warning-text: #d6a354;
     --shadow: 0 18px 55px rgb(0 0 0 / 35%), 0 0 0 1px rgb(255 255 255 / 2%);
-    --tool-pending: #282832;
-    --tool-success: #283228;
-    --tool-error: #3c2828;
     --tool-argument: #8abeb7;
   }
 

@@ -20,11 +20,7 @@ export function makeTaskSnapshotCache(retentionMs = DEFAULT_RETENTION_MS, now = 
     snapshots.set(snapshot.taskId, { snapshot, retainedAt });
   }
 
-  function clear() {
-    snapshots.clear();
-  }
-
-  return { get, set, clear };
+  return { get, set };
 }
 
 export const taskPath = (taskId: string) => `/tasks/${encodeURIComponent(taskId)}`;

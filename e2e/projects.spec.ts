@@ -1,14 +1,19 @@
-import { expect, test } from "@playwright/test";
-import { openTasks, rpcRequest } from "./support";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  createTask,
+  fulfillJson,
+  installFakeWebSocket,
+  openTasks,
+  rememberWorkspace,
+  routeInput,
+  rpcRequest,
+  workspaceName,
+} from "./support";
 
 test("keeps the starter home visible before a project is selected", async ({ page, request }) => {
   const bootstrap = await rpcRequest<Record<string, unknown>>(request, "system/bootstrap", {});
   await page.route("**/api/rpc/system/bootstrap", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ...bootstrap.result, recentWorkspaces: [] } },
-    }),
+    fulfillJson(route, { ...bootstrap.result, recentWorkspaces: [] }),
   );
 
   await page.goto("/");
@@ -84,51 +89,39 @@ test("groups worktree tasks under their source project", async ({ page, request 
   let recentWorkspaces: Record<string, unknown>[] = [sourceProject, worktreeProject];
   const openedPaths: string[] = [];
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces,
-          projectCandidates: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap.result,
+      recentWorkspaces,
+      projectCandidates: [],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     openedPaths.push(input.path);
     const worktree = input.path === worktreePath;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...source.result,
-          id: worktree ? worktreeWorkspaceId : sourceWorkspaceId,
-          path: worktree ? worktreePath : sourcePath,
-          sessions: worktree
-            ? [
-                {
-                  id: "worktree_task_e2e",
-                  name: "Worktree task",
-                  firstMessage: "Worktree task",
-                  createdAt: "2026-07-28T00:00:00.000Z",
-                  modifiedAt: "2026-07-29T00:00:00.000Z",
-                  messageCount: 1,
-                },
-              ]
-            : Array.from({ length: 6 }, (_, index) => ({
-                id: `local_task_e2e_${index}`,
-                name: index === 0 ? "Local task" : `Older local task ${index}`,
-                firstMessage: index === 0 ? "Local task" : `Older local task ${index}`,
-                createdAt: "2026-07-27T00:00:00.000Z",
-                modifiedAt: `2026-07-28T${String(6 - index).padStart(2, "0")}:00:00.000Z`,
-                messageCount: 1,
-              })),
-        },
-      },
+    await fulfillJson(route, {
+      ...source.result,
+      id: worktree ? worktreeWorkspaceId : sourceWorkspaceId,
+      path: worktree ? worktreePath : sourcePath,
+      sessions: worktree
+        ? [
+            {
+              id: "worktree_task_e2e",
+              name: "Worktree task",
+              firstMessage: "Worktree task",
+              createdAt: "2026-07-28T00:00:00.000Z",
+              modifiedAt: "2026-07-29T00:00:00.000Z",
+              messageCount: 1,
+            },
+          ]
+        : Array.from({ length: 6 }, (_, index) => ({
+            id: `local_task_e2e_${index}`,
+            name: index === 0 ? "Local task" : `Older local task ${index}`,
+            firstMessage: index === 0 ? "Local task" : `Older local task ${index}`,
+            createdAt: "2026-07-27T00:00:00.000Z",
+            modifiedAt: `2026-07-28T${String(6 - index).padStart(2, "0")}:00:00.000Z`,
+            messageCount: 1,
+          })),
     });
   });
 
@@ -158,49 +151,126 @@ test("groups worktree tasks under their source project", async ({ page, request 
   await expect(projects.getByText("Worktree task", { exact: true })).toBeVisible();
 });
 
+test("keeps a departed task's sidebar status correct when session-list responses complete out of order", async ({
+  page,
+  request,
+}) => {
+  // Regression test for a race in AppShell's `refreshSessions()`: navigating away from a
+  // running task fires a listing refresh for its workspace, and the bounded polling
+  // mitigation can fire more while a task keeps running. These requests can complete in a
+  // different order than they were issued. Without a per-workspace sequence guard, whichever
+  // response happens to RESOLVE last wins the cache write -- so a slow, early-issued response
+  // that still says "running" can silently revert a faster, later-issued response that
+  // correctly observed the task had gone idle.
+  await installFakeWebSocket(page);
+  const { csrfToken, workspace, task: taskA } = await createTask(request, process.cwd());
+  const taskB = await rpcRequest<Record<string, unknown> & { taskId: string }>(
+    request,
+    "chats/create",
+    { workspaceId: workspace.id },
+    csrfToken,
+  );
+  const now = new Date().toISOString();
+  const sessionsWithTaskAStatus = (status: "running" | "idle") => [
+    {
+      id: String(taskA.taskId),
+      name: "Race task A",
+      firstMessage: "Race task A",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 1,
+      status,
+    },
+    {
+      id: String(taskB.taskId),
+      name: "Race task B",
+      firstMessage: "Race task B",
+      createdAt: now,
+      modifiedAt: now,
+      messageCount: 1,
+      status: "idle",
+    },
+  ];
+
+  await page.route("**/api/rpc/workspaces/open", async (route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as { json: Record<string, unknown> };
+    if (payload.json.id !== workspace.id) {
+      await route.fulfill({ response });
+      return;
+    }
+    await route.fulfill({
+      response,
+      json: { ...payload, json: { ...payload.json, sessions: sessionsWithTaskAStatus("idle") } },
+    });
+  });
+
+  let sessionsCalls = 0;
+  await page.route("**/api/rpc/workspaces/sessions", async (route) => {
+    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (input.workspaceId !== workspace.id) {
+      await route.continue();
+      return;
+    }
+    sessionsCalls += 1;
+    if (sessionsCalls === 1) {
+      // Issued first (task A still reads "running" at this point) but slow to resolve --
+      // real network responses can complete out of issue order.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await fulfillJson(route, { sessions: sessionsWithTaskAStatus("running") });
+      return;
+    }
+    // Every later refresh is issued after task A actually went idle, and resolves promptly --
+    // and, without the sequence guard, would land and then be overwritten by call #1 above.
+    await fulfillJson(route, { sessions: sessionsWithTaskAStatus("idle") });
+  });
+
+  // Navigate via "/" and UI clicks (like every sibling test in this file), not a direct
+  // goto("/tasks/...") -- the latter races the app's own onMount project-restore against
+  // activateRoute's handling of the direct task route and can land on the wrong project.
+  await page.goto("/");
+  await openTasks(page);
+  const taskARow = page.getByRole("button", { name: /Race task A/ });
+  const taskBRow = page.getByRole("button", { name: /Race task B/ });
+  // The project may already be auto-restored and expanded (it's the workspace this whole
+  // e2e run operates in, so it's very likely the most-recently-remembered one) -- only expand
+  // it if it isn't already, since toggling an already-expanded project collapses it instead.
+  if (!(await taskBRow.isVisible()))
+    await page
+      .getByRole("button", { name: `Expand ${workspaceName}` })
+      .evaluate((button: HTMLButtonElement) => button.click());
+  await expect(taskBRow).toBeVisible();
+  await taskARow.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page).toHaveURL(`/tasks/${String(taskA.taskId)}`);
+
+  // Navigate away from A (issues the slow call #1 for A's workspace), then bounce back and
+  // away again fast enough that calls #2 and #3 are both issued -- and resolved -- before
+  // call #1's artificial delay elapses.
+  await taskBRow.evaluate((button: HTMLButtonElement) => button.click());
+  await taskARow.evaluate((button: HTMLButtonElement) => button.click());
+  await taskBRow.evaluate((button: HTMLButtonElement) => button.click());
+
+  await expect.poll(() => sessionsCalls).toBeGreaterThanOrEqual(2);
+  // Give call #1's 400ms delay time to resolve after the faster calls already landed.
+  await page.waitForTimeout(500);
+  await expect(taskARow.getByText("Working")).toBeHidden();
+  await expect(taskARow.locator("time")).toBeVisible();
+});
+
 test("manually reorders projects and preserves their order after reload", async ({
   page,
   request,
 }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "HTML drag and drop is a desktop interaction");
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const csrfToken = bootstrap.result.csrfToken;
-  const apps = await rpcRequest<{ id: string; path: string }>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps` },
-    csrfToken,
-  );
-  const packages = await rpcRequest<{ id: string; path: string }>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/packages` },
-    csrfToken,
-  );
-  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
-    request,
-    "system/bootstrap",
-    {},
-  );
-  const otherIds = remembered.result.recentWorkspaces
-    .map(({ id }) => id)
-    .filter((id) => id !== apps.result.id && id !== packages.result.id);
-  await rpcRequest(
-    request,
-    "workspaces/reorder",
-    { workspaceIds: [apps.result.id, packages.result.id, ...otherIds] },
-    csrfToken,
-  );
+  await rememberOrderedProjects(request);
 
   await page.goto("/");
   await openTasks(page);
   const projects = page.getByRole("navigation", { name: "Projects" });
   const projectOrder = async () =>
-    (
-      await projects
-        .getByRole("group")
-        .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")))
-    ).filter((label) => label === "apps project" || label === "packages project");
+    (await projectLabels(page)).filter(
+      (label) => label === "apps project" || label === "packages project",
+    );
   await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
   await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(0);
 
@@ -263,31 +333,20 @@ test("moves against the next visible project while filtering", async ({ page, re
   ];
   let reorderedIds: string[] = [];
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: projects,
-          projectCandidates: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap.result,
+      recentWorkspaces: projects,
+      projectCandidates: [],
     });
   });
   await page.route("**/api/rpc/workspaces/reorder", async (route) => {
-    reorderedIds = (route.request().postDataJSON() as { json: { workspaceIds: string[] } }).json
-      .workspaceIds;
+    reorderedIds = routeInput<{ workspaceIds: string[] }>(route).workspaceIds;
     const recentWorkspaces = reorderedIds.map((id) => {
       const project = projects.find((candidate) => candidate.id === id);
       if (!project) throw new Error(`Unexpected workspace ID ${id}`);
       return project;
     });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { recentWorkspaces } },
-    });
+    await fulfillJson(route, { recentWorkspaces });
   });
 
   await page.goto("/");
@@ -297,12 +356,7 @@ test("moves against the next visible project while filtering", async ({ page, re
   await page.getByRole("button", { name: "Expand visible-a" }).press("ArrowDown");
 
   await expect.poll(() => reorderedIds).toEqual(["workspace_b", "workspace_c", "workspace_a"]);
-  const visibleOrder = () =>
-    page
-      .getByRole("navigation", { name: "Projects" })
-      .getByRole("group")
-      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
-  await expect.poll(visibleOrder).toEqual(["visible-c project", "visible-a project"]);
+  await expect.poll(() => projectLabels(page)).toEqual(["visible-c project", "visible-a project"]);
 });
 
 test("refreshes stale project membership after a reorder conflict", async ({ page, request }) => {
@@ -317,16 +371,10 @@ test("refreshes stale project membership after a reorder conflict", async ({ pag
   ];
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: bootstrapCalls++ === 0 ? initial : canonical,
-          projectCandidates: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap.result,
+      recentWorkspaces: bootstrapCalls++ === 0 ? initial : canonical,
+      projectCandidates: [],
     });
   });
   await page.route("**/api/rpc/workspaces/reorder", (route) => route.abort("failed"));
@@ -335,43 +383,12 @@ test("refreshes stale project membership after a reorder conflict", async ({ pag
   await openTasks(page);
   await page.getByRole("button", { name: "Expand project-a" }).press("ArrowDown");
 
-  const projectOrder = () =>
-    page
-      .getByRole("navigation", { name: "Projects" })
-      .getByRole("group")
-      .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
-  await expect.poll(projectOrder).toEqual(["project-b project", "project-c project"]);
+  await expect.poll(() => projectLabels(page)).toEqual(["project-b project", "project-c project"]);
   expect(bootstrapCalls).toBe(2);
 });
 
 test("blocks project additions while saving the manual order", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const apps = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps` },
-    bootstrap.result.csrfToken,
-  );
-  const packages = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/packages` },
-    bootstrap.result.csrfToken,
-  );
-  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
-    request,
-    "system/bootstrap",
-    {},
-  );
-  const otherIds = remembered.result.recentWorkspaces
-    .map(({ id }) => id)
-    .filter((id) => id !== apps.result.id && id !== packages.result.id);
-  await rpcRequest(
-    request,
-    "workspaces/reorder",
-    { workspaceIds: [apps.result.id, packages.result.id, ...otherIds] },
-    bootstrap.result.csrfToken,
-  );
+  await rememberOrderedProjects(request);
   let releaseReorder: (() => void) | undefined;
   const reorderHeld = new Promise<void>((resolve) => {
     releaseReorder = resolve;
@@ -396,17 +413,7 @@ test("blocks project additions while saving the manual order", async ({ page, re
 });
 
 test("reconciles the manual order when adding project 101", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
     path: `${process.cwd()}/apps/project-${String(index).padStart(3, "0")}`,
@@ -415,31 +422,19 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     const recentWorkspaces = bootstrapCalls++ < 2 ? existing : [...existing.slice(1), added];
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces,
-          projectCandidates: [{ name: "new-project", path: added.path }],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces,
+      projectCandidates: [{ name: "new-project", path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const remembered = input.path === added.path ? added : existing[0];
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...workspaceTemplate.result,
-          ...remembered,
-          name: remembered.path.split("/").at(-1),
-        },
-      },
+    await fulfillJson(route, {
+      ...template,
+      ...remembered,
+      name: remembered.path.split("/").at(-1),
     });
   });
 
@@ -459,47 +454,25 @@ test("reconciles concurrent project additions after opening a new project", asyn
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const initial = { id: "workspace_initial", path: "/tmp/project-initial" };
   const concurrent = { id: "workspace_concurrent", path: "/tmp/project-concurrent" };
   const added = { id: "workspace_added", path: "/tmp/project-added" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: bootstrapCalls++ < 2 ? [initial] : [concurrent, added],
-          projectCandidates: [{ name: "project-added", path: added.path }],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces: bootstrapCalls++ < 2 ? [initial] : [concurrent, added],
+      projectCandidates: [{ name: "project-added", path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = input.path === added.path ? added : initial;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...workspaceTemplate.result,
-          ...project,
-          name: project.path.split("/").at(-1),
-        },
-      },
+    await fulfillJson(route, {
+      ...template,
+      ...project,
+      name: project.path.split("/").at(-1),
     });
   });
 
@@ -519,40 +492,22 @@ test("refreshes membership when reopening a remotely evicted project", async ({
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const stale = { id: "workspace_stale", path: "/tmp/project-stale" };
   const kept = { id: "workspace_kept", path: "/tmp/project-kept" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: bootstrapCalls++ === 0 ? [stale] : [kept, stale],
-          projectCandidates: [],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces: bootstrapCalls++ === 0 ? [stale] : [kept, stale],
+      projectCandidates: [],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...workspaceTemplate.result,
-          ...stale,
-          name: "project-stale",
-        },
-      },
+    await fulfillJson(route, {
+      ...template,
+      ...stale,
+      name: "project-stale",
     });
   });
 
@@ -569,13 +524,7 @@ test("keeps a successful project open within the history limit when refresh fail
   page,
   request,
 }) => {
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
@@ -587,26 +536,16 @@ test("keeps a successful project open within the history limit when refresh fail
       await route.abort("failed");
       return;
     }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: existing,
-          projectCandidates: [{ name: added.name, path: added.path }],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces: existing,
+      projectCandidates: [{ name: added.name, path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = input.path === added.path ? added : existing[0];
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ...workspaceTemplate.result, ...project } },
-    });
+    await fulfillJson(route, { ...template, ...project });
   });
 
   await page.goto("/");
@@ -629,17 +568,7 @@ test("keeps a successful project open within the history limit when refresh fail
 });
 
 test("keeps Add all within the 100-project sidebar boundary", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    recentWorkspaces: Array<{ id: string; path: string }>;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const projects = Array.from({ length: 101 }, (_, index) => {
     const suffix = String(index).padStart(3, "0");
     return {
@@ -650,27 +579,17 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
   });
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: bootstrapCalls++ === 0 ? [] : projects.slice(1),
-          projectCandidates: projects.map(({ name, path }) => ({ name, path })),
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces: bootstrapCalls++ === 0 ? [] : projects.slice(1),
+      projectCandidates: projects.map(({ name, path }) => ({ name, path })),
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const input = (route.request().postDataJSON() as { json: { path: string } }).json;
+    const input = routeInput<{ path: string }>(route);
     const project = projects.find(({ path }) => path === input.path);
     if (!project) throw new Error(`Unexpected project path ${input.path}`);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ...workspaceTemplate.result, ...project } },
-    });
+    await fulfillJson(route, { ...template, ...project });
   });
 
   await page.goto("/");
@@ -686,16 +605,7 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
 });
 
 test("releases Add all controls when history reconciliation fails", async ({ page, request }) => {
-  const bootstrap = await rpcRequest<{
-    csrfToken: string;
-    projectCandidates: Array<{ name: string; path: string }>;
-  }>(request, "system/bootstrap", {});
-  const workspaceTemplate = await rpcRequest<Record<string, unknown>>(
-    request,
-    "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
-    bootstrap.result.csrfToken,
-  );
+  const { bootstrap, template } = await openWorkspaceTemplate(request);
   const added = { id: "workspace_added", name: "project-added", path: "/tmp/project-added" };
   let bootstrapCalls = 0;
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
@@ -703,24 +613,14 @@ test("releases Add all controls when history reconciliation fails", async ({ pag
       await route.abort("failed");
       return;
     }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...bootstrap.result,
-          recentWorkspaces: [],
-          projectCandidates: [{ name: added.name, path: added.path }],
-        },
-      },
+    await fulfillJson(route, {
+      ...bootstrap,
+      recentWorkspaces: [],
+      projectCandidates: [{ name: added.name, path: added.path }],
     });
   });
   await page.route("**/api/rpc/workspaces/open", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { ...workspaceTemplate.result, ...added } },
-    });
+    await fulfillJson(route, { ...template, ...added });
   });
 
   await page.goto("/");
@@ -733,3 +633,48 @@ test("releases Add all controls when history reconciliation fails", async ({ pag
   await expect(page.getByRole("alert")).toContainText("Project history could not be refreshed");
   expect(bootstrapCalls).toBe(2);
 });
+
+async function openWorkspaceTemplate(request: APIRequestContext) {
+  const bootstrap = await rpcRequest<{
+    csrfToken: string;
+    recentWorkspaces: Array<{ id: string; path: string }>;
+    projectCandidates: Array<{ name: string; path: string }>;
+  }>(request, "system/bootstrap", {});
+  const template = await rpcRequest<Record<string, unknown>>(
+    request,
+    "workspaces/open",
+    { path: `${process.cwd()}/apps`, remember: false },
+    bootstrap.result.csrfToken,
+  );
+  return {
+    bootstrap: bootstrap.result,
+    csrfToken: bootstrap.result.csrfToken,
+    template: template.result,
+  };
+}
+
+async function rememberOrderedProjects(request: APIRequestContext) {
+  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
+  const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
+  const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
+    request,
+    "system/bootstrap",
+    {},
+  );
+  const otherIds = remembered.result.recentWorkspaces
+    .map(({ id }) => id)
+    .filter((id) => id !== apps.id && id !== packages.id);
+  await rpcRequest(
+    request,
+    "workspaces/reorder",
+    { workspaceIds: [apps.id, packages.id, ...otherIds] },
+    csrfToken,
+  );
+}
+
+function projectLabels(page: Page) {
+  return page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("group")
+    .evaluateAll((groups) => groups.map((group) => group.getAttribute("aria-label")));
+}

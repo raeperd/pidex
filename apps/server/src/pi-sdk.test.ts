@@ -125,12 +125,7 @@ Diagnose the failure before proposing a fix.
 `,
           );
         });
-        const pi = makePiSdkService(
-          makePiSdk({
-            agentDir: fixture.agentDir,
-            sessionDir: path.join(fixture.agentDir, "sessions"),
-          }),
-        );
+        const pi = piFor(fixture);
 
         const workspace = yield* pi.inspectWorkspace(fixture.cwd);
 
@@ -190,12 +185,7 @@ Diagnose the failure before proposing a fix.
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
-        const pi = makePiSdkService(
-          makePiSdk({
-            agentDir: fixture.agentDir,
-            sessionDir: path.join(fixture.agentDir, "sessions"),
-          }),
-        );
+        const pi = piFor(fixture);
 
         const session = yield* pi.createSession(fixture.cwd);
 
@@ -227,23 +217,12 @@ Find the root cause`,
         const assistantId = manager.appendMessage({
           role: "assistant",
           content: [{ type: "text", text: "The root cause is isolated." }],
-          api: "openai-responses",
-          provider: "openai",
-          model: "gpt-5.5",
-          usage: {
-            input: 10,
-            output: 5,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 15,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "stop",
+          ...assistantMessageMeta("stop"),
           timestamp: 2,
         });
         const nativePath = manager.getSessionFile();
         if (!nativePath) return yield* Effect.die("Persisted session has no file path");
-        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const pi = piFor(fixture);
 
         const session = yield* pi.resumeSession(fixture.cwd, nativePath);
 
@@ -308,18 +287,7 @@ Diagnose the failure before proposing a fix.`,
               arguments: { path: "missing.txt" },
             },
           ],
-          api: "openai-responses",
-          provider: "openai",
-          model: "gpt-5.5",
-          usage: {
-            input: 10,
-            output: 5,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 15,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "toolUse",
+          ...assistantMessageMeta("toolUse"),
           timestamp: 2,
         });
         manager.appendMessage({
@@ -341,24 +309,13 @@ Diagnose the failure before proposing a fix.`,
         const finalId = manager.appendMessage({
           role: "assistant",
           content: [{ type: "text", text: "This is a desktop coding client." }],
-          api: "openai-responses",
-          provider: "openai",
-          model: "gpt-5.5",
-          usage: {
-            input: 20,
-            output: 10,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 30,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "stop",
+          ...assistantMessageMeta("stop", 20, 10),
           timestamp: 5,
         });
         const nativePath = manager.getSessionFile();
         if (!nativePath) return yield* Effect.die("Persisted session has no file path");
 
-        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const pi = piFor(fixture);
         const session = yield* pi.resumeSession(fixture.cwd, nativePath);
 
         assert.deepEqual(
@@ -435,18 +392,7 @@ Diagnose the failure before proposing a fix.`,
               arguments: { command: "sleep 30" },
             },
           ],
-          api: "openai-responses",
-          provider: "openai",
-          model: "gpt-5.5",
-          usage: {
-            input: 10,
-            output: 5,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 15,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "toolUse",
+          ...assistantMessageMeta("toolUse"),
           timestamp: 1,
         });
         manager.appendMessage({
@@ -460,7 +406,7 @@ Diagnose the failure before proposing a fix.`,
         const nativePath = manager.getSessionFile();
         if (!nativePath) return yield* Effect.die("Persisted session has no file path");
 
-        const pi = makePiSdkService(makePiSdk({ agentDir: fixture.agentDir, sessionDir }));
+        const pi = piFor(fixture);
         const session = yield* pi.resumeSession(fixture.cwd, nativePath);
         const large = session.state.messages.find((item) => item.id === "tool-large");
         const orphaned = session.state.messages.find((item) => item.id === "tool-orphaned");
@@ -486,12 +432,7 @@ Diagnose the failure before proposing a fix.`,
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = yield* isolatedPiWorkspace;
-        const pi = makePiSdkService(
-          makePiSdk({
-            agentDir: fixture.agentDir,
-            sessionDir: path.join(fixture.agentDir, "sessions"),
-          }),
-        );
+        const pi = piFor(fixture);
 
         const workspace = yield* pi.inspectWorkspace(fixture.cwd);
         assert.deepEqual(workspace.sessions, []);
@@ -506,6 +447,28 @@ Diagnose the failure before proposing a fix.`,
     ),
   );
 });
+
+const piFor = (fixture: { agentDir: string }) =>
+  makePiSdkService(
+    makePiSdk({ agentDir: fixture.agentDir, sessionDir: path.join(fixture.agentDir, "sessions") }),
+  );
+
+function assistantMessageMeta(stopReason: "stop" | "toolUse", input = 10, output = 5) {
+  return {
+    api: "openai-responses",
+    provider: "openai",
+    model: "gpt-5.5",
+    usage: {
+      input,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: input + output,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason,
+  } as const;
+}
 
 const isolatedPiWorkspace = Effect.acquireRelease(
   Effect.tryPromise(async () => {

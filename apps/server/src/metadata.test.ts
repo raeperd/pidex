@@ -8,8 +8,8 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { Effect } from "effect";
 import { afterAll, afterEach, assert, describe, expect, it, layer, vi } from "@effect/vitest";
+import { ActionProtocolError } from "./errors.js";
 import {
-  ActionProtocolError,
   Metadata,
   MetadataError,
   makeMetadataStore,
@@ -49,13 +49,7 @@ describe("metadata Effect service", () => {
     effectIt.effect("preserves typed action protocol errors", () =>
       Effect.gen(function* () {
         const metadata = yield* Metadata;
-        const request = {
-          actionId: "effectaction0001",
-          clientId: "effectclient0001",
-          expectedRevision: 0,
-          requestDigest: requestDigest({ text: "original" }),
-          sessionKey: "effect-session",
-        };
+        const request = promptRequest("effect-session", "effectaction0001");
         yield* metadata.acceptPrompt(request);
 
         const error = yield* metadata
@@ -100,16 +94,15 @@ describe("metadata store", () => {
     vi.useRealTimers();
   });
 
-  it("marks an accepted run interrupted after restart and requires acknowledgement", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-metadata-"));
+  async function freshStore(prefix: string) {
+    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), prefix));
     store = makeMetadataStore();
-    const request = {
-      actionId: "actioncrash0001",
-      clientId: "clientcrash001",
-      expectedRevision: 0,
-      requestDigest: requestDigest({ text: "work" }),
-      sessionKey: "session-crash",
-    };
+    return store;
+  }
+
+  it("marks an accepted run interrupted after restart and requires acknowledgement", async () => {
+    store = await freshStore("pidex-metadata-");
+    const request = promptRequest("session-crash", "actioncrash0001");
     const accepted = store.acceptPrompt(request);
     store.markPromptStatus(request.sessionKey, accepted.runId, "running");
     store.close();
@@ -138,8 +131,7 @@ describe("metadata store", () => {
   });
 
   it("looks up a known workspace without changing its recent-order metadata", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-"));
-    store = makeMetadataStore();
+    store = await freshStore("pidex-workspace-");
     expect(store.workspaceId("/tmp/example-project")).toBeUndefined();
     const id = store.rememberWorkspace("/tmp/example-project");
     expect(store.rememberWorkspace("/tmp/example-project")).toBe(id);
@@ -148,8 +140,7 @@ describe("metadata store", () => {
   });
 
   it("keeps a worktree attached to its source project across restarts", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-worktree-"));
-    store = makeMetadataStore();
+    store = await freshStore("pidex-worktree-");
     const sourceWorkspaceId = store.rememberWorkspace("/tmp/example-project");
     const worktreeId = store.rememberWorkspace("/tmp/example-worktree", sourceWorkspaceId);
 
@@ -168,8 +159,7 @@ describe("metadata store", () => {
   });
 
   it("persists a manually reordered workspace list across restarts", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-order-"));
-    store = makeMetadataStore();
+    store = await freshStore("pidex-workspace-order-");
     const first = store.rememberWorkspace("/tmp/first-project");
     const second = store.rememberWorkspace("/tmp/second-project");
     const third = store.rememberWorkspace("/tmp/third-project");
@@ -186,8 +176,7 @@ describe("metadata store", () => {
   });
 
   it("keeps a newly remembered workspace inside the 100-project ordering boundary", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-limit-"));
-    store = makeMetadataStore();
+    store = await freshStore("pidex-workspace-limit-");
     for (let index = 0; index < 100; index += 1) store.rememberWorkspace(`/tmp/project-${index}`);
 
     const newestId = store.rememberWorkspace("/tmp/project-100");
@@ -199,10 +188,8 @@ describe("metadata store", () => {
   });
 
   it("refreshes recency without changing manual order when reopening a workspace", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-recency-"));
+    const metadata = await freshStore("pidex-workspace-recency-");
     vi.useFakeTimers();
-    const metadata = makeMetadataStore();
-    store = metadata;
     const remembered = Array.from({ length: 100 }, (_, index) => {
       vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
       const workspacePath = `/tmp/recency-project-${index}`;
@@ -223,9 +210,7 @@ describe("metadata store", () => {
   });
 
   it("preserves the durable ID of a project evicted from the sidebar", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-workspace-id-"));
-    const metadata = makeMetadataStore();
-    store = metadata;
+    const metadata = await freshStore("pidex-workspace-id-");
     const remembered = Array.from({ length: 100 }, (_, index) => {
       const workspacePath = `/tmp/durable-project-${index}`;
       return { id: metadata.rememberWorkspace(workspacePath), path: workspacePath };
@@ -275,8 +260,7 @@ describe("metadata store", () => {
   });
 
   it("assigns one durable task ID to a native Pi session", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-task-"));
-    store = makeMetadataStore();
+    store = await freshStore("pidex-task-");
 
     const workspaceId = store.rememberWorkspace("/tmp/task-project");
     const taskId = store.rememberTask(workspaceId, "/tmp/task-project", "/sessions/task.jsonl");
@@ -299,20 +283,13 @@ describe("metadata store", () => {
   });
 
   it("persists action transitions and replays through Drizzle transactions", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-actions-"));
-    store = makeMetadataStore();
-    const promptRequest = {
-      actionId: "actionprompt001",
-      clientId: "clientactions01",
-      expectedRevision: 0,
-      requestDigest: requestDigest({ text: "work" }),
-      sessionKey: "session-actions",
-    };
-    const prompt = store.acceptPrompt(promptRequest);
-    expect(store.acceptPrompt(promptRequest)).toMatchObject({ replayed: true, revision: 1 });
+    store = await freshStore("pidex-actions-");
+    const request = promptRequest("session-actions", "actionprompt001");
+    const prompt = store.acceptPrompt(request);
+    expect(store.acceptPrompt(request)).toMatchObject({ replayed: true, revision: 1 });
 
     const steerRequest = {
-      ...promptRequest,
+      ...request,
       actionId: "actionsteer0001",
       expectedRevision: 1,
       requestDigest: requestDigest({ text: "adjust" }),
@@ -328,20 +305,20 @@ describe("metadata store", () => {
     });
 
     const stop = store.acceptStop({
-      ...promptRequest,
+      ...request,
       actionId: "actionstop00001",
       expectedRevision: 2,
       requestDigest: requestDigest({ runId: prompt.runId }),
       runId: prompt.runId,
     });
     expect(stop).toMatchObject({ revision: 3, replayed: false });
-    expect(store.sessionState(promptRequest.sessionKey).run?.status).toBe("running");
+    expect(store.sessionState(request.sessionKey).run?.status).toBe("running");
 
-    store.markPromptStatus(promptRequest.sessionKey, prompt.runId, "completed");
-    expect(store.sessionState(promptRequest.sessionKey).run?.status).toBe("completed");
+    store.markPromptStatus(request.sessionKey, prompt.runId, "completed");
+    expect(store.sessionState(request.sessionKey).run?.status).toBe("completed");
     expect(
       store.acceptSessionMutation({
-        ...promptRequest,
+        ...request,
         actionId: "actionrename001",
         expectedRevision: 3,
         requestDigest: requestDigest({ name: "renamed" }),
@@ -351,15 +328,8 @@ describe("metadata store", () => {
   });
 
   it("does not overwrite a terminal prompt status with a late settlement", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-settlement-"));
-    store = makeMetadataStore();
-    const request = {
-      actionId: "actionsettle001",
-      clientId: "clientsettle001",
-      expectedRevision: 0,
-      requestDigest: requestDigest({ text: "work" }),
-      sessionKey: "session-settlement",
-    };
+    store = await freshStore("pidex-settlement-");
+    const request = promptRequest("session-settlement", "actionsettle001");
     const accepted = store.acceptPrompt(request);
     store.markPromptStatus(request.sessionKey, accepted.runId, "running");
     store.markPromptStatus(request.sessionKey, accepted.runId, "cancelled");
@@ -370,15 +340,8 @@ describe("metadata store", () => {
   });
 
   it("rejects conflicting actions without consuming a revision", async () => {
-    process.env.PIDEX_STATE_DIR = await mkdtemp(path.join(os.tmpdir(), "pidex-conflicts-"));
-    store = makeMetadataStore();
-    const request = {
-      actionId: "actionconflict01",
-      clientId: "clientconflict1",
-      expectedRevision: 0,
-      requestDigest: requestDigest({ text: "original" }),
-      sessionKey: "session-conflicts",
-    };
+    store = await freshStore("pidex-conflicts-");
+    const request = promptRequest("session-conflicts", "actionconflict01");
     store.acceptPrompt(request);
 
     expect(() =>
@@ -396,9 +359,8 @@ describe("metadata store", () => {
   });
 
   it("initializes only the product tables without a migration backup", async () => {
-    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-schema-"));
-    process.env.PIDEX_STATE_DIR = stateDir;
-    store = makeMetadataStore();
+    store = await freshStore("pidex-schema-");
+    const stateDir = process.env.PIDEX_STATE_DIR!;
     store.close();
     store = makeMetadataStore();
 
@@ -421,16 +383,9 @@ describe("metadata store", () => {
   });
 
   it("rolls back crash recovery when either durable update fails", async () => {
-    const stateDir = await mkdtemp(path.join(os.tmpdir(), "pidex-recovery-"));
-    process.env.PIDEX_STATE_DIR = stateDir;
-    store = makeMetadataStore();
-    const request = {
-      actionId: "actionrecovery01",
-      clientId: "clientrecovery1",
-      expectedRevision: 0,
-      requestDigest: requestDigest({ text: "recover" }),
-      sessionKey: "session-recovery",
-    };
+    store = await freshStore("pidex-recovery-");
+    const stateDir = process.env.PIDEX_STATE_DIR!;
+    const request = promptRequest("session-recovery", "actionrecovery01");
     const accepted = store.acceptPrompt(request);
     store.markPromptStatus(request.sessionKey, accepted.runId, "running");
     store.close();
@@ -469,6 +424,16 @@ describe("metadata store", () => {
     });
   });
 });
+
+function promptRequest(sessionKey: string, actionId: string) {
+  return {
+    actionId,
+    clientId: `client-${sessionKey}`,
+    expectedRevision: 0,
+    requestDigest: requestDigest({ text: "work" }),
+    sessionKey,
+  };
+}
 
 const sqliteMaster = sqliteTable("sqlite_master", {
   type: text("type").notNull(),

@@ -31,16 +31,13 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type AdapterSessionInfo,
+  type AdapterToolOutput,
   type AdapterWorkspaceInfo,
   type EffectAdapterSession,
 } from "./adapter.js";
+import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 
-interface PiSdkError {
-  readonly _tag: "PiSdkError";
-  readonly operation: string;
-  readonly message: string;
-  readonly cause: unknown;
-}
+type PiSdkError = TaggedOperationError<"PiSdkError">;
 
 export interface PiSdkServiceApi {
   inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
@@ -59,24 +56,20 @@ export interface PiSdkOptions {
   readonly sessionDir?: string;
 }
 
+const isContentPart = (part: unknown): part is { type: string; text?: string; thinking?: string } =>
+  typeof part === "object" && part !== null && "type" in part;
 const textOf = (content: unknown): string => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter(
-      (part): part is { type: string; text?: string; thinking?: string } =>
-        typeof part === "object" && part !== null && "type" in part,
-    )
+    .filter(isContentPart)
     .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
     .join("");
 };
 const thinkingOf = (content: unknown): string =>
   Array.isArray(content)
     ? content
-        .filter(
-          (part): part is { type: string; thinking?: string } =>
-            typeof part === "object" && part !== null && "type" in part,
-        )
+        .filter(isContentPart)
         .map((part) => (part.type === "thinking" ? part.thinking?.trim() : undefined))
         .filter((thinking): thinking is string => Boolean(thinking))
         .join("\n\n")
@@ -86,7 +79,7 @@ const messageId = (message: { role: string; timestamp?: number }) =>
 
 function transcriptItems(entries: SessionEntry[]) {
   const items: TranscriptItem[] = [];
-  const toolOutputs = new Map<string, { id: string; text: string; sourceTruncated: boolean }>();
+  const toolOutputs = new Map<string, AdapterToolOutput>();
   const toolIndexes = new Map<string, number>();
   for (const entry of entries) {
     if (entry.type !== "message") continue;
@@ -164,31 +157,6 @@ function messageItems(input: TextItem): Array<TextItem | SkillItem> {
   return skill.userMessage ? [item, { ...input, text: skill.userMessage }] : [item];
 }
 
-function resolvedSessionDir(
-  cwd: string,
-  agentDir: string,
-  settings: SettingsManager,
-  override: string | undefined,
-): string | undefined {
-  if (override)
-    return path.resolve(
-      cwd,
-      override.replace(/^~(?=$|\/)/, agentDir.replace(/\/\.pi\/agent$/, "")),
-    );
-  return settings.getSessionDir();
-}
-
-function trustState(
-  cwd: string,
-  agentDir: string,
-  settings: SettingsManager,
-): { trusted: boolean | null; skipped: boolean } {
-  if (!hasTrustRequiringProjectResources(cwd)) return { trusted: true, skipped: false };
-  const saved = new ProjectTrustStore(agentDir).get(cwd);
-  const trusted = saved ?? (settings.getDefaultProjectTrust() === "always" ? true : null);
-  return { trusted, skipped: trusted !== true };
-}
-
 type ResourceDiagnostic = AdapterWorkspaceInfo["resourceDiagnostics"][number];
 const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic => ({
   level: type === "error" ? "error" : "warning",
@@ -211,21 +179,6 @@ function makePiSession(session: AgentSession) {
         emit({ type: "notice", level: "error", text: `Extension error: ${error.error}` }),
     });
   }
-  function readMessages(): TranscriptItem[] {
-    return restoredTranscript.items;
-  }
-  function readToolOutputs() {
-    return restoredTranscript.toolOutputs;
-  }
-  function readModel() {
-    return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
-  }
-  function readThinkingLevel() {
-    return session.thinkingLevel;
-  }
-  function readSessionName() {
-    return session.sessionName;
-  }
   function readContextUsage(): ContextUsage | undefined {
     const usage = session.getContextUsage();
     if (!usage) return undefined;
@@ -234,9 +187,6 @@ function makePiSession(session: AgentSession) {
       totalProcessedTokens: session.getSessionStats().tokens.total,
       compactsAutomatically: session.settingsManager.getCompactionSettings().enabled,
     };
-  }
-  function readIsIdle() {
-    return session.isIdle;
   }
   function subscribe(listener: (event: AdapterEvent) => void) {
     listeners.add(listener);
@@ -251,20 +201,21 @@ function makePiSession(session: AgentSession) {
   }
   function handle(event: AgentSessionEvent) {
     if (
-      event.type === "message_start" &&
+      (event.type === "message_start" || event.type === "message_end") &&
       (event.message.role === "user" || event.message.role === "assistant")
     ) {
+      const thinking = thinkingOf(event.message.content);
       const item: TextItem = {
         type: event.message.role,
         id: messageId(event.message),
         text: textOf(event.message.content),
-        ...(thinkingOf(event.message.content)
-          ? { thinking: thinkingOf(event.message.content) }
-          : {}),
-        complete: false,
+        ...(thinking ? { thinking } : {}),
+        complete: event.type === "message_end",
         timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
       };
       for (const message of messageItems(item)) emit({ type: "message", item: message });
+      if (event.type === "message_end" && event.message.role === "assistant")
+        scheduleContextUsage();
     } else if (event.type === "message_update") {
       const update = event.assistantMessageEvent;
       if (update.type === "text_delta")
@@ -281,22 +232,6 @@ function makePiSession(session: AgentSession) {
           delta: update.delta,
           channel: "thinking",
         });
-    } else if (
-      event.type === "message_end" &&
-      (event.message.role === "user" || event.message.role === "assistant")
-    ) {
-      const item: TextItem = {
-        type: event.message.role,
-        id: messageId(event.message),
-        text: textOf(event.message.content),
-        ...(thinkingOf(event.message.content)
-          ? { thinking: thinkingOf(event.message.content) }
-          : {}),
-        complete: true,
-        timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
-      };
-      for (const message of messageItems(item)) emit({ type: "message", item: message });
-      if (event.message.role === "assistant") scheduleContextUsage();
     } else if (event.type === "tool_execution_start") {
       const args = bounded(event.args, 800);
       emit({
@@ -414,18 +349,9 @@ function makePiSession(session: AgentSession) {
     await session.prompt(text);
     if (session.isIdle && settlementGeneration === previousSettlement) emitSettled();
   }
-  async function steer(text: string) {
-    await session.steer(text);
-  }
-  async function followUp(text: string) {
-    await session.followUp(text);
-  }
   async function abort() {
     session.clearQueue();
     await session.abort();
-  }
-  function clearQueue() {
-    session.clearQueue();
   }
   async function configure(input: {
     model?: string;
@@ -442,12 +368,6 @@ function makePiSession(session: AgentSession) {
       await session.setModel(model);
     }
     if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
-  }
-  function rename(name: string) {
-    session.setSessionName(name);
-  }
-  async function compact(instructions?: string) {
-    await session.compact(instructions);
   }
   function getStats() {
     const stats = session.getSessionStats();
@@ -478,37 +398,39 @@ function makePiSession(session: AgentSession) {
   return {
     nativeId,
     nativePath,
-    get messages() {
-      return readMessages();
+    get messages(): TranscriptItem[] {
+      return restoredTranscript.items;
     },
     get toolOutputs() {
-      return readToolOutputs();
+      return restoredTranscript.toolOutputs;
     },
     get model() {
-      return readModel();
+      return session.model ? `${session.model.provider}/${session.model.id}` : undefined;
     },
     get thinkingLevel() {
-      return readThinkingLevel();
+      return session.thinkingLevel;
     },
     get sessionName() {
-      return readSessionName();
+      return session.sessionName;
     },
     get contextUsage() {
       return readContextUsage();
     },
     get isIdle() {
-      return readIsIdle();
+      return session.isIdle;
     },
     bind,
     subscribe,
     prompt,
-    steer,
-    followUp,
+    steer: (text: string) => session.steer(text),
+    followUp: (text: string) => session.followUp(text),
     abort,
-    clearQueue,
+    clearQueue: () => session.clearQueue(),
     configure,
-    rename,
-    compact,
+    rename: (name: string) => session.setSessionName(name),
+    compact: async (instructions?: string) => {
+      await session.compact(instructions);
+    },
     getStats,
     respondToDialog,
     dispose,
@@ -516,10 +438,18 @@ function makePiSession(session: AgentSession) {
 }
 
 export function makePiSdk(options: PiSdkOptions = {}) {
+  const agentDir = options.agentDir ?? getAgentDir();
+
   async function services(cwd: string) {
-    const agentDir = options.agentDir ?? getAgentDir();
     const settings = SettingsManager.create(cwd, agentDir);
-    const trust = trustState(cwd, agentDir, settings);
+    let trust: { trusted: boolean | null; skipped: boolean };
+    if (!hasTrustRequiringProjectResources(cwd)) {
+      trust = { trusted: true, skipped: false };
+    } else {
+      const saved = new ProjectTrustStore(agentDir).get(cwd);
+      const trusted = saved ?? (settings.getDefaultProjectTrust() === "always" ? true : null);
+      trust = { trusted, skipped: trusted !== true };
+    }
     const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
     await loader.reload({ resolveProjectTrust: async () => trust.trusted === true });
     const modelRuntime = await ModelRuntime.create({
@@ -527,23 +457,23 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       modelsPath: path.join(agentDir, "models.json"),
     });
     await modelRuntime.refresh({ allowNetwork: false });
+    const sessionDirOverride = options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR;
     return {
-      agentDir,
       settings,
       trust,
       loader,
       modelRuntime,
-      sessionDir: resolvedSessionDir(
-        cwd,
-        agentDir,
-        settings,
-        options.sessionDir ?? process.env.PI_CODING_AGENT_SESSION_DIR,
-      ),
+      sessionDir: sessionDirOverride
+        ? path.resolve(
+            cwd,
+            sessionDirOverride.replace(/^~(?=$|\/)/, agentDir.replace(/\/\.pi\/agent$/, "")),
+          )
+        : settings.getSessionDir(),
     };
   }
 
   async function inspectWorkspace(cwd: string): Promise<AdapterWorkspaceInfo> {
-    const { agentDir, settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
+    const { settings, trust, loader, modelRuntime, sessionDir } = await services(cwd);
     const sessions = await SessionManager.list(cwd, sessionDir);
     const result = await createAgentSession({
       cwd,
@@ -571,15 +501,11 @@ export function makePiSdk(options: PiSdkOptions = {}) {
       result.session.dispose();
     }
     const diagnostics: AdapterWorkspaceInfo["resourceDiagnostics"] = [
-      ...loader
-        .getSkills()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
-      ...loader
-        .getPrompts()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
-      ...loader
-        .getThemes()
-        .diagnostics.map((entry) => resourceDiagnostic(entry.type, entry.message)),
+      ...[
+        ...loader.getSkills().diagnostics,
+        ...loader.getPrompts().diagnostics,
+        ...loader.getThemes().diagnostics,
+      ].map((entry) => resourceDiagnostic(entry.type, entry.message)),
       ...loader
         .getExtensions()
         .errors.map((entry) =>
@@ -612,14 +538,17 @@ export function makePiSdk(options: PiSdkOptions = {}) {
     };
   }
 
-  async function open(cwd: string, manager: SessionManager) {
-    const { agentDir, settings, loader, modelRuntime } = await services(cwd);
+  async function open(
+    cwd: string,
+    svc: Awaited<ReturnType<typeof services>>,
+    manager: SessionManager,
+  ) {
     const result = await createAgentSession({
       cwd,
       agentDir,
-      settingsManager: settings,
-      resourceLoader: loader,
-      modelRuntime,
+      settingsManager: svc.settings,
+      resourceLoader: svc.loader,
+      modelRuntime: svc.modelRuntime,
       sessionManager: manager,
     });
     const wrapped = makePiSession(result.session);
@@ -633,27 +562,27 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   }
 
   async function createSession(cwd: string) {
-    const { sessionDir } = await services(cwd);
-    return open(cwd, SessionManager.create(cwd, sessionDir));
+    const svc = await services(cwd);
+    return open(cwd, svc, SessionManager.create(cwd, svc.sessionDir));
   }
 
   async function resumeSession(cwd: string, nativePath: string) {
-    const { sessionDir } = await services(cwd);
-    return open(cwd, SessionManager.open(nativePath, sessionDir, cwd));
+    const svc = await services(cwd);
+    return open(cwd, svc, SessionManager.open(nativePath, svc.sessionDir, cwd));
   }
 
   async function setWorkspaceTrust(cwd: string, trusted: boolean) {
-    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, trusted);
+    new ProjectTrustStore(agentDir).set(cwd, trusted);
   }
 
   async function inheritWorkspaceTrust(sourceCwd: string, cwd: string) {
-    const trust = new ProjectTrustStore(options.agentDir ?? getAgentDir());
+    const trust = new ProjectTrustStore(agentDir);
     const decision = trust.get(sourceCwd);
     if (decision !== null) trust.set(cwd, decision);
   }
 
   async function clearWorkspaceTrust(cwd: string) {
-    new ProjectTrustStore(options.agentDir ?? getAgentDir()).set(cwd, null);
+    new ProjectTrustStore(agentDir).set(cwd, null);
   }
   return {
     inspectWorkspace,
@@ -667,7 +596,7 @@ export function makePiSdk(options: PiSdkOptions = {}) {
 
 export type PiSdk = ReturnType<typeof makePiSdk>;
 
-export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi {
+export function makePiSdkService(sdk: PiSdk): PiSdkServiceApi {
   return {
     inspectWorkspace: (cwd) => fromPiPromise("workspace.inspect", () => sdk.inspectWorkspace(cwd)),
     createSession: (cwd) =>
@@ -685,21 +614,4 @@ export function makePiSdkService(sdk: Pick<PiSdk, keyof PiSdk>): PiSdkServiceApi
   };
 }
 
-function fromPiPromise<A>(
-  operation: string,
-  evaluate: () => Promise<A>,
-): Effect.Effect<A, PiSdkError> {
-  return Effect.tryPromise({
-    try: evaluate,
-    catch: (cause) => piSdkError(operation, cause),
-  });
-}
-
-function piSdkError(operation: string, cause: unknown): PiSdkError {
-  return {
-    _tag: "PiSdkError",
-    operation,
-    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
-    cause,
-  };
-}
+const { promise: fromPiPromise } = taggedAttempt("PiSdkError");

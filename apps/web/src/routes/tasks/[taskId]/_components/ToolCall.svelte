@@ -1,36 +1,42 @@
 <script lang="ts" module>
-  export type ToolCallKind = "shell" | "read" | "search" | "edit" | "generic";
+  type ToolCallKind = "shell" | "read" | "search" | "edit" | "generic";
 
-  export interface ToolCallHeader {
+  interface ToolCallHeader {
     kind: ToolCallKind;
     label: string;
     detail: string;
     range?: string;
   }
 
-  export interface ToolCallPreview {
+  interface ToolCallPreview {
     lines: string[];
     skipped: number;
   }
 
-  export const TOOL_PREVIEW_LINES = 5;
+  const KIND_ICONS = {
+    shell: "terminal",
+    read: "file",
+    search: "search",
+    edit: "compose",
+    generic: "tool",
+  } as const;
+
+  export function toolCallExpanded(override: boolean | undefined, status: string): boolean {
+    return override ?? status === "error";
+  }
 
   export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
     const kind = toolCallKind(name);
+    const label = toolCallLabel(name, kind);
     const args = parseArguments(argumentSummary);
-    if (!args)
-      return {
-        kind,
-        label: toolCallLabel(name, kind),
-        detail: argumentSummary.trim(),
-      };
+    if (!args) return { kind, label, detail: argumentSummary.trim() };
     if (kind === "shell")
-      return { kind, label: "$", detail: text(args.command) || compactArguments(args) || "…" };
-    if (kind === "read") return { kind, label: "Read", ...readDetail(args) };
+      return { kind, label, detail: text(args.command) || compactArguments(args) || "…" };
+    if (kind === "read") return { kind, label, ...readDetail(args) };
     if (kind === "search")
       return {
         kind,
-        label: "Search",
+        label,
         detail: [text(args.pattern), text(args.path) || text(args.file_path)]
           .filter(Boolean)
           .join(" · "),
@@ -38,18 +44,18 @@
     if (kind === "edit")
       return {
         kind,
-        label: name === "write" ? "Write" : "Edit",
+        label,
         detail:
           text(args.path) || text(args.file_path) || text(args.patch) || compactArguments(args),
       };
     const detail = [text(args.pattern), text(args.path) || text(args.file_path)]
       .filter(Boolean)
       .join(" ");
-    return { kind, label: humanizeToolName(name), detail: detail || compactArguments(args) };
+    return { kind, label, detail: detail || compactArguments(args) };
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
-  export function toolCallPreview(output: string, maxLines = TOOL_PREVIEW_LINES): ToolCallPreview {
+  export function toolCallPreview(output: string, maxLines = 5): ToolCallPreview {
     const lines = output.replace(/\s+$/, "").split("\n");
     if (lines.length <= maxLines) return { lines, skipped: 0 };
     return { lines: lines.slice(-maxLines), skipped: lines.length - maxLines };
@@ -169,7 +175,8 @@
     children?: Snippet;
   } = $props();
 
-  let expanded = $derived(status === "error");
+  let expandedOverride = $state<boolean | undefined>(undefined);
+  let expanded = $derived(toolCallExpanded(expandedOverride, status));
   let header = $derived(toolCallHeader(name, argumentSummary));
   let normalizedOutput = $derived(toolCallOutputText(output));
   let preview = $derived(toolCallPreview(normalizedOutput));
@@ -179,17 +186,7 @@
       ? undefined
       : `${status === "running" ? "Elapsed" : "Took"} ${formatToolDuration((endedAt ?? now) - startedAt)}`,
   );
-  let icon: "terminal" | "file" | "search" | "compose" | "tool" = $derived(
-    header.kind === "shell"
-      ? "terminal"
-      : header.kind === "read"
-        ? "file"
-        : header.kind === "search"
-          ? "search"
-          : header.kind === "edit"
-            ? "compose"
-            : "tool",
-  );
+  let icon = $derived(KIND_ICONS[header.kind]);
   let accessibleLabel = $derived(
     `${header.label}${header.detail ? ` ${header.detail}${header.range ?? ""}` : ""}`,
   );
@@ -197,13 +194,9 @@
 
 <div
   class={[
-    "tool-call min-w-0 text-control leading-[1.5]",
-    header.kind === "shell"
-      ? "tool-call--shell rounded-lg bg-secondary/70 px-2 py-2 font-mono"
-      : "tool-call--activity font-sans",
+    "min-w-0 text-control leading-[1.5]",
+    header.kind === "shell" ? "rounded-lg bg-secondary/70 px-2 py-2 font-mono" : "font-sans",
   ]}
-  data-tool-kind={header.kind}
-  data-tool-status={status}
 >
   {#snippet headerContent()}
     <span
@@ -225,7 +218,7 @@
           title={header.detail}>{header.detail}</span
         >{/if}
       {#if header.range}<span
-          class="tool-call__range flex-none font-mono font-semibold text-[#DCDC1F]"
+          class="tool-call__range flex-none font-mono font-semibold text-warning-text"
           >{header.range}</span
         >{/if}
     </span>
@@ -260,7 +253,7 @@
       ]}
       aria-label={accessibleLabel}
       aria-expanded={expanded}
-      onclick={() => (expanded = !expanded)}
+      onclick={() => (expandedOverride = !expanded)}
     >
       {@render headerContent()}
     </button>
@@ -289,7 +282,7 @@
   {#if expanded && hasDetails}
     <div
       class={[
-        "tool-call__details mt-1.5 min-w-0",
+        "mt-1.5 min-w-0",
         header.kind === "shell"
           ? "border-t border-border pt-2"
           : "ml-7 rounded-r-lg border-l border-border-strong bg-secondary/45 px-3 py-2 font-mono",

@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
@@ -17,7 +18,7 @@ import {
 } from "@pidex/api";
 import { Effect } from "effect";
 import WebSocket, { type RawData } from "ws";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPidexServer } from "./main.js";
 
 const execFileAsync = promisify(execFile);
@@ -60,14 +61,6 @@ describe.sequential("HTTP API endpoints", () => {
   let chatId: string;
   let httpUrl: string;
   let websocketUrl: string;
-  const originalEnvironment = preserveEnvironment([
-    "PIDEX_PROJECT_ROOTS",
-    "PIDEX_STATE_DIR",
-    "PIDEX_WORKTREES_DIR",
-    "PI_CODING_AGENT_DIR",
-    "PI_CODING_AGENT_SESSION_DIR",
-    "WORKSPACE_ROOTS",
-  ]);
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
@@ -104,12 +97,12 @@ describe.sequential("HTTP API endpoints", () => {
     );
     workspacePath = await realpath(workspacePath);
 
-    process.env.PIDEX_PROJECT_ROOTS = tempRoot;
-    process.env.PIDEX_STATE_DIR = path.join(tempRoot, "state");
-    process.env.PIDEX_WORKTREES_DIR = path.join(tempRoot, "worktrees");
-    process.env.PI_CODING_AGENT_DIR = path.join(tempRoot, "agent");
-    process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, "sessions");
-    process.env.WORKSPACE_ROOTS = [workspacePath, nonGitWorkspacePath].join(path.delimiter);
+    vi.stubEnv("PIDEX_PROJECT_ROOTS", tempRoot);
+    vi.stubEnv("PIDEX_STATE_DIR", path.join(tempRoot, "state"));
+    vi.stubEnv("PIDEX_WORKTREES_DIR", path.join(tempRoot, "worktrees"));
+    vi.stubEnv("PI_CODING_AGENT_DIR", path.join(tempRoot, "agent"));
+    vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
+    vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
 
     app = await createPidexServer();
     await listen(app);
@@ -129,7 +122,7 @@ describe.sequential("HTTP API endpoints", () => {
     try {
       await app?.close();
     } finally {
-      restoreEnvironment(originalEnvironment);
+      vi.unstubAllEnvs();
       if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
     }
   });
@@ -359,9 +352,50 @@ describe.sequential("HTTP API endpoints", () => {
   });
 
   it("workspaces.sessions", async () => {
+    // Pi only writes a session file to disk once it holds an assistant reply (never for a
+    // chat that was created but never answered), and this suite runs without a live model.
+    // Seed one directly through the real SessionManager persistence API — no mock of our
+    // own code, just a session with a genuine reply already on disk — so the listing has
+    // something to resolve a status for.
+    const seeded = SessionManager.create(workspacePath, path.join(tempRoot, "sessions"));
+    seeded.appendMessage({ role: "user", content: "Ping", timestamp: Date.now() });
+    seeded.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Pong" }],
+      api: "messages",
+      provider: "test",
+      model: "test-model",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
     const result = await api.workspaces.sessions({ workspaceId });
 
     expect(result.sessions).toEqual(expect.any(Array));
+    const session = result.sessions.find((entry) => entry.firstMessage === "Ping");
+    expect(session?.status).toBe("idle");
+  });
+
+  it("workspaces.sessions includes a live chat Pi hasn't persisted to disk yet", async () => {
+    // A chat with no assistant reply yet has no session file on disk (see the seeding note
+    // above), so it is absent from `pi.inspectWorkspace().sessions`. The server must still
+    // surface it from the live ChatRecord, or a brand-new task has no sidebar row for its
+    // entire first run.
+    const created = await api.chats.create({ workspaceId });
+
+    const result = await api.workspaces.sessions({ workspaceId });
+
+    const session = result.sessions.find((entry) => entry.id === created.taskId);
+    expect(session).toMatchObject({ status: "idle", messageCount: 0 });
+    await api.chats.dispose({ chatId: created.chatId });
   });
 
   it("workspaces.trust", async () => {
@@ -733,18 +767,4 @@ async function rawRpcResult(response: Response) {
   if (!payload || typeof payload !== "object" || !("json" in payload))
     throw new Error("Expected an oRPC JSON envelope");
   return payload.json;
-}
-
-function preserveEnvironment<const Key extends string>(keys: readonly Key[]) {
-  return Object.fromEntries(keys.map((key) => [key, process.env[key]])) as Record<
-    Key,
-    string | undefined
-  >;
-}
-
-function restoreEnvironment(environment: Record<string, string | undefined>) {
-  for (const [key, value] of Object.entries(environment)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
 }

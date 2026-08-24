@@ -1,11 +1,16 @@
-import { expect, test } from "@playwright/test";
-import { basename } from "node:path";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
+  captureCreatedChat,
+  createTask,
+  e2eModel,
   emitServerEvent,
+  fulfillAccepted,
+  fulfillJson,
   installFakeWebSocket,
-  openTasks,
-  rememberWorkspace,
+  patchRpcResponse,
+  routeInput,
   rpcRequest,
+  startNewTask,
   waitForFakeWebSocket,
 } from "./support";
 
@@ -15,26 +20,7 @@ test("renders assistant markdown as safe interactive components", async ({
   request,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  const workspaceName = basename(process.cwd());
-  await installFakeWebSocket(page);
-  let snapshot: Record<string, unknown> | undefined;
-  await page.route("**/api/rpc/chats/create", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    snapshot = payload.json;
-    await route.fulfill({ response, json: payload });
-  });
-
-  await rememberWorkspace(request, process.cwd());
-  await page.goto("/");
-  await openTasks(page);
-  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
-  await expect(newTaskButton).toBeEnabled();
-  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
-  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
     type: "message",
     eventId: 1,
@@ -86,7 +72,7 @@ const answer = 42;
   const transcriptBody = page.getByRole("log").locator(":scope > div");
   const userPrompt = page.getByRole("log").getByText("Inspect this repository", { exact: true });
   const assistantBody = page.locator(".markdown").filter({ hasText: "Rendered result" });
-  await expect(transcriptBody).toHaveCSS("max-width", "576px");
+  await expect(transcriptBody).toHaveCSS("max-width", "704px");
   await expect(transcriptBody).toHaveCSS("font-family", /DM Sans/);
   await expect(userPrompt).toHaveCSS("border-radius", "16px");
   await expect(userPrompt).toHaveCSS("font-family", /DM Sans/);
@@ -106,7 +92,7 @@ const answer = 42;
   const assistantHeading = page.getByRole("heading", { name: "Rendered result" });
   await expect(assistantHeading).toHaveCSS("font-size", "21.7px");
   expect(await assistantHeading.evaluate((element) => getComputedStyle(element).color)).not.toBe(
-    "rgb(183, 121, 31)",
+    "rgb(138, 90, 18)",
   );
   await expect(page.getByText("Safe Markdown", { exact: true })).toHaveCSS("font-weight", "700");
   await expect(page.getByText("Entity text: AT&T ©", { exact: true })).toBeVisible();
@@ -158,26 +144,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   page,
   request,
 }) => {
-  const workspaceName = basename(process.cwd());
-  await installFakeWebSocket(page);
-  let snapshot: Record<string, unknown> | undefined;
-  await page.route("**/api/rpc/chats/create", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    snapshot = payload.json;
-    await route.fulfill({ response, json: payload });
-  });
-
-  await rememberWorkspace(request, process.cwd());
-  await page.goto("/");
-  await openTasks(page);
-  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
-  await expect(newTaskButton).toBeEnabled();
-  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
-  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   const toolItem = {
     type: "tool",
     id: "tool_bash_e2e",
@@ -302,7 +269,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   await expect(readBlock).toBeVisible();
   await expect(readContainer).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(readContainer.locator(".tool-call__range")).toHaveText(":1-800");
-  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(220, 220, 31)");
+  await expect(readContainer.locator(".tool-call__range")).toHaveCSS("color", "rgb(138, 90, 18)");
   await expect(readBlock).toHaveAttribute("aria-expanded", "false");
   await expect(readContainer.locator(".tool-call__output")).toHaveCount(0);
   await readBlock.click();
@@ -311,26 +278,7 @@ test("renders grouped tool activity with semantic rows and expandable output", a
 });
 
 test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
-  const workspaceName = basename(process.cwd());
-  await installFakeWebSocket(page);
-  let snapshot: Record<string, unknown> | undefined;
-  await page.route("**/api/rpc/chats/create", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    snapshot = payload.json;
-    await route.fulfill({ response, json: payload });
-  });
-
-  await rememberWorkspace(request, process.cwd());
-  await page.goto("/");
-  await openTasks(page);
-  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
-  await expect(newTaskButton).toBeEnabled();
-  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
-  await expect.poll(() => snapshot?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
-
-  const chatId = String(snapshot?.chatId);
+  const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
     type: "message",
     eventId: 1,
@@ -392,45 +340,28 @@ test("preserves edits made while slash compaction is pending", async ({
   page,
   request,
 }, testInfo) => {
-  const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
   let compactInput: Record<string, unknown> | undefined;
   let compactRequests = 0;
   let queuedRequests = 0;
-  let snapshot: Record<string, unknown> | undefined;
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...payload.json,
-          commands: Array.from({ length: 24 }, (_, index) => ({
-            name: `command-${String(index + 1).padStart(2, "0")}`,
-            description: `Workspace command ${index + 1}`,
-          })),
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
-  await page.route("**/api/rpc/chats/create", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    snapshot = payload.json;
-    await route.fulfill({ response, json: payload });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) => ({
+    ...json,
+    commands: Array.from({ length: 24 }, (_, index) => ({
+      name: `command-${String(index + 1).padStart(2, "0")}`,
+      description: `Workspace command ${index + 1}`,
+    })),
+    models: [e2eModel],
+  }));
+  const snapshot = await captureCreatedChat(page);
   await page.route("**/api/rpc/chats/compact", async (route) => {
-    if (!snapshot) throw new Error("Expected a chat before compaction");
+    if (!snapshot.current) throw new Error("Expected a chat before compaction");
     compactRequests++;
-    compactInput = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    compactInput = routeInput(route);
     await compactionPending;
-    snapshot = {
-      ...snapshot,
+    snapshot.current = {
+      ...snapshot.current,
       revision: Number(compactInput.expectedRevision) + 1,
       contextUsage: {
         tokens: 10,
@@ -440,27 +371,14 @@ test("preserves edits made while slash compaction is pending", async ({
         compactsAutomatically: true,
       },
     };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: snapshot },
-    });
+    await fulfillJson(route, snapshot.current);
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {
     queuedRequests++;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { accepted: false, reason: "Compaction is active" } },
-    });
+    await fulfillJson(route, { accepted: false, reason: "Compaction is active" });
   });
 
-  await rememberWorkspace(request, process.cwd());
-  await page.goto("/");
-  await openTasks(page);
-  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
-  await expect(newTaskButton).toBeEnabled();
-  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await startNewTask(page, request);
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/);
 
   const prompt = page.getByLabel("Prompt");
@@ -494,19 +412,21 @@ test("preserves edits made while slash compaction is pending", async ({
   await emitServerEvent(page, {
     type: "run_status",
     eventId: 1,
-    chatId: String(snapshot?.chatId),
+    chatId: String(snapshot.current?.chatId),
     status: "compacting",
-    revision: Number(snapshot?.revision),
+    revision: Number(snapshot.current?.revision),
   });
+  // The compact request is still in flight (blocked on `compactionPending`) while the run is
+  // active, so the stop button is rendered -- but it is only ever disabled by a lost connection,
+  // so its label stays the plain action name "Stop" rather than borrowing the pending-compaction
+  // reason (that reason still drives the placeholder) -- see TaskComposer.svelte's
+  // `composerAffordances`.
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
   if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
+    await settleFrames(page);
   }
   expect(compactRequests).toBe(1);
   expect(queuedRequests).toBe(0);
@@ -531,9 +451,9 @@ test("preserves edits made while slash compaction is pending", async ({
     await emitServerEvent(page, {
       type: "run_status",
       eventId: 2,
-      chatId: String(snapshot?.chatId),
+      chatId: String(snapshot.current?.chatId),
       status: "idle",
-      revision: Number(snapshot?.revision),
+      revision: Number(snapshot.current?.revision),
       run: {
         runId: "run_requires_acknowledgement",
         actionId: "action_requires_acknowledgement",
@@ -542,12 +462,13 @@ test("preserves edits made while slash compaction is pending", async ({
       },
     });
     await prompt.fill("/compact");
-    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    // requiresAcknowledgement now outranks the default "Send" label in the disabled-reason
+    // cascade -- see TaskComposer.svelte's `composerAffordances`.
+    await expect(
+      page.getByRole("button", { name: "Acknowledge the interrupted run above to continue" }),
+    ).toBeDisabled();
     await prompt.press("Enter");
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
+    await settleFrames(page);
     expect(compactRequests).toBe(2);
   }
 });
@@ -557,29 +478,17 @@ test("isolates pending task operations while navigating between tasks", async ({
   request,
 }) => {
   await installFakeWebSocket(page);
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const opened = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: process.cwd() },
-    bootstrap.result.csrfToken,
-  );
-  const first = await rpcRequest<Record<string, unknown>>(
-    request,
-    "chats/create",
-    { workspaceId: opened.result.id },
-    bootstrap.result.csrfToken,
-  );
+  const { csrfToken, workspace, task: firstTask } = await createTask(request, process.cwd());
   const second = await rpcRequest<Record<string, unknown>>(
     request,
     "chats/create",
-    { workspaceId: opened.result.id },
-    bootstrap.result.csrfToken,
+    { workspaceId: workspace.id },
+    csrfToken,
   );
   const now = new Date().toISOString();
   const sessions = [
     {
-      id: String(first.result.taskId),
+      id: String(firstTask.taskId),
       name: "First task",
       firstMessage: "",
       createdAt: now,
@@ -608,85 +517,43 @@ test("isolates pending task operations while navigating between tasks", async ({
   let configurationRequested = false;
   let compactRequested = false;
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    if (payload.json.id !== opened.result.id) {
-      await route.fulfill({ response });
-      return;
-    }
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...payload.json,
-          sessions,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) =>
+    json.id === workspace.id ? { ...json, sessions, models: [e2eModel] } : json,
+  );
   await page.route("**/api/rpc/workspaces/sessions", async (route) => {
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
-    if (input.workspaceId !== opened.result.id) {
+    const input = routeInput(route);
+    if (input.workspaceId !== workspace.id) {
       await route.continue();
       return;
     }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: { sessions } },
-    });
+    await fulfillJson(route, { sessions });
   });
-  await page.route("**/api/rpc/chats/resume", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json:
-          input.taskId === second.result.taskId
-            ? { ...payload.json, contextUsage: secondUsage }
-            : payload.json,
-      },
-    });
-  });
+  await patchRpcResponse(page, "chats/resume", (json, route) =>
+    routeInput(route).taskId === second.result.taskId
+      ? { ...json, contextUsage: secondUsage }
+      : json,
+  );
   await page.route("**/api/rpc/chats/compact", async (route) => {
     compactRequested = true;
     await compactionPending;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...first.result,
-          revision: Number(first.result.revision) + 1,
-          contextUsage: { ...secondUsage, tokens: 10, percent: 10, totalProcessedTokens: 10 },
-        },
-      },
+    await fulfillJson(route, {
+      ...firstTask,
+      revision: Number(firstTask.revision) + 1,
+      contextUsage: { ...secondUsage, tokens: 10, percent: 10, totalProcessedTokens: 10 },
     });
   });
   await page.route("**/api/rpc/chats/configure", async (route) => {
     configurationRequested = true;
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    const input = routeInput(route);
     await configurationPending;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          ...first.result,
-          thinkingLevel: input.thinkingLevel,
-          revision: Number(input.expectedRevision) + 1,
-        },
-      },
+    await fulfillJson(route, {
+      ...firstTask,
+      thinkingLevel: input.thinkingLevel,
+      revision: Number(input.expectedRevision) + 1,
     });
   });
 
-  await page.goto(`/tasks/${String(first.result.taskId)}`);
+  await page.goto(`/tasks/${String(firstTask.taskId)}`);
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
   const thinking = page.getByLabel("Thinking level");
@@ -698,7 +565,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await expect(thinking).toBeEnabled();
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
-  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(page).toHaveURL(`/tasks/${String(firstTask.taskId)}`);
   await expect(thinking).toBeDisabled();
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
@@ -706,7 +573,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   releaseConfiguration();
   await configurationResponse;
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
-  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
+  await expect(page).toHaveURL(`/tasks/${String(firstTask.taskId)}`);
   await prompt.fill("/compact");
   const compactResponse = page.waitForResponse("**/api/rpc/chats/compact");
   await page.getByRole("button", { name: "Send" }).click();
@@ -717,8 +584,11 @@ test("isolates pending task operations while navigating between tasks", async ({
   await prompt.fill("Message for the second task");
   await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
-  await expect(page).toHaveURL(`/tasks/${String(first.result.taskId)}`);
-  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await expect(page).toHaveURL(`/tasks/${String(firstTask.taskId)}`);
+  // The first task's compact request is still in flight (blocked on `compactionPending`), so the
+  // disabled-reason cascade labels the button with the pending-compaction reason instead of
+  // "Send" -- see TaskComposer.svelte's `composerAffordances`.
+  await expect(page.getByRole("button", { name: "Compacting context" })).toBeDisabled();
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await expect(prompt).toHaveValue("Message for the second task");
@@ -726,10 +596,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   releaseCompaction();
   await compactResponse;
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
+  await settleFrames(page);
 
   await expect(page.getByLabel("Context window 20% used")).toBeVisible();
   await expect(page.getByLabel("Context window 10% used")).toHaveCount(0);
@@ -741,42 +608,14 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
 }, testInfo) => {
   if (testInfo.project.name === "mobile") await page.setViewportSize({ width: 390, height: 844 });
   await installFakeWebSocket(page);
-  const bootstrap = await rpcRequest<{ csrfToken: string }>(request, "system/bootstrap", {});
-  const opened = await rpcRequest<{ id: string }>(
-    request,
-    "workspaces/open",
-    { path: process.cwd() },
-    bootstrap.result.csrfToken,
-  );
-  const created = await rpcRequest<Record<string, unknown>>(
-    request,
-    "chats/create",
-    { workspaceId: opened.result.id },
-    bootstrap.result.csrfToken,
-  );
-  let snapshot = created.result;
+  const { task } = await createTask(request, process.cwd());
+  let snapshot: Record<string, unknown> = task;
   const taskId = String(snapshot.taskId);
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
-  await page.route("**/api/rpc/chats/resume", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
+  await patchRpcResponse(page, "workspaces/open", (json) => ({ ...json, models: [e2eModel] }));
+  await patchRpcResponse(page, "chats/resume", (json) => {
     snapshot = {
-      ...payload.json,
+      ...json,
       model: "e2e/model",
       thinkingLevel: "high",
       contextUsage: {
@@ -787,7 +626,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
         compactsAutomatically: true,
       },
     };
-    await route.fulfill({ response, json: { ...payload, json: snapshot } });
+    return snapshot;
   });
 
   await page.goto(`/tasks/${taskId}`);
@@ -900,86 +739,42 @@ test("persists idle configuration immediately without overwriting the draft", as
   page,
   request,
 }, testInfo) => {
-  const workspaceName = basename(process.cwd());
   await installFakeWebSocket(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
   const { promise: configurationPending, resolve: releaseConfiguration } =
     Promise.withResolvers<void>();
-  let snapshot: Record<string, unknown> | undefined;
 
-  await page.route("**/api/rpc/workspaces/open", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    const workspace = payload.json as Record<string, unknown> & { models: unknown[] };
-    await route.fulfill({
-      response,
-      json: {
-        ...payload,
-        json: {
-          ...workspace,
-          models: [{ id: "e2e/model", provider: "e2e", name: "E2E model", reasoning: true }],
-        },
-      },
-    });
-  });
-  await page.route("**/api/rpc/chats/create", async (route) => {
-    const response = await route.fetch();
-    const payload = (await response.json()) as { json: Record<string, unknown> };
-    snapshot = payload.json;
-    await route.fulfill({ response, json: payload });
-  });
+  await patchRpcResponse(page, "workspaces/open", (json) => ({ ...json, models: [e2eModel] }));
+  const snapshot = await captureCreatedChat(page);
   await page.route("**/api/rpc/chats/configure", async (route) => {
-    if (!snapshot) throw new Error("Expected a chat before configuration");
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (!snapshot.current) throw new Error("Expected a chat before configuration");
+    const input = routeInput(route);
     mutations.push({ procedure: "configure", input });
     await configurationPending;
-    snapshot = {
-      ...snapshot,
+    snapshot.current = {
+      ...snapshot.current,
       ...(typeof input.model === "string" ? { model: input.model } : {}),
       ...(typeof input.thinkingLevel === "string" ? { thinkingLevel: input.thinkingLevel } : {}),
       revision: Number(input.expectedRevision) + 1,
     };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: { json: snapshot },
-    });
+    await fulfillJson(route, snapshot.current);
   });
   await page.route("**/api/rpc/chats/sendMessage", async (route) => {
-    if (!snapshot) throw new Error("Expected a chat before sending");
-    const input = (route.request().postDataJSON() as { json: Record<string, unknown> }).json;
+    if (!snapshot.current) throw new Error("Expected a chat before sending");
+    const input = routeInput(route);
     mutations.push({ procedure: "send", input });
-    const revision = Number(input.expectedRevision) + 1;
-    snapshot = { ...snapshot, revision };
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      json: {
-        json: {
-          accepted: true,
-          actionId: input.actionId,
-          runId: "run_e2e_12345",
-          status: "accepted",
-          revision,
-          replayed: false,
-        },
-      },
-    });
+    snapshot.current = { ...snapshot.current, revision: Number(input.expectedRevision) + 1 };
+    await fulfillAccepted(route, input, "run_e2e_12345");
   });
 
-  await rememberWorkspace(request, process.cwd());
-  await page.goto("/");
-  await openTasks(page);
-  const newTaskButton = page.getByRole("button", { name: `New task in ${workspaceName}` });
-  await expect(newTaskButton).toBeEnabled();
-  await newTaskButton.evaluate((button: HTMLButtonElement) => button.click());
+  await startNewTask(page, request);
 
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
   await waitForFakeWebSocket(page);
 
-  const chatId = String(snapshot?.chatId);
+  const chatId = String(snapshot.current?.chatId);
   const contextUsage = {
     tokens: 87_000,
     contextWindow: 258_000,
@@ -987,7 +782,7 @@ test("persists idle configuration immediately without overwriting the draft", as
     totalProcessedTokens: 2_500_000,
     compactsAutomatically: true,
   };
-  snapshot = { ...snapshot, contextUsage };
+  snapshot.current = { ...snapshot.current, contextUsage };
   await emitServerEvent(page, {
     type: "context_usage",
     eventId: 1,
@@ -1000,7 +795,9 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(contextMeter).toHaveAttribute("aria-label", "Context window 34% used");
   if (testInfo.project.name === "mobile") await contextMeter.focus();
   else await contextMeter.hover();
-  const contextDetails = page.getByRole("tooltip");
+  // Scoped: the sidebar's icon-button tooltips (collapse, search, etc.) are
+  // also role="tooltip" elements always present in the DOM.
+  const contextDetails = page.getByRole("tooltip").filter({ hasText: "Context Window" });
   await expect(contextDetails).toHaveCSS("opacity", "1");
   await expect(contextDetails).toContainText("Context Window");
   await expect(contextDetails).toContainText("34% · 87k/258k");
@@ -1015,7 +812,10 @@ test("persists idle configuration immediately without overwriting the draft", as
   await expect(page.getByText("Next turn", { exact: true })).toHaveCount(0);
   await expect(thinking).toBeDisabled();
   await prompt.fill("Draft while configuration is pending");
-  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+  // The configure request is still in flight (blocked on `configurationPending`), so the
+  // disabled-reason cascade labels the button with the pending-configuration reason instead of
+  // "Send" -- see TaskComposer.svelte's `composerAffordances`.
+  await expect(page.getByRole("button", { name: "Saving configuration" })).toBeDisabled();
   if (testInfo.project.name !== "mobile") await prompt.press("Enter");
   expect(mutations.map(({ procedure }) => procedure)).toEqual(["configure"]);
   releaseConfiguration();
@@ -1080,3 +880,19 @@ test("persists idle configuration immediately without overwriting the draft", as
     .toEqual(["configure", "send"]);
   expect(mutations[1]?.input).toEqual(expect.objectContaining({ delivery: "normal" }));
 });
+
+async function startStreamingTask(page: Page, request: APIRequestContext) {
+  await installFakeWebSocket(page);
+  const snapshot = await captureCreatedChat(page);
+  await startNewTask(page, request);
+  await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
+  await waitForFakeWebSocket(page);
+  return { snapshot, chatId: String(snapshot.current?.chatId) };
+}
+
+function settleFrames(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}

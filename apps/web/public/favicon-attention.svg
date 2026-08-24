@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-labelledby="title">
+  <title id="title">Pidex — needs attention</title>
+  <rect width="800" height="800" rx="120" fill="#09090b" />
+
+  <!-- Pi-inspired P, constructed on the same coarse modular grid. -->
+  <path
+    fill="#f3f2f0"
+    fill-rule="evenodd"
+    d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
+  />
+
+
+  <!-- The status dot replaces the paired-client x: same corner cell of the grid, no overlap debris. Status: attention. Background-colored keyline ring separates the dot from the mark it overlaps. -->
+  <circle cx="620" cy="620" r="175" fill="#09090b" />
+  <circle cx="620" cy="620" r="130" fill="#dc4c4c" />
+</svg>

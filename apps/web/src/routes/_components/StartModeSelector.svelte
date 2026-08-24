@@ -50,13 +50,13 @@
   </button>
   {#if open}
     <div
-      class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-xl"
+      class="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl border border-border-strong bg-card p-1.5 text-foreground shadow-popover"
       role="menu"
       aria-label="Start in"
     >
       <p class="m-0 px-2 py-1.5 text-meta font-medium text-faint">Start in</p>
       <button
-        class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+        class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
         role="menuitemradio"
         aria-checked={mode === "local"}
         onclick={() => choose("local")}
@@ -66,7 +66,7 @@
         {#if mode === "local"}<Icon name="check" size={13} />{/if}
       </button>
       <button
-        class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-xs text-muted hover:bg-secondary hover:text-foreground"
+        class="flex h-8 w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 text-left text-control text-muted hover:bg-secondary hover:text-foreground"
         role="menuitemradio"
         aria-checked={mode === "worktree"}
         onclick={() => choose("worktree")}

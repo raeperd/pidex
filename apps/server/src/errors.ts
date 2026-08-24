@@ -62,9 +62,32 @@ export function applicationError(operation: string, cause: unknown): Application
     cause instanceof ServerOperationError
   )
     return cause;
-  return ServerOperationError.make({
+  return ServerOperationError.make({ operation, message: failureMessage(operation, cause), cause });
+}
+
+export function failureMessage(operation: string, cause: unknown): string {
+  return cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`;
+}
+
+export interface TaggedOperationError<Tag extends string> {
+  readonly _tag: Tag;
+  readonly operation: string;
+  readonly message: string;
+  readonly cause: unknown;
+}
+
+/** Wraps throwing calls into `{ _tag, operation, message, cause }` failures. */
+export function taggedAttempt<Tag extends string>(tag: Tag) {
+  const fail = (operation: string, cause: unknown): TaggedOperationError<Tag> => ({
+    _tag: tag,
     operation,
-    message: cause instanceof Error ? cause.message : `Unexpected failure during ${operation}`,
+    message: failureMessage(operation, cause),
     cause,
   });
+  return {
+    promise: <A>(operation: string, evaluate: () => Promise<A>) =>
+      Effect.tryPromise({ try: evaluate, catch: (cause) => fail(operation, cause) }),
+    sync: <A>(operation: string, evaluate: () => A) =>
+      Effect.try({ try: evaluate, catch: (cause) => fail(operation, cause) }),
+  };
 }

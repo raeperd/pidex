@@ -49,6 +49,25 @@
     if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
     return `${phrases.slice(0, -1).join(", ")}, and ${phrases.at(-1)}`;
   }
+
+  type ScrollPosition = { scrollTop: number; scrollHeight: number; clientHeight: number };
+
+  function isNearBottom(position: ScrollPosition): boolean {
+    return position.scrollHeight - position.scrollTop - position.clientHeight < 96;
+  }
+
+  export function resolveFollowing(
+    following: boolean,
+    event: { kind: "wheel" | "touchmove" | "scroll"; deltaY?: number },
+    position: ScrollPosition,
+  ): boolean {
+    // A wheel event fires before the browser applies its scroll, so `position` can still read
+    // "at the bottom" for an upward step that is about to move away from it: decide upward wheel
+    // gestures by direction alone, not by this pre-scroll position.
+    if (event.kind === "wheel" && (event.deltaY ?? 0) < 0) return false;
+    if (event.kind === "scroll") return following || isNearBottom(position);
+    return isNearBottom(position);
+  }
 </script>
 
 <script lang="ts">
@@ -56,6 +75,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import AgentMessage from "./AgentMessage.svelte";
   import AgentMessageBody from "./AgentMessageBody.svelte";
+  import type { HighlightTheme } from "./AgentMessageCodeBlock.svelte";
   import { parseAgentMessage } from "./AgentMessageParser";
   import type { TaskToolOutput, TaskToolTiming } from "../../../_components/AppShellContext.svelte";
   import Icon from "../../../_components/Icon.svelte";
@@ -85,17 +105,21 @@
 
   let transcript = $state<HTMLElement>();
   let nearBottom = $state(true);
+  let following = $state(true);
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
+  const reducedMotion = new MediaQuery("prefers-reduced-motion: reduce");
+  let theme: HighlightTheme = $derived(darkMode.current ? "dark" : "light");
   let rows = $derived(groupTranscriptItems(items));
 
   export function scrollLatest() {
     if (!transcript) return;
     transcript.scrollTop = transcript.scrollHeight;
     nearBottom = true;
+    following = true;
   }
 
   export function scrollIfNearBottom() {
-    if (nearBottom) requestAnimationFrame(scrollLatest);
+    if (following) requestAnimationFrame(scrollLatest);
   }
 
   async function prependEarlierMessages() {
@@ -108,14 +132,33 @@
     }
   }
 
-  function onScroll() {
-    if (transcript)
-      nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 96;
+  function jumpToLatest() {
+    if (!transcript) return;
+    transcript.scrollTo({
+      top: transcript.scrollHeight,
+      behavior: reducedMotion.current ? "auto" : "smooth",
+    });
+    nearBottom = true;
+    following = true;
+  }
+
+  function onScroll(event: Event) {
+    if (!transcript) return;
+    const kind = event.type as "scroll" | "wheel" | "touchmove";
+    const deltaY = "deltaY" in event ? (event as WheelEvent).deltaY : undefined;
+    const position = {
+      scrollTop: transcript.scrollTop,
+      scrollHeight: transcript.scrollHeight,
+      clientHeight: transcript.clientHeight,
+    };
+    if (kind === "scroll") nearBottom = isNearBottom(position);
+    following = resolveFollowing(following, { kind, deltaY }, position);
   }
 </script>
 
 {#snippet toolCall(item: ToolItem)}
-  {@const output = (item.resourceId ? toolOutputs[item.resourceId]?.text : "") || item.preview}
+  {@const state = item.resourceId ? toolOutputs[item.resourceId] : undefined}
+  {@const output = state?.text || item.preview}
   <ToolCall
     name={item.name}
     argumentSummary={item.argumentSummary}
@@ -126,27 +169,23 @@
     now={toolElapsedNow}
     detailsAvailable={Boolean(output || item.resourceId)}
   >
-    {#if item.resourceId && !toolOutputs[item.resourceId]?.complete}
+    {#if item.resourceId && !state?.complete}
       <button
-        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary disabled:opacity-40"
+        class="mt-2 rounded-lg border border-border bg-card px-2 py-1.5 text-meta font-semibold text-primary-text disabled:opacity-40"
         onclick={() => loadToolOutput(item)}
-        disabled={toolOutputs[item.resourceId]?.loading}
-        >{toolOutputs[item.resourceId]?.loading
+        disabled={state?.loading}
+        >{state?.loading
           ? "Loading bounded chunk…"
-          : toolOutputs[item.resourceId]?.text
-            ? `Load more · ${toolOutputs[item.resourceId]?.nextOffset.toLocaleString()} / ${toolOutputs[item.resourceId]?.total.toLocaleString()}`
+          : state?.text
+            ? `Load more · ${state.nextOffset.toLocaleString()} / ${state.total.toLocaleString()}`
             : `Load complete output · ${(item.outputSize ?? 0).toLocaleString()} chars`}</button
       >
     {/if}
-    {#if item.resourceId && toolOutputs[item.resourceId]?.sourceTruncated}<p
-        class="mt-2 text-meta text-faint"
-      >
+    {#if state?.sourceTruncated}<p class="mt-2 text-meta text-faint">
         The host bounded this output at its safety limit.
       </p>{/if}
-    {#if item.resourceId && toolOutputs[item.resourceId]?.error}<p
-        class="mt-2 text-meta text-danger"
-      >
-        {toolOutputs[item.resourceId]?.error}
+    {#if state?.error}<p class="mt-2 text-meta text-danger">
+        {state.error}
       </p>{/if}
   </ToolCall>
 {/snippet}
@@ -157,9 +196,9 @@
     aria-label={`Skill loaded: ${item.name}`}
   >
     <summary
-      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-[11px] transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden"
+      class="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 font-sans text-meta transition-colors hover:bg-secondary/60 focus-visible:outline-2 focus-visible:outline-primary"
     >
-      <span class="font-bold text-primary">[skill]</span>
+      <span class="font-bold text-primary-text">[skill]</span>
       <strong class="font-semibold text-foreground">{item.name}</strong>
       <span class="text-faint">loaded</span>
       <span class="ml-auto text-faint transition-transform group-open/skill:rotate-90"
@@ -167,12 +206,9 @@
       >
     </summary>
     <div
-      class="markdown border-t border-border px-3 py-2.5 font-mono text-[12px] leading-[1.55] text-muted [overflow-wrap:anywhere]"
+      class="markdown border-t border-border px-3 py-2.5 font-mono text-control leading-[1.55] text-muted [overflow-wrap:anywhere]"
     >
-      <AgentMessageBody
-        nodes={parseAgentMessage(item.content)}
-        theme={darkMode.current ? "dark" : "light"}
-      />
+      <AgentMessageBody nodes={parseAgentMessage(item.content)} {theme} />
     </div>
   </details>
 {/snippet}
@@ -180,11 +216,11 @@
 {#snippet toolGroup(row: Extract<TranscriptRow, { kind: "tools" }>)}
   {@const previous = row.items.slice(0, -1)}
   {@const latest = row.items.at(-1)}
-  <div class="tool-activity-group my-3 space-y-2">
+  <div class="my-3 space-y-2">
     {#if previous.length > 0}
       <details class="group/tool-history">
         <summary
-          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
+          class="flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 font-sans text-control text-faint transition-colors hover:bg-secondary hover:text-muted focus-visible:ring-2 focus-visible:ring-primary"
         >
           <span class="transition-transform duration-150 group-open/tool-history:rotate-90"
             ><Icon name="chevron" size={12} /></span
@@ -200,14 +236,16 @@
         </div>
       </details>
     {/if}
-    {#if latest}{@render toolCall(latest)}{/if}
+    {#if latest}{#key latest.id}{@render toolCall(latest)}{/key}{/if}
   </div>
 {/snippet}
 
 <section
-  class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin] motion-reduce:scroll-auto"
+  class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-color:var(--border-strong)_transparent] [scrollbar-width:thin]"
   bind:this={transcript}
   onscroll={onScroll}
+  onwheel={onScroll}
+  ontouchmove={onScroll}
   role="log"
   aria-live="polite"
   aria-relevant="additions text"
@@ -234,7 +272,7 @@
           text={row.item.text}
           thinking={row.item.thinking}
           timestamp={row.item.timestamp}
-          theme={darkMode.current ? "dark" : "light"}
+          {theme}
         />
       {:else if row.item.type === "skill"}
         {@render skillActivity(row.item)}
@@ -243,9 +281,12 @@
       {/if}
     {/each}
   </div>
+  {#if !nearBottom}
+    <div class="pointer-events-none sticky bottom-4 z-7 flex h-0 justify-center">
+      <button
+        class="pointer-events-auto flex -translate-y-full items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-raised hover:text-foreground"
+        onclick={jumpToLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
+      >
+    </div>
+  {/if}
 </section>
-
-{#if !nearBottom}<button
-    class="absolute bottom-40 left-1/2 z-7 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-meta text-muted shadow-lg hover:text-foreground max-[560px]:bottom-33"
-    onclick={scrollLatest}>Jump to latest <Icon name="arrow-down" size={13} /></button
-  >{/if}
