@@ -624,17 +624,15 @@
       projectOrderSaving = false;
     }
   }
-  async function openProject(
-    path = projectPath,
-    options: {
-      activate?: boolean;
-      closeDrawer?: boolean;
-      expand?: boolean;
-      remember?: boolean;
-      reconcileHistory?: boolean;
-      navigate?: boolean;
-    } = {},
-  ) {
+  interface OpenProjectOptions {
+    activate?: boolean;
+    closeDrawer?: boolean;
+    expand?: boolean;
+    remember?: boolean;
+    reconcileHistory?: boolean;
+    navigate?: boolean;
+  }
+  async function openProject(path = projectPath, options: OpenProjectOptions = {}) {
     const activate = options.activate ?? true;
     const remember = options.remember ?? true;
     if (remember && projectOrderSaving) return undefined;
@@ -654,28 +652,7 @@
         }
       }
       rememberWorkspace(loaded, options.expand ?? activate);
-      if (activate) {
-        const loadedProject = bootstrap?.recentWorkspaces.find(
-          (project) => project.id === loaded.id || project.path === loaded.path,
-        );
-        if (loadedProject) await loadSourceWorkspace(loadedProject);
-        for (const worktree of worktreesFor(loaded.id))
-          if (!workspaceFor(worktree.id))
-            await openProject(worktree.path, {
-              activate: false,
-              expand: false,
-              remember: false,
-            });
-        adoptWorkspace(loaded);
-        snapshot = undefined;
-        draft = "";
-        if (options.closeDrawer ?? true) drawerOpen = false;
-        if (routeReady && (options.navigate ?? true)) {
-          appliedRoute = "/";
-          routeSequence += 1;
-          if (page.url.pathname !== "/") await goto("/");
-        }
-      }
+      if (activate) await activateWorkspace(loaded, options);
       return loaded;
     } catch (cause) {
       reportToast(cause, "Could not open project");
@@ -683,6 +660,24 @@
     } finally {
       if (activate) projectLoading = false;
       projectLoadingId = "";
+    }
+  }
+  async function activateWorkspace(loaded: Workspace, options: OpenProjectOptions) {
+    const loadedProject = bootstrap?.recentWorkspaces.find(
+      (project) => project.id === loaded.id || project.path === loaded.path,
+    );
+    if (loadedProject) await loadSourceWorkspace(loadedProject);
+    for (const worktree of worktreesFor(loaded.id))
+      if (!workspaceFor(worktree.id))
+        await openProject(worktree.path, { activate: false, expand: false, remember: false });
+    adoptWorkspace(loaded);
+    snapshot = undefined;
+    draft = "";
+    if (options.closeDrawer ?? true) drawerOpen = false;
+    if (routeReady && (options.navigate ?? true)) {
+      appliedRoute = "/";
+      routeSequence += 1;
+      if (page.url.pathname !== "/") await goto("/");
     }
   }
   function adoptWorkspace(loaded: Workspace, mode?: TaskStartMode) {
@@ -1131,22 +1126,8 @@
     } else if (event.type === "message" || event.type === "tool" || event.type === "notice") {
       if (event.type === "tool") recordToolTiming(event.item);
       replaceItem(event.item);
-    } else if (event.type === "run_status") {
-      const wasIdle = snapshot.runStatus === "idle";
-      snapshot = {
-        ...snapshot,
-        runStatus: event.status,
-        revision: event.revision,
-        ...(event.run ? { run: event.run } : {}),
-      };
-      if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt();
-      // A session only enters the sidebar listing via refreshSessions, which used to fire
-      // only when a run settles. Without also refreshing on the idle -> non-idle transition,
-      // a task created this session had no sidebar presence for its entire first run.
-      // `wasIdle` here already implies `event.status !== "idle"`: this branch of the OR only
-      // runs once the first has ruled that out.
-      if (event.status === "idle" || wasIdle) void refreshSessions();
-    } else if (event.type === "queue")
+    } else if (event.type === "run_status") applyRunStatus(event);
+    else if (event.type === "queue")
       snapshot = { ...snapshot, steeringQueue: event.steering, followUpQueue: event.followUp };
     else if (event.type === "context_usage") snapshot = { ...snapshot, contextUsage: event.usage };
     else if (event.type === "session") {
@@ -1156,19 +1137,38 @@
         stats: event.stats,
       };
       void refreshSessions();
-    } else if (event.type === "extension_dialog") {
-      if (event.dialog) {
-        snapshot = { ...snapshot, extensionDialog: event.dialog };
-        initializeDialogValue(event.dialog);
-        void tick().then(() => dialogElement?.showModal());
-      } else {
-        const nextSnapshot = { ...snapshot };
-        delete nextSnapshot.extensionDialog;
-        snapshot = nextSnapshot;
-        dialogElement?.close();
-      }
-    }
+    } else if (event.type === "extension_dialog") applyExtensionDialog(event.dialog);
     taskViews.scrollIfNearBottom();
+  }
+  function applyRunStatus(event: Extract<ServerEvent, { type: "run_status" }>) {
+    if (!snapshot) return;
+    const wasIdle = snapshot.runStatus === "idle";
+    snapshot = {
+      ...snapshot,
+      runStatus: event.status,
+      revision: event.revision,
+      ...(event.run ? { run: event.run } : {}),
+    };
+    if (pendingPrompt && event.run?.actionId === pendingPrompt.actionId) clearPendingPrompt();
+    // A session only enters the sidebar listing via refreshSessions, which used to fire
+    // only when a run settles. Without also refreshing on the idle -> non-idle transition,
+    // a task created this session had no sidebar presence for its entire first run.
+    // `wasIdle` here already implies `event.status !== "idle"`: this branch of the OR only
+    // runs once the first has ruled that out.
+    if (event.status === "idle" || wasIdle) void refreshSessions();
+  }
+  function applyExtensionDialog(dialog: ExtensionDialog | undefined) {
+    if (!snapshot) return;
+    if (dialog) {
+      snapshot = { ...snapshot, extensionDialog: dialog };
+      initializeDialogValue(dialog);
+      void tick().then(() => dialogElement?.showModal());
+      return;
+    }
+    const nextSnapshot = { ...snapshot };
+    delete nextSnapshot.extensionDialog;
+    snapshot = nextSnapshot;
+    dialogElement?.close();
   }
   function pendingKey() {
     return snapshot ? `pidex:pending:${snapshot.taskId}` : "";
@@ -1335,27 +1335,30 @@
     if (!snapshot || !item.resourceId) return;
     const current = toolOutputs[item.resourceId];
     if (current?.loading || current?.complete) return;
+    const base = current ?? {
+      text: "",
+      nextOffset: 0,
+      total: item.outputSize ?? 0,
+      sourceTruncated: false,
+    };
+    // Rebuilt field-by-field rather than spread so a retry drops any `error` from a prior attempt.
     toolOutputs = {
       ...toolOutputs,
       [item.resourceId]: {
-        text: current?.text ?? "",
-        nextOffset: current?.nextOffset ?? 0,
-        total: current?.total ?? item.outputSize ?? 0,
+        text: base.text,
+        nextOffset: base.nextOffset,
+        total: base.total,
+        sourceTruncated: base.sourceTruncated,
         complete: false,
         loading: true,
-        sourceTruncated: current?.sourceTruncated ?? false,
       },
     };
     try {
-      const chunk = await api.toolOutput(
-        snapshot.chatId,
-        item.resourceId,
-        current?.nextOffset ?? 0,
-      );
+      const chunk = await api.toolOutput(snapshot.chatId, item.resourceId, base.nextOffset);
       toolOutputs = {
         ...toolOutputs,
         [item.resourceId]: {
-          text: `${current?.text ?? ""}${chunk.text}`,
+          text: `${base.text}${chunk.text}`,
           nextOffset: chunk.nextOffset,
           total: chunk.total,
           complete: chunk.complete,
