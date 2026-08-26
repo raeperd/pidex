@@ -89,6 +89,9 @@ function parseTokens(tokens: Token[], parentKey: string): AgentMessageNode[] {
   );
 }
 
+// One flat case per marked token type. Cyclomatic complexity counts every case, so this scores
+// high while staying trivial to read; splitting the dispatch would only scatter it.
+// oxlint-disable-next-line complexity
 function parseToken(token: MarkedToken, position: string): AgentMessageNode[] {
   const key = `${position}:${token.type}`;
   switch (token.type) {

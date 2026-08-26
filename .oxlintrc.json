@@ -4,6 +4,9 @@
     "correctness": "error",
     "suspicious": "error"
   },
+  "rules": {
+    "eslint/complexity": "error"
+  },
   "ignorePatterns": ["**/build/**", "**/dist/**"],
   "options": {
     "typeAware": false,
