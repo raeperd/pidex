@@ -39,6 +39,16 @@ import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 
 type PiSdkError = TaggedOperationError<"PiSdkError">;
 
+type SessionMessageEvent = Extract<
+  AgentSessionEvent,
+  { type: "message_start" | "message_end" | "message_update" }
+>;
+
+type ToolExecutionEvent = Extract<
+  AgentSessionEvent,
+  { type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end" }
+>;
+
 export interface PiSdkServiceApi {
   inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
   createSession(cwd: string): Effect.Effect<EffectAdapterSession, PiSdkError, Scope.Scope>;
@@ -120,13 +130,14 @@ function transcriptItems(entries: SessionEntry[]) {
     if (!tool || tool.type !== "tool") continue;
     const output = boundedResource(textOf(message.content));
     const preview = bounded(output.text);
+    const outputTruncated = preview.truncated || output.sourceTruncated;
     let resolved: ToolItem = {
       ...tool,
       state: message.isError ? "error" : "success",
       preview: preview.text,
-      truncated: tool.truncated || preview.truncated || output.sourceTruncated,
+      truncated: tool.truncated || outputTruncated,
     };
-    if (preview.truncated || output.sourceTruncated) {
+    if (outputTruncated) {
       const resourceId = randomUUID().replaceAll("-", "");
       toolOutputs.set(resourceId, { id: resourceId, ...output });
       resolved = { ...resolved, resourceId, outputSize: output.text.length };
@@ -201,68 +212,18 @@ function makePiSession(session: AgentSession) {
   }
   function handle(event: AgentSessionEvent) {
     if (
-      (event.type === "message_start" || event.type === "message_end") &&
-      (event.message.role === "user" || event.message.role === "assistant")
-    ) {
-      const thinking = thinkingOf(event.message.content);
-      const item: TextItem = {
-        type: event.message.role,
-        id: messageId(event.message),
-        text: textOf(event.message.content),
-        ...(thinking ? { thinking } : {}),
-        complete: event.type === "message_end",
-        timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
-      };
-      for (const message of messageItems(item)) emit({ type: "message", item: message });
-      if (event.type === "message_end" && event.message.role === "assistant")
-        scheduleContextUsage();
-    } else if (event.type === "message_update") {
-      const update = event.assistantMessageEvent;
-      if (update.type === "text_delta")
-        emit({
-          type: "delta",
-          itemId: messageId(event.message),
-          delta: update.delta,
-          channel: "text",
-        });
-      if (update.type === "thinking_delta")
-        emit({
-          type: "delta",
-          itemId: messageId(event.message),
-          delta: update.delta,
-          channel: "thinking",
-        });
-    } else if (event.type === "tool_execution_start") {
-      const args = bounded(event.args, 800);
-      emit({
-        type: "tool",
-        item: {
-          type: "tool",
-          id: event.toolCallId,
-          name: event.toolName,
-          argumentSummary: args.text,
-          state: "running",
-          preview: "",
-          truncated: args.truncated,
-        },
-      });
-    } else if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
-      const value = event.type === "tool_execution_update" ? event.partialResult : event.result;
-      const output = boundedResource(value);
-      const preview = bounded(output.text);
-      const item: ToolItem = {
-        type: "tool",
-        id: event.toolCallId,
-        name: event.toolName,
-        argumentSummary:
-          event.type === "tool_execution_update" ? bounded(event.args, 800).text : "",
-        state:
-          event.type === "tool_execution_update" ? "running" : event.isError ? "error" : "success",
-        preview: preview.text,
-        truncated: preview.truncated || output.sourceTruncated,
-      };
-      emit({ type: "tool", item, output });
-    } else if (event.type === "queue_update")
+      event.type === "message_start" ||
+      event.type === "message_end" ||
+      event.type === "message_update"
+    )
+      handleMessage(event);
+    else if (
+      event.type === "tool_execution_start" ||
+      event.type === "tool_execution_update" ||
+      event.type === "tool_execution_end"
+    )
+      handleTool(event);
+    else if (event.type === "queue_update")
       emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
     else if (event.type === "agent_settled") emitSettled();
     else if (event.type === "compaction_start")
@@ -282,6 +243,62 @@ function makePiSession(session: AgentSession) {
       });
     else if (event.type === "auto_retry_end" && !event.success)
       emit({ type: "notice", level: "error", text: event.finalError ?? "Retry failed." });
+  }
+  function handleMessage(event: SessionMessageEvent) {
+    if (event.type === "message_update") {
+      const update = event.assistantMessageEvent;
+      if (update.type === "text_delta" || update.type === "thinking_delta")
+        emit({
+          type: "delta",
+          itemId: messageId(event.message),
+          delta: update.delta,
+          channel: update.type === "text_delta" ? "text" : "thinking",
+        });
+      return;
+    }
+    if (event.message.role !== "user" && event.message.role !== "assistant") return;
+    const thinking = thinkingOf(event.message.content);
+    const item: TextItem = {
+      type: event.message.role,
+      id: messageId(event.message),
+      text: textOf(event.message.content),
+      ...(thinking ? { thinking } : {}),
+      complete: event.type === "message_end",
+      timestamp: new Date(event.message.timestamp ?? Date.now()).toISOString(),
+    };
+    for (const message of messageItems(item)) emit({ type: "message", item: message });
+    if (event.type === "message_end" && event.message.role === "assistant") scheduleContextUsage();
+  }
+  function handleTool(event: ToolExecutionEvent) {
+    if (event.type === "tool_execution_start") {
+      const args = bounded(event.args, 800);
+      emit({
+        type: "tool",
+        item: {
+          type: "tool",
+          id: event.toolCallId,
+          name: event.toolName,
+          argumentSummary: args.text,
+          state: "running",
+          preview: "",
+          truncated: args.truncated,
+        },
+      });
+      return;
+    }
+    const running = event.type === "tool_execution_update";
+    const output = boundedResource(running ? event.partialResult : event.result);
+    const preview = bounded(output.text);
+    const item: ToolItem = {
+      type: "tool",
+      id: event.toolCallId,
+      name: event.toolName,
+      argumentSummary: running ? bounded(event.args, 800).text : "",
+      state: running ? "running" : event.isError ? "error" : "success",
+      preview: preview.text,
+      truncated: preview.truncated || output.sourceTruncated,
+    };
+    emit({ type: "tool", item, output });
   }
   function scheduleContextUsage() {
     queueMicrotask(() => {
