@@ -61,7 +61,7 @@ Browser storage  unsent drafts and local UI preferences
 - Electron 41 with a supervised Node child process.
 - Svelte 5, Vite, and Tailwind CSS 4.
 - Valibot for API validation and Effect Schema for persisted-data validation.
-- oRPC 1 native RPC for contract-first request/response calls.
+- oRPC 2 native RPC for contract-first request/response calls.
 - Effect 4 beta for server workflows, dependency injection, and resource lifecycles.
 - Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `apps/server`.
 

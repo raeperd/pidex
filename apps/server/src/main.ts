@@ -12,7 +12,7 @@ import { safeParse, wsClientMessageSchema } from "@pidex/api";
 import { Context, Effect } from "effect";
 import { WebSocketServer, type RawData } from "ws";
 import { Chats, makeApplicationRuntime } from "./app-runtime.js";
-import { applicationError, attemptOperation, HttpError } from "./errors.js";
+import { apiErrorStatus, applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
 import {
   allowedRoots,
@@ -54,29 +54,9 @@ export async function createPidexApplication() {
     const apiHandler = new RPCHandler(apiRouter, {
       errorStatusMap: {
         ...COMMON_ERROR_STATUS_MAP,
-        action_conflict: 409,
+        ...apiErrorStatus,
         csrf: 403,
-        dialog_mismatch: 409,
-        dialog_value_invalid: 400,
         internal_error: 500,
-        interrupted_run: 409,
-        model_unavailable: 400,
-        project_missing_from_worktree: 400,
-        project_not_git: 400,
-        project_outside_repository: 400,
-        run_mismatch: 409,
-        session_busy: 409,
-        stale_revision: 409,
-        validation: 400,
-        workspace_forbidden: 403,
-        workspace_missing: 404,
-        workspace_not_directory: 400,
-        workspace_not_managed_worktree: 400,
-        worktree_branch_read_failed: 400,
-        worktree_branch_remove_failed: 400,
-        worktree_create_failed: 400,
-        worktree_has_tasks: 409,
-        worktree_remove_failed: 400,
       },
       plugins: [new RequestLimitHandlerPlugin({ maxBodySize: 64 * 1024 })],
     });

@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { applicationError, ConfigurationError, HttpError } from "./errors.js";
+import { apiError, applicationError, ConfigurationError, HttpError } from "./errors.js";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -38,12 +38,7 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
 ) {
   const canonical = yield* Effect.tryPromise({
     try: () => realpath(candidate),
-    catch: () =>
-      HttpError.make({
-        status: 404,
-        code: "workspace_missing",
-        message: "Project directory does not exist",
-      }),
+    catch: () => apiError("workspace_missing", "Project directory does not exist"),
   });
   const details = yield* Effect.tryPromise({
     try: () => stat(canonical),
@@ -51,19 +46,11 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
   });
   if (!details.isDirectory())
     return yield* Effect.fail(
-      HttpError.make({
-        status: 400,
-        code: "workspace_not_directory",
-        message: "Project path is not a directory",
-      }),
+      apiError("workspace_not_directory", "Project path is not a directory"),
     );
   if (!roots.some((root) => isDescendant(root, canonical)))
     return yield* Effect.fail(
-      HttpError.make({
-        status: 403,
-        code: "workspace_forbidden",
-        message: "Project is outside WORKSPACE_ROOTS",
-      }),
+      apiError("workspace_forbidden", "Project is outside WORKSPACE_ROOTS"),
     );
   return canonical;
 });

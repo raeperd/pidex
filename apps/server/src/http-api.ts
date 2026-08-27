@@ -6,7 +6,7 @@ import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex
 import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
 import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
-import { ActionProtocolError, HttpError } from "./errors.js";
+import { apiError, ActionProtocolError, HttpError } from "./errors.js";
 import { requestDigest, type MetadataService } from "./metadata.js";
 import {
   createProjectWorktree,
@@ -69,11 +69,7 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
             : undefined;
           if (!rememberedId || sourceWorkspaceId === rememberedId)
             return yield* Effect.fail(
-              HttpError.make({
-                status: 403,
-                code: "workspace_forbidden",
-                message: "Project is outside WORKSPACE_ROOTS",
-              }),
+              apiError("workspace_forbidden", "Project is outside WORKSPACE_ROOTS"),
             );
         }
         let id: string;
@@ -122,21 +118,16 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const sourceWorkspaceId = yield* metadata.workspaceProjectId(input.workspaceId);
         if (sourceWorkspaceId === input.workspaceId)
           return yield* Effect.fail(
-            HttpError.make({
-              status: 400,
-              code: "workspace_not_managed_worktree",
-              message: "Workspace is not a managed Pidex worktree",
-            }),
+            apiError("workspace_not_managed_worktree", "Workspace is not a managed Pidex worktree"),
           );
         const source = yield* manager.workspace(sourceWorkspaceId);
         const canRemove = yield* manager.workspaceCanBeRemoved(worktree.id);
         if (!canRemove)
           return yield* Effect.fail(
-            HttpError.make({
-              status: 409,
-              code: "worktree_has_tasks",
-              message: "Only a newly created worktree without task history can be removed",
-            }),
+            apiError(
+              "worktree_has_tasks",
+              "Only a newly created worktree without task history can be removed",
+            ),
           );
         yield* removeProjectWorktree(source.path, worktree.path);
         yield* pi.clearWorkspaceTrust(worktree.path).pipe(Effect.catch(() => Effect.void));
@@ -193,11 +184,7 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const delivery = input.delivery;
         if (!runId)
           return yield* Effect.fail(
-            HttpError.make({
-              status: 400,
-              code: "validation",
-              message: "An active run ID is required for queued instructions",
-            }),
+            apiError("validation", "An active run ID is required for queued instructions"),
           );
         const outcome = yield* metadata.acceptRunMutation({ ...action, runId, kind: delivery });
         return yield* manager.deliverDuringRun(chat, input.text, delivery, outcome);
@@ -241,13 +228,7 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         const workspace = yield* manager.workspace(chat.workspaceId);
         const modelAvailable = workspace.info.models.some((model) => model.id === input.model);
         if (input.model && !modelAvailable)
-          return yield* Effect.fail(
-            HttpError.make({
-              status: 400,
-              code: "model_unavailable",
-              message: "Model is no longer available",
-            }),
-          );
+          return yield* Effect.fail(apiError("model_unavailable", "Model is no longer available"));
         const patch = {
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -350,13 +331,7 @@ function validateDialogResponse(
   value: string | boolean | null,
 ) {
   if (!dialog || dialog.id !== requestId)
-    return Effect.fail(
-      HttpError.make({
-        status: 409,
-        code: "dialog_mismatch",
-        message: "Extension dialog is no longer pending",
-      }),
-    );
+    return Effect.fail(apiError("dialog_mismatch", "Extension dialog is no longer pending"));
   if (value === null) return Effect.void;
   if (dialog.kind === "confirm" && typeof value === "boolean") return Effect.void;
   if (dialog.kind === "select" && typeof value === "string" && dialog.options?.includes(value))
@@ -364,10 +339,6 @@ function validateDialogResponse(
   if ((dialog.kind === "input" || dialog.kind === "editor") && typeof value === "string")
     return Effect.void;
   return Effect.fail(
-    HttpError.make({
-      status: 400,
-      code: "dialog_value_invalid",
-      message: "Extension response does not match the pending dialog",
-    }),
+    apiError("dialog_value_invalid", "Extension response does not match the pending dialog"),
   );
 }
