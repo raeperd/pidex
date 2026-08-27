@@ -71,7 +71,7 @@ export function makeMetadataStore(stateDir?: string) {
             requiresAcknowledgement: true,
             updatedAt: sql`datetime('now')`,
           })
-          .where(inArray(sessionState.runStatus, ["accepted", "running", "stopping"]))
+          .where(inArray(sessionState.runStatus, ["accepted", "running"]))
           .run();
       },
       { behavior: "immediate" },
@@ -393,7 +393,7 @@ export function makeMetadataStore(stateDir?: string) {
             and(
               eq(sessionState.sessionKey, sessionKey),
               eq(sessionState.runId, runId),
-              inArray(sessionState.runStatus, ["accepted", "running", "stopping"]),
+              inArray(sessionState.runStatus, ["accepted", "running"]),
             ),
           )
           .run();
@@ -426,8 +426,6 @@ export function makeMetadataStore(stateDir?: string) {
     if (!persistedRow) throw new Error(`Session ${sessionKey} was not initialized`);
     const row = decodeSessionStateRow(persistedRow);
     if (!row.runId || !row.promptActionId || !row.runStatus) return { revision: row.revision };
-    if (row.runStatus === "stopping")
-      throw new Error(`Session ${sessionKey} retained an unrecovered stopping state`);
     return {
       revision: row.revision,
       run: {
@@ -615,7 +613,6 @@ const actionStatuses = [
   "interrupted",
 ] as const satisfies ReadonlyArray<ActionOutcome["status"]>;
 type ActionStatus = ActionOutcome["status"];
-type PersistedRunStatus = ActionStatus | "stopping";
 
 const actionKinds = [
   "prompt",
@@ -649,7 +646,7 @@ const sessionState = sqliteTable("session_state", {
   revision: integer("revision").notNull().default(0),
   runId: text("run_id"),
   promptActionId: text("prompt_action_id"),
-  runStatus: text("run_status").$type<PersistedRunStatus>(),
+  runStatus: text("run_status").$type<ActionStatus>(),
   requiresAcknowledgement: integer("requires_acknowledgement", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -683,7 +680,7 @@ const actions = sqliteTable(
 const workspaceRowSchema = createSelectSchema(workspaces);
 const taskRowSchema = createSelectSchema(tasks);
 const sessionStateRowSchema = createSelectSchema(sessionState, {
-  runStatus: Schema.NullOr(Schema.Literals([...actionStatuses, "stopping"])),
+  runStatus: Schema.NullOr(Schema.Literals([...actionStatuses])),
 });
 const actionRowSchema = createSelectSchema(actions, {
   kind: Schema.Literals([...actionKinds]),
