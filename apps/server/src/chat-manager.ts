@@ -17,15 +17,14 @@ import type { WebSocket } from "ws";
 import { Effect, Exit, Scope, Stream } from "effect";
 import type {
   AdapterEvent,
-  AdapterSession,
   AdapterSessionInfo,
   AdapterToolOutput,
   AdapterWorkspaceInfo,
   EffectAdapterSession,
-} from "./adapter.js";
+  PiSdkServiceApi,
+} from "./pi-sdk.js";
 import { applicationError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
-import type { PiSdkServiceApi } from "./pi-sdk.js";
 import { safeError } from "./security.js";
 
 interface WorkspaceRecord {
@@ -533,7 +532,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     });
   }
 
-  function configure(chat: ChatRecord, input: Parameters<AdapterSession["configure"]>[0]) {
+  function configure(chat: ChatRecord, input: Parameters<EffectAdapterSession["configure"]>[0]) {
     return Effect.gen(function* () {
       yield* chat.session.configure(input);
       yield* broadcastSession(chat);

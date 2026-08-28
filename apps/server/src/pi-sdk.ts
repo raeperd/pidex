@@ -16,28 +16,94 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type {
+  ChatSnapshot,
   ContextUsage,
   ExtensionDialog,
+  ModelInfo,
+  SessionSummary,
   SkillItem,
   TextItem,
   TranscriptItem,
   ToolItem,
 } from "@pidex/api";
-import { Effect, Scope } from "effect";
-import {
-  acquireAdapterSession,
-  bounded,
-  boundedResource,
-  type AdapterEvent,
-  type AdapterSession,
-  type AdapterSessionInfo,
-  type AdapterToolOutput,
-  type AdapterWorkspaceInfo,
-  type EffectAdapterSession,
-} from "./adapter.js";
+import { Effect, Queue, Scope, Stream } from "effect";
 import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 
-type PiSdkError = TaggedOperationError<"PiSdkError">;
+type AdapterSessionError = TaggedOperationError<"AdapterSessionError">;
+
+export type AdapterEvent =
+  | { type: "message"; item: TextItem | SkillItem }
+  | { type: "delta"; itemId: string; delta: string; channel: "text" | "thinking" }
+  | { type: "tool"; item: ToolItem; output?: { text: string; sourceTruncated: boolean } }
+  | { type: "queue"; steering: string[]; followUp: string[] }
+  | { type: "notice"; level: "info" | "warning" | "error"; text: string }
+  | { type: "context_usage"; usage: ContextUsage }
+  | { type: "settled" }
+  | { type: "dialog"; dialog?: ExtensionDialog };
+
+export interface AdapterToolOutput {
+  readonly id: string;
+  readonly text: string;
+  readonly sourceTruncated: boolean;
+}
+
+export interface AdapterSessionInfo extends SessionSummary {
+  nativeId: string;
+  nativePath?: string;
+}
+
+export interface AdapterWorkspaceInfo {
+  models: ModelInfo[];
+  sessions: AdapterSessionInfo[];
+  trusted: boolean | null;
+  protectedResourcesSkipped: boolean;
+  resourceDiagnostics: Array<{ level: "warning" | "error"; message: string }>;
+  commands: Array<{ name: string; description?: string }>;
+}
+
+interface SessionLifecycle {
+  subscribe(listener: (event: AdapterEvent) => void): () => void;
+  abort(): Promise<void>;
+  dispose(): void;
+}
+
+export interface EffectAdapterSession {
+  readonly state: {
+    readonly nativeId: string;
+    readonly nativePath: string | undefined;
+    readonly messages: TranscriptItem[];
+    readonly toolOutputs: ReadonlyMap<string, AdapterToolOutput>;
+    readonly model: string | undefined;
+    readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+    readonly sessionName: string | undefined;
+    readonly contextUsage: ContextUsage | undefined;
+    readonly isIdle: boolean;
+  };
+  readonly events: Stream.Stream<AdapterEvent>;
+  prompt(text: string): Effect.Effect<void, AdapterSessionError>;
+  steer(text: string): Effect.Effect<void, AdapterSessionError>;
+  followUp(text: string): Effect.Effect<void, AdapterSessionError>;
+  abort(): Effect.Effect<void, AdapterSessionError>;
+  clearQueue(): Effect.Effect<void, AdapterSessionError>;
+  configure(input: {
+    model?: string;
+    thinkingLevel?: EffectAdapterSession["state"]["thinkingLevel"];
+  }): Effect.Effect<void, AdapterSessionError>;
+  rename(name: string): Effect.Effect<void, AdapterSessionError>;
+  compact(instructions?: string): Effect.Effect<void, AdapterSessionError>;
+  getStats(): Effect.Effect<ChatSnapshot["stats"], AdapterSessionError>;
+  respondToDialog(
+    requestId: string,
+    value: string | boolean | null,
+  ): Effect.Effect<void, AdapterSessionError>;
+}
+
+type PiSession = EffectAdapterSession & {
+  readonly lifecycle: SessionLifecycle;
+  readonly bind: () => Promise<void>;
+  readonly dispose: () => void;
+};
+type AcquiredPiSession = EffectAdapterSession & { readonly lifecycle: SessionLifecycle };
 
 type SessionMessageEvent = Extract<
   AgentSessionEvent,
@@ -48,18 +114,6 @@ type ToolExecutionEvent = Extract<
   AgentSessionEvent,
   { type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end" }
 >;
-
-export interface PiSdkServiceApi {
-  inspectWorkspace(cwd: string): Effect.Effect<AdapterWorkspaceInfo, PiSdkError>;
-  createSession(cwd: string): Effect.Effect<EffectAdapterSession, PiSdkError, Scope.Scope>;
-  resumeSession(
-    cwd: string,
-    nativePath: string,
-  ): Effect.Effect<EffectAdapterSession, PiSdkError, Scope.Scope>;
-  setWorkspaceTrust(cwd: string, trusted: boolean): Effect.Effect<void, PiSdkError>;
-  inheritWorkspaceTrust(sourceCwd: string, cwd: string): Effect.Effect<void, PiSdkError>;
-  clearWorkspaceTrust(cwd: string): Effect.Effect<void, PiSdkError>;
-}
 
 export interface PiSdkOptions {
   readonly agentDir?: string;
@@ -174,7 +228,7 @@ const resourceDiagnostic = (type: string, message: string): ResourceDiagnostic =
   message: message.slice(0, 1000),
 });
 
-function makePiSession(session: AgentSession) {
+function makePiSession(session: AgentSession): PiSession {
   const nativeId = session.sessionId;
   const nativePath = session.sessionFile;
   const restoredTranscript = transcriptItems(session.sessionManager.buildContextEntries());
@@ -372,7 +426,7 @@ function makePiSession(session: AgentSession) {
   }
   async function configure(input: {
     model?: string;
-    thinkingLevel?: AdapterSession["thinkingLevel"];
+    thinkingLevel?: EffectAdapterSession["state"]["thinkingLevel"];
   }) {
     if (!session.isIdle) throw new Error("Configuration can only change while idle");
     if (input.model) {
@@ -412,10 +466,19 @@ function makePiSession(session: AgentSession) {
     session.dispose();
     listeners.clear();
   }
-  return {
-    nativeId,
-    nativePath,
-    get messages(): TranscriptItem[] {
+  const lifecycle: SessionLifecycle = {
+    subscribe,
+    abort,
+    dispose,
+  };
+  const state: EffectAdapterSession["state"] = {
+    get nativeId() {
+      return nativeId;
+    },
+    get nativePath() {
+      return nativePath;
+    },
+    get messages() {
       return restoredTranscript.items;
     },
     get toolOutputs() {
@@ -436,20 +499,35 @@ function makePiSession(session: AgentSession) {
     get isIdle() {
       return session.isIdle;
     },
+  };
+  return {
+    state,
+    events: sessionEvents(lifecycle),
     bind,
-    subscribe,
-    prompt,
-    steer: (text: string) => session.steer(text),
-    followUp: (text: string) => session.followUp(text),
-    abort,
-    clearQueue: () => session.clearQueue(),
-    configure,
-    rename: (name: string) => session.setSessionName(name),
-    compact: async (instructions?: string) => {
-      await session.compact(instructions);
-    },
-    getStats,
-    respondToDialog,
+    lifecycle,
+    prompt: (text) =>
+      attemptSessionPromise("session.prompt", () => prompt(text)).pipe(
+        Effect.onInterrupt(() => abortForCleanup(lifecycle)),
+      ),
+    steer: (text) => attemptSessionPromise("session.steer", () => session.steer(text)),
+    followUp: (text) => attemptSessionPromise("session.followUp", () => session.followUp(text)),
+    abort: () => attemptSessionPromise("session.abort", abort),
+    clearQueue: () =>
+      attemptSessionSync("session.clearQueue", () => {
+        session.clearQueue();
+      }),
+    configure: (input) => attemptSessionPromise("session.configure", () => configure(input)),
+    rename: (name) =>
+      attemptSessionSync("session.rename", () => {
+        session.setSessionName(name);
+      }),
+    compact: (instructions) =>
+      attemptSessionPromise("session.compact", () => session.compact(instructions)),
+    getStats: () => attemptSessionSync("session.getStats", getStats),
+    respondToDialog: (requestId, value) =>
+      attemptSessionSync("session.respondToDialog", () => {
+        respondToDialog(requestId, value);
+      }),
     dispose,
   };
 }
@@ -611,24 +689,84 @@ export function makePiSdk(options: PiSdkOptions = {}) {
   };
 }
 
+const { promise: attemptSessionPromise, sync: attemptSessionSync } =
+  taggedAttempt("AdapterSessionError");
+
+function sessionEvents(session: SessionLifecycle): Stream.Stream<AdapterEvent> {
+  return Stream.callback((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        session.subscribe((event) => {
+          Queue.offerUnsafe(queue, event);
+        }),
+      ),
+      (unsubscribe) => Effect.sync(unsubscribe),
+    ),
+  );
+}
+
+function abortForCleanup(session: SessionLifecycle): Effect.Effect<void> {
+  return Effect.tryPromise(() => session.abort()).pipe(Effect.ignore);
+}
+
+function releasePiSession(session: AcquiredPiSession): Effect.Effect<void> {
+  return abortForCleanup(session.lifecycle).pipe(
+    Effect.andThen(
+      Effect.try({
+        try: () => session.lifecycle.dispose(),
+        catch: (cause) => cause,
+      }).pipe(Effect.ignore),
+    ),
+  );
+}
+
+export function acquireAdapterSession<E, R>(
+  acquire: Effect.Effect<AcquiredPiSession, E, R>,
+): Effect.Effect<EffectAdapterSession, E, R | Scope.Scope> {
+  return Effect.acquireRelease(acquire, releasePiSession);
+}
+
+function bounded(value: unknown, max = 12_000): { text: string; truncated: boolean } {
+  let text: string;
+  try {
+    text = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
+  } catch {
+    text = "[unserializable output]";
+  }
+  return text.length <= max
+    ? { text, truncated: false }
+    : { text: `${text.slice(0, max)}\n… output truncated`, truncated: true };
+}
+
+function boundedResource(
+  value: unknown,
+  max = 1_000_000,
+): { text: string; sourceTruncated: boolean } {
+  const serialized = bounded(value, max);
+  return { text: serialized.text, sourceTruncated: serialized.truncated };
+}
+
 export type PiSdk = ReturnType<typeof makePiSdk>;
 
-export function makePiSdkService(sdk: PiSdk): PiSdkServiceApi {
+export function makePiSdkService(sdk: PiSdk) {
   return {
-    inspectWorkspace: (cwd) => fromPiPromise("workspace.inspect", () => sdk.inspectWorkspace(cwd)),
-    createSession: (cwd) =>
+    inspectWorkspace: (cwd: string) =>
+      fromPiPromise("workspace.inspect", () => sdk.inspectWorkspace(cwd)),
+    createSession: (cwd: string) =>
       acquireAdapterSession(fromPiPromise("session.create", () => sdk.createSession(cwd))),
-    resumeSession: (cwd, nativePath) =>
+    resumeSession: (cwd: string, nativePath: string) =>
       acquireAdapterSession(
         fromPiPromise("session.resume", () => sdk.resumeSession(cwd, nativePath)),
       ),
-    setWorkspaceTrust: (cwd, trusted) =>
+    setWorkspaceTrust: (cwd: string, trusted: boolean) =>
       fromPiPromise("workspace.trust.set", () => sdk.setWorkspaceTrust(cwd, trusted)),
-    inheritWorkspaceTrust: (sourceCwd, cwd) =>
+    inheritWorkspaceTrust: (sourceCwd: string, cwd: string) =>
       fromPiPromise("workspace.trust.inherit", () => sdk.inheritWorkspaceTrust(sourceCwd, cwd)),
-    clearWorkspaceTrust: (cwd) =>
+    clearWorkspaceTrust: (cwd: string) =>
       fromPiPromise("workspace.trust.clear", () => sdk.clearWorkspaceTrust(cwd)),
   };
 }
+
+export type PiSdkServiceApi = ReturnType<typeof makePiSdkService>;
 
 const { promise: fromPiPromise } = taggedAttempt("PiSdkError");
