@@ -37,7 +37,9 @@
   },
   "packageManager": "pnpm@11.16.0",
   "knip": {
-    "ignoreDependencies": ["@effect/language-service"],
+    "ignoreDependencies": [
+      "@effect/language-service"
+    ],
     "workspaces": {
       ".": {
         "svelte": false
