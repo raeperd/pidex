@@ -6,7 +6,7 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
-    "test": "vitest run --root ../.. apps/web",
+    "test": "vitest run --root ../.. packages/web",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {

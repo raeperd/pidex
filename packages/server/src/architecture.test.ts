@@ -22,13 +22,14 @@ function importsIn(directory: string): Array<{ file: string; specifier: string }
 }
 
 function crossAppImports(app: "web" | "server" | "desktop", targets: string[], subdirectory = "") {
-  return importsIn(path.join(repositoryRoot, "apps", app, subdirectory)).filter(({ specifier }) =>
-    targets.some(
-      (target) =>
-        specifier.startsWith(`@pidex/${target}`) ||
-        specifier.includes(`apps/${target}`) ||
-        new RegExp(`(?:\\.\\./)+${target}/`).test(specifier),
-    ),
+  return importsIn(path.join(repositoryRoot, "packages", app, subdirectory)).filter(
+    ({ specifier }) =>
+      targets.some(
+        (target) =>
+          specifier.startsWith(`@pidex/${target}`) ||
+          specifier.includes(`packages/${target}`) ||
+          new RegExp(`(?:\\.\\./)+${target}/`).test(specifier),
+      ),
   );
 }
 

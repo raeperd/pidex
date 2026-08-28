@@ -78,7 +78,20 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(vite@8.1.5(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
-  apps/desktop:
+  packages/api:
+    dependencies:
+      '@orpc/contract':
+        specifier: 'catalog:'
+        version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
+      valibot:
+        specifier: 1.4.2
+        version: 1.4.2(typescript@7.0.2)
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
+  packages/desktop:
     dependencies:
       '@effect/platform-node':
         specifier: 'catalog:'
@@ -88,7 +101,7 @@ importers:
         version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
       '@pidex/api':
         specifier: workspace:*
-        version: link:../../packages/api
+        version: link:../api
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.101
@@ -112,11 +125,11 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(vite@8.1.5(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
-  apps/server:
+  packages/server:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.80.10
-        version: 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)
+        version: 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-beta.101(effect@4.0.0-beta.101)(ioredis@5.11.1(supports-color@7.2.0))
@@ -128,10 +141,10 @@ importers:
         version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
       '@pidex/api':
         specifier: workspace:*
-        version: link:../../packages/api
+        version: link:../api
       drizzle-orm:
         specifier: 1.0.0-rc.4
-        version: 1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.1.12)
+        version: 1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.4.3)
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.101
@@ -158,7 +171,7 @@ importers:
         specifier: 'catalog:'
         version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(vite@8.1.5(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
-  apps/web:
+  packages/web:
     dependencies:
       '@fontsource-variable/dm-sans':
         specifier: 5.2.8
@@ -218,19 +231,6 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(vite@8.1.5(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-
-  packages/api:
-    dependencies:
-      '@orpc/contract':
-        specifier: 'catalog:'
-        version: 2.0.0-beta.21(@opentelemetry/api@1.9.0)
-      valibot:
-        specifier: 1.4.2
-        version: 1.4.2(typescript@7.0.2)
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
 
 packages:
 
@@ -3877,9 +3877,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@4.1.12:
-    resolution: {integrity: sha512-JInaHOamG8pt5+Ey8kGmdcAcg3OL9reK8ltczgHTAwNhMys/6ThXHityHxVV2p3fkw/c+MAvBHFVYHFZDmjMCQ==}
-
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
@@ -3888,11 +3885,11 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@0.91.1(zod@4.1.12)':
+  '@anthropic-ai/sdk@0.91.1(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
-      zod: 4.1.12
+      zod: 4.4.3
 
   '@aws-crypto/sha256-browser@5.2.0':
     dependencies:
@@ -4110,9 +4107,9 @@ snapshots:
 
   '@babel/runtime@7.29.7': {}
 
-  '@earendil-works/pi-agent-core@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)':
+  '@earendil-works/pi-agent-core@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)
+      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
       ignore: 7.0.5
       typebox: 1.1.38
       yaml: 2.9.0
@@ -4124,9 +4121,9 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)':
+  '@earendil-works/pi-ai@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)':
     dependencies:
-      '@anthropic-ai/sdk': 0.91.1(zod@4.1.12)
+      '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
       '@google/genai': 1.52.0(supports-color@7.2.0)
       '@mistralai/mistralai': 2.2.6(@opentelemetry/api@1.9.0)
@@ -4134,7 +4131,7 @@ snapshots:
       '@smithy/node-http-handler': 4.7.3
       http-proxy-agent: 7.0.2(supports-color@7.2.0)
       https-proxy-agent: 7.0.6(supports-color@7.2.0)
-      openai: 6.26.0(ws@8.18.3)(zod@4.1.12)
+      openai: 6.26.0(ws@8.18.3)(zod@4.4.3)
       partial-json: 0.1.7
       typebox: 1.1.38
     transitivePeerDependencies:
@@ -4145,10 +4142,10 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)':
+  '@earendil-works/pi-coding-agent@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-agent-core': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)
-      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.1.12)
+      '@earendil-works/pi-agent-core': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
       '@earendil-works/pi-tui': 0.80.10
       '@silvia-odwyer/photon-node': 0.3.4
       chalk: 5.6.2
@@ -4509,8 +4506,8 @@ snapshots:
     dependencies:
       '@opentelemetry/semantic-conventions': 1.43.0
       ws: 8.18.3
-      zod: 4.1.12
-      zod-to-json-schema: 3.25.2(zod@4.1.12)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
     transitivePeerDependencies:
@@ -5699,13 +5696,13 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  drizzle-orm@1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.1.12):
+  drizzle-orm@1.0.0-rc.4(@opentelemetry/api@1.9.0)(effect@4.0.0-beta.101)(typebox@1.1.38)(valibot@1.4.2(typescript@7.0.2))(zod@4.4.3):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       effect: 4.0.0-beta.101
       typebox: 1.1.38
       valibot: 1.4.2(typescript@7.0.2)
-      zod: 4.1.12
+      zod: 4.4.3
 
   dunder-proto@1.0.1:
     dependencies:
@@ -6568,10 +6565,10 @@ snapshots:
       regex: 6.1.0
       regex-recursion: 6.0.2
 
-  openai@6.26.0(ws@8.18.3)(zod@4.1.12):
+  openai@6.26.0(ws@8.18.3)(zod@4.4.3):
     optionalDependencies:
       ws: 8.18.3
-      zod: 4.1.12
+      zod: 4.4.3
 
   oxc-parser@0.140.0:
     dependencies:
@@ -7316,11 +7313,9 @@ snapshots:
 
   zimmerframe@1.1.4: {}
 
-  zod-to-json-schema@3.25.2(zod@4.1.12):
+  zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
-      zod: 4.1.12
-
-  zod@4.1.12: {}
+      zod: 4.4.3
 
   zod@4.4.3: {}
 

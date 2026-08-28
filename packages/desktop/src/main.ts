@@ -145,7 +145,7 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
   const serverDirectory = app.isPackaged
     ? path.join(process.resourcesPath, "server")
-    : path.join(repositoryRoot, "apps/server");
+    : path.join(repositoryRoot, "packages/server");
   const command = ChildProcess.make(
     process.execPath,
     [path.join(serverDirectory, "dist/main.js")],

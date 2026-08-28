@@ -66,8 +66,8 @@ Pidex will use strict TypeScript and native ESM in a pnpm workspace with one com
 
 pnpm and Vite solve different problems and are used together:
 
-- pnpm owns workspace discovery, dependency installation, the lockfile, version catalogs, and filtered scripts across apps and packages.
-- Vite is the development server and production asset builder inside `apps/web`.
+- pnpm owns workspace discovery, dependency installation, the lockfile, version catalogs, and filtered scripts across the Pidex packages.
+- Vite is the development server and production asset builder inside `packages/web`.
 - pnpm's recursive and filtered scripts are sufficient for this workspace size. Do not add Turborepo or Nx initially.
 
 T3 Code layers these tools as follows:
@@ -78,7 +78,7 @@ T3 Code layers these tools as follows:
 4. T3 Code additionally uses Vite Plus (`vp`) as a repository-wide task runner, formatter, linter, test runner, and packager. Its package configs express build edges such as server after web and desktop after server.
 5. Root scripts call `vp run --filter ...` or a custom development runner. pnpm remains the package manager and workspace/lockfile authority beneath Vite Plus.
 
-Pidex should copy the separation, not T3 Code's workspace count or extra orchestration layer. Start with standard Vite in `apps/web` and pnpm commands such as `pnpm --filter @pidex/web dev`, `pnpm -r typecheck`, and dependency-aware filtered builds. Add a workspace or task runner only when an actual reuse, ownership, independent-versioning, build-graph, or caching need appears.
+Pidex should copy the separation, not T3 Code's workspace count or extra orchestration layer. Start with standard Vite in `packages/web` and pnpm commands such as `pnpm --filter @pidex/web dev`, `pnpm -r typecheck`, and dependency-aware filtered builds. Add a workspace or task runner only when an actual reuse, ownership, independent-versioning, build-graph, or caching need appears.
 
 ### Desktop and host
 
@@ -119,18 +119,15 @@ The same production web build is served by the loopback host to Electron and by 
 
 ```text
 pidex/
-├── apps/
+├── packages/
 │   ├── desktop/               # Electron main, preload, menu/window lifecycle, packaging
 │   ├── web/                   # Svelte/Vite UI used by Electron and mobile browsers
 │   │   └── src/lib/client/    # fetch/WebSocket, reconnect, snapshots, action IDs
-│   └── server/                # Child-process HTTP/WS host, Pi, SQLite, auth, Tailscale
-│       └── src/pi/            # Matched-SDK adapter
-├── packages/
-│   └── api/                   # Browser-safe Valibot schemas, oRPC contract, DTOs, protocol version
-├── tests/
-│   ├── contract/              # Real host transport and recovery matrix
+│   ├── server/                # Child-process HTTP/WS host, Pi, SQLite, auth, Tailscale
+│   │   └── src/pi/            # Matched-SDK adapter
+│   ├── api/                   # Browser-safe Valibot schemas, oRPC contract, DTOs, protocol version
 │   ├── e2e/                   # Responsive web and packaged Electron Playwright tests
-│   └── fixtures/              # Pi JSONL and Tailscale CLI outputs
+│   └── tooling/               # Repository scripts
 ├── docs/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -141,18 +138,18 @@ pidex/
 Shared protocol dependencies are one-way:
 
 ```text
-apps/web ───────────────> packages/api
-apps/server ────────────> packages/api
-apps/desktop ───────────> packages/api
+packages/web ───────────────> packages/api
+packages/server ────────────> packages/api
+packages/desktop ───────────> packages/api
 ```
 
 Electron has a runtime supervision relationship, not a server-code import:
 
 ```text
-apps/desktop ──spawns and supervises──> apps/server executable
+packages/desktop ──spawns and supervises──> packages/server executable
 ```
 
-`packages/api` must remain browser-safe and contain schemas, the oRPC contract, and inferred types, not server implementations. `apps/server` may use Node APIs and must never be imported by `apps/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Pi SDK integration remains internal to the server. The web connection runtime stays under `apps/web/src/lib/client`.
+`packages/api` must remain browser-safe and contain schemas, the oRPC contract, and inferred types, not server implementations. `packages/server` may use Node APIs and must never be imported by `packages/web`. The desktop package includes the compiled server entry and web assets. Electron spawns the server with a private bootstrap channel, waits for readiness, captures logs, restarts unexpected exits, and terminates it on Quit. The desktop renderer and mobile browser communicate with the server through HTTP and WebSocket only. The server is bundled with Pidex and is not an independently installed daemon. Pi SDK integration remains internal to the server. The web connection runtime stays under `packages/web/src/lib/client`.
 
 This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`, or persistence packages later only if they gain a second consumer or need independent testing, ownership, or versioning that cannot be maintained cleanly in their app.
 
@@ -160,14 +157,14 @@ This is the minimum useful package split. Extract `client-runtime`, `pi-adapter`
 
 The first scaffold should include only dependencies needed for the first vertical slice.
 
-| Workspace      | Runtime dependencies                                                     |
-| -------------- | ------------------------------------------------------------------------ |
-| `apps/desktop` | `electron`, oRPC client; packaging includes the server and web artifacts |
-| `apps/web`     | `svelte`, oRPC client/contract, and `@pidex/api`                         |
-| `apps/server`  | Pi SDK, Effect and Node platform, `@pidex/api`, oRPC, Drizzle, and `ws`  |
-| `packages/api` | `valibot`, `@orpc/contract`                                              |
+| Workspace          | Runtime dependencies                                                     |
+| ------------------ | ------------------------------------------------------------------------ |
+| `packages/desktop` | `electron`, oRPC client; packaging includes the server and web artifacts |
+| `packages/web`     | `svelte`, oRPC client/contract, and `@pidex/api`                         |
+| `packages/server`  | Pi SDK, Effect and Node platform, `@pidex/api`, oRPC, Drizzle, and `ws`  |
+| `packages/api`     | `valibot`, `@orpc/contract`                                              |
 
-Build and test dependencies live at the narrowest workspace that uses them. `apps/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. Root tooling may coordinate TypeScript, Playwright, Oxlint, and Oxfmt, but production packages must not depend on test runners or Electron development tooling.
+Build and test dependencies live at the narrowest workspace that uses them. `packages/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. `packages/e2e` owns the cross-application Playwright suite, while `packages/tooling` holds repository scripts. Production packages must not depend on test runners or Electron development tooling.
 
 Defer `electron-updater`, richer syntax highlighting, virtualization, and component libraries beyond the named primitives until their corresponding delivery phase needs them. Do not add React, SvelteKit, Expo, React Native, Express, provider SDKs, hosted-auth SDKs, SSH libraries, relay clients, terminal libraries, Git libraries, or a second transcript database.
 

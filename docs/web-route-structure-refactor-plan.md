@@ -54,7 +54,7 @@ Existing verification surfaces include:
 ## Target structure
 
 ```text
-apps/web/src/
+packages/web/src/
 ├── app.html
 ├── styles.css
 └── routes/
@@ -192,8 +192,8 @@ pnpm test:e2e
 Run this gate before creating every implementation commit:
 
 ```sh
-pnpm exec oxfmt --check apps/web/src apps/web/vite.config.ts
-pnpm exec oxlint apps/web/src
+pnpm exec oxfmt --check packages/web/src packages/web/vite.config.ts
+pnpm exec oxlint packages/web/src
 pnpm --filter @pidex/web typecheck
 pnpm --filter @pidex/web test
 pnpm --filter @pidex/web build
@@ -213,14 +213,14 @@ rerun the component analysis until no relevant issue remains.
 Run focused Chromium tests after message-rendering changes:
 
 ```sh
-pnpm exec playwright test e2e/app.spec.ts --project=chromium \
+pnpm exec playwright test packages/e2e/app.spec.ts --project=chromium \
   --grep "renders assistant markdown|renders tool calls"
 ```
 
 Run focused Chromium tests after shell or route-state changes:
 
 ```sh
-pnpm exec playwright test e2e/app.spec.ts --project=chromium \
+pnpm exec playwright test packages/e2e/app.spec.ts --project=chromium \
   --grep "deep-linked task|no-active-task experience"
 ```
 
@@ -435,7 +435,7 @@ Verification:
 1. Run the autofixer on `AppShell.svelte` and any context consumer.
 2. Run the per-commit web gate.
 3. Run both targeted browser gates.
-4. Run the full Chromium `e2e/app.spec.ts` suite.
+4. Run the full Chromium `packages/e2e/app.spec.ts` suite.
 
 Exit criteria:
 
@@ -501,9 +501,9 @@ Actions:
 Required searches:
 
 ```sh
-rg -n "App\.svelte|MarkdownNodes|MarkdownCode|parseMarkdown" apps/web/src
-rg -n "tasks/\[taskId\]/_components" apps/web/src/routes --glob '*.{ts,svelte}'
-find apps/web/src -maxdepth 1 -type f -print
+rg -n "App\.svelte|MarkdownNodes|MarkdownCode|parseMarkdown" packages/web/src
+rg -n "tasks/\[taskId\]/_components" packages/web/src/routes --glob '*.{ts,svelte}'
+find packages/web/src -maxdepth 1 -type f -print
 ```
 
 Verification:

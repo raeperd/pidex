@@ -108,7 +108,7 @@ Remove, in this order:
 deferred-attach race guard, tested in `AppShellContext.test.ts`, and `resizeComposer` has seven call
 sites. Only the transcript half goes.
 
-**Done when:** `grep -rn "scrollIfNearBottom\|scrollLatest\|TaskTranscriptController\|attachTranscript" apps/web`
+**Done when:** `grep -rn "scrollIfNearBottom\|scrollLatest\|TaskTranscriptController\|attachTranscript" packages/web`
 returns zero hits.
 
 ## Step 6 — Verify
@@ -123,10 +123,10 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
-Automated coverage is thin here — `e2e/conversation.spec.ts` streams deltas and asserts rendered
+Automated coverage is thin here — `packages/e2e/conversation.spec.ts` streams deltas and asserts rendered
 content but never asserts scroll position, and `TaskTranscript.test.ts:113` only checks that the
 container renders without `scroll-smooth`. So verify the invariants below by hand in a browser
 before calling this done, and add the missing assertion in Step 7.
@@ -135,7 +135,7 @@ before calling this done, and add the missing assertion in Step 7.
 
 ## Step 7 — Add the assertion the suite is missing
 
-Extend `e2e/conversation.spec.ts` around its existing delta-streaming section: emit enough content to
+Extend `packages/e2e/conversation.spec.ts` around its existing delta-streaming section: emit enough content to
 overflow the viewport, assert the container is scrolled to the bottom, scroll up, emit more, and
 assert the position held. That is the regression this whole refactor is about, and nothing currently
 covers it.

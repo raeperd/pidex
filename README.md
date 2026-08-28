@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/desktop/assets/icon.png" width="96" alt="pidex icon">
+  <img src="packages/desktop/assets/icon.png" width="96" alt="pidex icon">
 </p>
 
 # pidex
@@ -91,14 +91,14 @@ pnpm typecheck      # Check types
 pnpm test           # Run deterministic tests; no paid model calls
 pnpm test:e2e       # Run Playwright tests in Chromium
 pnpm build          # Build all packages
-pnpm package:desktop # Build an unsigned macOS app in apps/desktop/release
+pnpm package:desktop # Build an unsigned macOS app in packages/desktop/release
 pnpm start          # Run the built browser app and server
 pnpm start:desktop  # Run the built desktop app
 ```
 
 Tests live beside the code they exercise and use real local dependencies when they are fast and
-deterministic. Outside-in Playwright workflows live in `e2e/`, grouped by product behavior; shared
-browser helpers stay in `e2e/support.ts`.
+deterministic. Outside-in Playwright workflows live in `packages/e2e/`, grouped by product behavior;
+shared browser helpers stay in `packages/e2e/support.ts`.
 
 The packaged app is ad-hoc signed for local development, so it does not require an Apple
 Developer account. It is not notarized or intended for distribution.
