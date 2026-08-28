@@ -17,14 +17,12 @@
     "@orpc/server": "catalog:",
     "@pidex/api": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
-    "effect": "catalog:",
-    "ws": "8.18.3"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@orpc/client": "catalog:",
     "@types/node": "catalog:",
-    "@types/ws": "8.18.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -9,7 +9,6 @@ import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
-import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
 import {
   pidexApiContract,
   PROTOCOL_VERSION,
@@ -18,7 +17,6 @@ import {
   type ServerEvent,
 } from "@pidex/api";
 import { Effect } from "effect";
-import WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPidexServer } from "./main.js";
 
@@ -55,7 +53,6 @@ describe.sequential("HTTP API endpoints", () => {
   let app: Awaited<ReturnType<typeof createPidexServer>>;
   let publicApi: PidexApiContractClient;
   let api: PidexApiContractClient;
-  let websocketApi: PidexApiContractClient;
   let tempRoot: string;
   let workspacePath: string;
   let nonGitWorkspacePath: string;
@@ -63,8 +60,6 @@ describe.sequential("HTTP API endpoints", () => {
   let nonGitWorkspaceId: string;
   let chatId: string;
   let httpUrl: string;
-  let websocketUrl: string;
-  let websocket: WebSocket | undefined;
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
@@ -112,10 +107,8 @@ describe.sequential("HTTP API endpoints", () => {
     const address = app.server.address() as AddressInfo;
     httpUrl = `http://127.0.0.1:${address.port}`;
     const rpcUrl = `${httpUrl}/api/rpc`;
-    websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
-    websocketApi = createWebsocketClient(websocketUrl, (socket) => (websocket = socket));
     const bootstrap = await publicApi.system.bootstrap({});
     api = createClient(rpcUrl, bootstrap.csrfToken);
     workspaceId = (await api.workspaces.open({ path: workspacePath, remember: false })).id;
@@ -124,7 +117,6 @@ describe.sequential("HTTP API endpoints", () => {
 
   afterAll(async () => {
     try {
-      websocket?.close();
       await app?.close();
     } finally {
       vi.unstubAllEnvs();
@@ -155,8 +147,8 @@ describe.sequential("HTTP API endpoints", () => {
     expect(result.csrfToken).toHaveLength(43);
   });
 
-  it("streams chat events through the oRPC WebSocket transport", async () => {
-    const events = await subscribeChatEvents(websocketApi, chatId);
+  it("streams chat events through the oRPC HTTP event stream", async () => {
+    const events = await subscribeChatEvents(api, chatId);
 
     await expect(events.next()).resolves.toMatchObject({
       done: false,
@@ -170,14 +162,58 @@ describe.sequential("HTTP API endpoints", () => {
     await events.return?.();
   });
 
+  it("serves typed chat events as SSE over the Node HTTP boundary", async () => {
+    const response = await fetch(`${httpUrl}/api/rpc/live/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-pidex-csrf": (await publicApi.system.bootstrap({})).csrfToken,
+      },
+      body: JSON.stringify({
+        json: { protocolVersion: PROTOCOL_VERSION, chatId },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/event-stream/);
+    expect(response.headers.get("cache-control")).toBe("no-cache, no-transform");
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Expected an SSE response body");
+    let body = "";
+    const decoder = new TextDecoder();
+    try {
+      while (!body.includes('"type":"snapshot"')) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error("SSE stream ended before the snapshot");
+        body += decoder.decode(chunk.value, { stream: true });
+      }
+    } finally {
+      await reader.cancel();
+    }
+    expect(body).toContain("event: message");
+  });
+
+  it("rejects an unauthenticated HTTP event stream", async () => {
+    const { response, result } = await rawRpcRequest(httpUrl, "live/events", {
+      protocolVersion: PROTOCOL_VERSION,
+      chatId,
+    });
+
+    expect(response.status).toBe(403);
+    expect(result).toEqual(
+      expect.objectContaining({ code: "csrf", message: "Invalid CSRF token" }),
+    );
+  });
+
   it("replays chat events from the requested event ID", async () => {
-    const initial = await subscribeChatEvents(websocketApi, chatId);
+    const initial = await subscribeChatEvents(api, chatId);
     const snapshot = await nextMatchingEvent(initial, (event) => event.type === "snapshot");
     const chat = await currentChat();
 
     await api.chats.rename({ ...actionFor(chat), name: "Replay source" });
 
-    const replay = await subscribeChatEvents(websocketApi, chatId, snapshot.eventId);
+    const replay = await subscribeChatEvents(api, chatId, snapshot.eventId);
     try {
       await expect(
         nextMatchingEvent(replay, (event) => event.type === "session"),
@@ -189,6 +225,35 @@ describe.sequential("HTTP API endpoints", () => {
     } finally {
       await initial.return?.();
       await replay.return?.();
+    }
+  });
+
+  it("falls back to a snapshot when the requested cursor is outside the replay window", async () => {
+    const created = await api.chats.create({ workspaceId });
+    let current = created;
+    try {
+      for (let index = 0; index < 501; index++) {
+        current = await api.chats.rename({
+          ...actionFor(current),
+          name: `Replay window ${index}`,
+        });
+      }
+
+      const events = await subscribeChatEvents(api, created.chatId, 0);
+      try {
+        await expect(events.next()).resolves.toMatchObject({
+          done: false,
+          value: {
+            type: "snapshot",
+            chatId: created.chatId,
+            snapshot: { chatId: created.chatId },
+          },
+        });
+      } finally {
+        await events.return?.();
+      }
+    } finally {
+      await api.chats.dispose({ chatId: created.chatId });
     }
   });
 
@@ -582,8 +647,8 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("broadcasts refreshed context usage after configuration", async () => {
     const streams = await Promise.all([
-      connectChatEvents(websocketApi, chatId),
-      connectChatEvents(websocketApi, chatId),
+      connectChatEvents(api, chatId),
+      connectChatEvents(api, chatId),
     ]);
     try {
       const contextUsage = {
@@ -691,20 +756,6 @@ function createClient(url: string, csrfToken?: string): PidexApiContractClient {
       return response;
     },
     ...(csrfToken ? { headers: { "x-pidex-csrf": csrfToken } } : {}),
-  });
-  return createORPCClient(link);
-}
-
-function createWebsocketClient(
-  url: string,
-  onSocket?: (socket: WebSocket) => void,
-): PidexApiContractClient {
-  const link = new WebSocketRPCLink({
-    connect: () => {
-      const socket = new WebSocket(url);
-      onSocket?.(socket);
-      return socket;
-    },
   });
   return createORPCClient(link);
 }

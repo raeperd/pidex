@@ -128,101 +128,93 @@ async function captureCreatedChat(page: Page) {
   return captured;
 }
 
-async function waitForFakeWebSocket(page: Page) {
+async function waitForFakeEventStream(page: Page) {
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
-          (
-            globalThis as typeof globalThis & {
-              pidexTestSocket?: WebSocket;
-            }
-          ).pidexTestSocket?.readyState,
+      page.evaluate(() =>
+        (
+          globalThis as typeof globalThis & {
+            pidexTestEventStreams?: Array<{ open: boolean }>;
+          }
+        ).pidexTestEventStreams?.some((stream) => stream.open),
       ),
     )
-    .toBe(1);
+    .toBe(true);
 }
 
-async function installFakeWebSocket(page: Page) {
+async function installFakeEventStream(page: Page) {
   await page.addInitScript(() => {
-    const OPEN = 1;
-    const CLOSED = 3;
-    type FakeWebSocket = EventTarget & {
-      readyState: number;
-      requestId?: string;
-      send: (data: string) => void;
-      close: () => void;
+    type FakeEventStreamState = {
+      controller?: ReadableStreamDefaultController<Uint8Array>;
+      open: boolean;
     };
 
-    const makeFakeWebSocket = (): FakeWebSocket => {
-      const socket = Object.assign(new EventTarget(), {
-        readyState: 0,
-        requestId: undefined as string | undefined,
-        send(data: string) {
-          const message = JSON.parse(data) as { id?: string; kind?: string };
-          if (message.kind !== "request" || !message.id) return;
-          socket.requestId = message.id;
-          setTimeout(() => {
-            socket.dispatchEvent(
-              new MessageEvent("message", {
-                data: JSON.stringify({
-                  id: message.id,
-                  kind: "response",
-                  json: { status: 200, headers: { "standard-server": "event-stream" } },
-                }),
-              }),
-            );
-          });
-        },
-        close() {
-          if (socket.readyState === CLOSED) return;
-          socket.readyState = CLOSED;
-          socket.dispatchEvent(new CloseEvent("close", { code: 1000 }));
-        },
-      });
-      const scope = globalThis as typeof globalThis & { pidexTestSocket?: FakeWebSocket };
-      scope.pidexTestSocket = socket;
-      setTimeout(() => {
-        socket.readyState = OPEN;
-        socket.dispatchEvent(new Event("open"));
-      });
-      return socket;
-    };
+    const realFetch = globalThis.fetch.bind(globalThis);
+    const encoder = new TextEncoder();
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (!url.pathname.endsWith("/api/rpc/live/events")) return realFetch(input, init);
 
-    Object.defineProperty(globalThis, "WebSocket", {
-      configurable: true,
-      value: function () {
-        return makeFakeWebSocket();
-      },
-    });
+      const state: FakeEventStreamState = { open: true };
+      const scope = globalThis as typeof globalThis & {
+        pidexTestEventStreams?: FakeEventStreamState[];
+      };
+      (scope.pidexTestEventStreams ??= []).push(state);
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          state.controller = controller;
+          controller.enqueue(encoder.encode(": connected\n\n"));
+          signal?.addEventListener(
+            "abort",
+            () => {
+              state.open = false;
+              controller.close();
+            },
+            { once: true },
+          );
+        },
+        cancel() {
+          state.open = false;
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          "standard-server": "event-stream",
+        },
+      });
+    };
   });
 }
 
 async function emitServerEvent(page: Page, event: unknown) {
   await page.evaluate((serverEvent) => {
     const scope = globalThis as typeof globalThis & {
-      pidexTestSocket?: EventTarget & { requestId?: string };
+      pidexTestEventStreams?: FakeEventStream[];
     };
-    const { pidexTestSocket } = scope;
-    if (!pidexTestSocket?.requestId) throw new Error("Expected an active oRPC WebSocket request");
-    pidexTestSocket.dispatchEvent(
-      new MessageEvent("message", {
-        data: JSON.stringify({
-          id: pidexTestSocket.requestId,
-          kind: "event-stream",
-          json: { data: { json: serverEvent } },
-        }),
-      }),
+    const stream = scope.pidexTestEventStreams?.findLast((candidate) => candidate.open);
+    if (!stream?.controller) throw new Error("Expected an active HTTP event stream");
+    stream.controller.enqueue(
+      new TextEncoder().encode(
+        `event: message\ndata: ${JSON.stringify({ json: serverEvent })}\n\n`,
+      ),
     );
   }, event);
 }
+
+type FakeEventStream = {
+  controller?: ReadableStreamDefaultController<Uint8Array>;
+  open: boolean;
+};
 
 export {
   captureCreatedChat,
   createTask,
   emitServerEvent,
   fulfillAccepted,
-  installFakeWebSocket,
+  installFakeEventStream,
   installIntegratedTitleBar,
   makeChatSnapshot,
   openTasks,
@@ -230,5 +222,5 @@ export {
   rememberWorkspace,
   rpcRequest,
   startNewTask,
-  waitForFakeWebSocket,
+  waitForFakeEventStream,
 };

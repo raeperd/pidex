@@ -129,7 +129,7 @@ importers:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.80.10
-        version: 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
+        version: 0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-beta.101(effect@4.0.0-beta.101)(ioredis@5.11.1(supports-color@7.2.0))
@@ -148,9 +148,6 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.101
-      ws:
-        specifier: 8.18.3
-        version: 8.18.3
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
@@ -161,9 +158,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.12.4
-      '@types/ws':
-        specifier: 8.18.1
-        version: 8.18.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -4107,9 +4101,9 @@ snapshots:
 
   '@babel/runtime@7.29.7': {}
 
-  '@earendil-works/pi-agent-core@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
       ignore: 7.0.5
       typebox: 1.1.38
       yaml: 2.9.0
@@ -4142,9 +4136,30 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)':
+  '@earendil-works/pi-ai@0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-agent-core': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
+      '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
+      '@aws-sdk/client-bedrock-runtime': 3.1048.0
+      '@google/genai': 1.52.0(supports-color@7.2.0)
+      '@mistralai/mistralai': 2.2.6(@opentelemetry/api@1.9.0)
+      '@opentelemetry/api': 1.9.0
+      '@smithy/node-http-handler': 4.7.3
+      http-proxy-agent: 7.0.2(supports-color@7.2.0)
+      https-proxy-agent: 7.0.6(supports-color@7.2.0)
+      openai: 6.26.0(ws@8.21.1)(zod@4.4.3)
+      partial-json: 0.1.7
+      typebox: 1.1.38
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
+
+  '@earendil-works/pi-coding-agent@0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)':
+    dependencies:
+      '@earendil-works/pi-agent-core': 0.80.10(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.80.10(supports-color@7.2.0)(ws@8.18.3)(zod@4.4.3)
       '@earendil-works/pi-tui': 0.80.10
       '@silvia-odwyer/photon-node': 0.3.4
@@ -6568,6 +6583,11 @@ snapshots:
   openai@6.26.0(ws@8.18.3)(zod@4.4.3):
     optionalDependencies:
       ws: 8.18.3
+      zod: 4.4.3
+
+  openai@6.26.0(ws@8.21.1)(zod@4.4.3):
+    optionalDependencies:
+      ws: 8.21.1
       zod: 4.4.3
 
   oxc-parser@0.140.0:

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   emitServerEvent,
   fulfillJson,
-  installFakeWebSocket,
+  installFakeEventStream,
   makeChatSnapshot,
   openTasks,
   rpcRequest,
@@ -64,7 +64,7 @@ test("scales mobile task and composer targets while preserving responsive densit
   };
 
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   await page.addInitScript(({ path }) => localStorage.setItem("pidex:last-project", path), {
     path: workspacePath,
   });
