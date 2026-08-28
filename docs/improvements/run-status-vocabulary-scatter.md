@@ -41,10 +41,12 @@ Confirm this before deleting, then delete. The confirmation is one command, and 
 revision including the pre-Drizzle raw-SQL era:
 
 ```sh
-git log --all --oneline -S'runStatus: "stopping"'
+git log --all --oneline -S'runStatus: "stopping"' -- apps packages
 ```
 
-It returns nothing: no commit has ever written the value. That is what makes the five sites below
+It returns nothing: no commit has ever written the value. The `-- apps packages` pathspec is
+required — without it the search also matches this plan and the review HTML, which quote the string,
+and appears to refute itself. That is what makes the five sites below
 safe to remove rather than migrate.
 
 - `metadata.ts:74` — drop `"stopping"` from the recovery `WHERE … IN` list
