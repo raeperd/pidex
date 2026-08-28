@@ -26,6 +26,12 @@ import type {
 import { applicationError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
 import type { PiSdkServiceApi } from "./pi-sdk.js";
+import {
+  resolveSessionStatus,
+  runTransitions,
+  type LiveRunStatus,
+  type RunTransitionName,
+} from "./run-state.js";
 import { safeError } from "./security.js";
 
 interface WorkspaceRecord {
@@ -45,7 +51,7 @@ interface ChatRecord {
   scope: Scope.Closeable;
   revision: number;
   run?: RunOutcome;
-  runStatus: ChatSnapshot["runStatus"];
+  runStatus: LiveRunStatus;
   items: TranscriptItem[];
   steering: string[];
   followUp: string[];
@@ -183,6 +189,10 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         return yield* getChat(existingId);
       }
       const persisted = yield* metadata.sessionState(sessionKey);
+      // Crash recovery rewrites active runs to `interrupted` when the database opens, so this
+      // is never a leftover from a previous process. It is reachable within one: `chats.dispose`
+      // drops the owner entry without settling the run, so a later `chats.resume` (or a second
+      // `chats.create` landing on the same session) reads the row back as still active.
       const runIsActive =
         persisted.run?.status === "accepted" || persisted.run?.status === "running";
       const id = randomUUID().replaceAll("-", "");
@@ -317,6 +327,19 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     });
   }
 
+  /**
+   * Applies one named run transition: the live status always, and the durable status only when
+   * `runTransitions` records one for that transition and a run is in flight. Broadcasting stays
+   * at the call sites, whose ordering around the write differs.
+   */
+  function applyRunTransition(chat: ChatRecord, name: RunTransitionName) {
+    const transition = runTransitions[name];
+    chat.runStatus = transition.live;
+    return "durable" in transition && chat.run
+      ? metadata.markPromptStatus(chat.sessionKey, chat.run.runId, transition.durable)
+      : Effect.void;
+  }
+
   function sendSnapshot(chat: ChatRecord, socket: WebSocket) {
     return snapshot(chat).pipe(
       Effect.tap((currentSnapshot) =>
@@ -355,13 +378,15 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function handle(chat: ChatRecord, event: AdapterEvent) {
     if (event.type === "settled")
       return Effect.gen(function* () {
-        const outcome = chat.abortRequested ? "cancelled" : "completed";
-        if (chat.run) {
-          yield* metadata.markPromptStatus(chat.sessionKey, chat.run.runId, outcome);
-          chat.run = { ...chat.run, status: outcome, requiresAcknowledgement: false };
-        }
+        const transition = chat.abortRequested ? "runCancelled" : "runCompleted";
+        if (chat.run)
+          chat.run = {
+            ...chat.run,
+            status: runTransitions[transition].durable,
+            requiresAcknowledgement: false,
+          };
         chat.abortRequested = false;
-        chat.runStatus = "idle";
+        yield* applyRunTransition(chat, transition);
         broadcastRun(chat);
         yield* broadcastSession(chat);
       });
@@ -450,15 +475,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         requiresAcknowledgement: false,
       });
       chat.run = runState("running");
-      chat.runStatus = "running";
-      yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "running");
+      yield* applyRunTransition(chat, "promptStarted");
       broadcastRun(chat);
       yield* chat.session.prompt(text).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
-            yield* metadata.markPromptStatus(chat.sessionKey, outcome.runId, "failed");
             chat.run = runState("failed");
-            chat.runStatus = "error";
+            yield* applyRunTransition(chat, "promptFailed");
             handleNotice(chat, { level: "error", text: safeError(error) });
             broadcastRun(chat);
           }),
@@ -493,7 +516,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
           applicationError("chats.abort", new Error("Stop no longer targets the active run")),
         );
       chat.abortRequested = true;
-      chat.runStatus = "stopping";
+      yield* applyRunTransition(chat, "stopRequested");
       broadcastRun(chat);
       yield* settleAction(chat, outcome, () => chat.session.abort());
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
@@ -554,16 +577,16 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     });
   }
   function compact(chat: ChatRecord, instructions?: string) {
-    return Effect.sync(() => {
-      chat.runStatus = "compacting";
-      broadcastRun(chat);
-    }).pipe(
+    return applyRunTransition(chat, "compactStarted").pipe(
+      Effect.andThen(Effect.sync(() => broadcastRun(chat))),
       Effect.andThen(chat.session.compact(instructions)),
       Effect.ensuring(
-        Effect.sync(() => {
-          chat.runStatus = "idle";
-          broadcastRun(chat);
-        }),
+        // `compactEnded` records no durable status, so the transition cannot fail; `orDie`
+        // only satisfies `ensuring`'s never-failing finalizer.
+        applyRunTransition(chat, "compactEnded").pipe(
+          Effect.orDie,
+          Effect.andThen(Effect.sync(() => broadcastRun(chat))),
+        ),
       ),
     );
   }
@@ -623,29 +646,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 }
 
 export type ChatManager = ReturnType<typeof makeChatManager>;
-
-/**
- * Coarsens run state down to what the sidebar needs. A live chat always wins over persisted
- * state (it is the more current source of truth); with no live chat, only a persisted failure
- * or an unacknowledged crash-interrupted run counts as "error" — everything else the server
- * knows (completed, cancelled, or an in-flight run left behind by a race) reads as idle rather
- * than inventing a status the server cannot actually stand behind.
- */
-export function resolveSessionStatus(
-  liveRunStatus: ChatSnapshot["runStatus"] | undefined,
-  persistedRun: RunOutcome | undefined,
-): "running" | "error" | "idle" {
-  if (liveRunStatus === "running" || liveRunStatus === "stopping" || liveRunStatus === "compacting")
-    return "running";
-  if (liveRunStatus === "error") return "error";
-  if (liveRunStatus === "idle") return "idle";
-  if (
-    persistedRun?.status === "failed" ||
-    (persistedRun?.status === "interrupted" && persistedRun.requiresAcknowledgement)
-  )
-    return "error";
-  return "idle";
-}
 
 /**
  * Builds a SessionSummary for a live chat that Pi hasn't written to disk yet (no assistant

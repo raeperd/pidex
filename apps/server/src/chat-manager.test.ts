@@ -1,6 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { RunOutcome } from "@pidex/api";
-import { describe, expect, it } from "@effect/vitest";
-import { resolveSessionStatus } from "./chat-manager.js";
+import { Effect, Stream } from "effect";
+import { afterAll, assert, describe, expect, it, layer } from "@effect/vitest";
+import type { EffectAdapterSession } from "./adapter.js";
+import { makeChatManager } from "./chat-manager.js";
+import { Metadata, makeMetadataLayer, requestDigest } from "./metadata.js";
+import type { PiSdkServiceApi } from "./pi-sdk.js";
+import { resolveSessionStatus } from "./run-state.js";
 
 const runOutcome = (status: RunOutcome["status"], requiresAcknowledgement = false): RunOutcome => ({
   runId: "run_12345678",
@@ -52,3 +60,93 @@ describe("resolveSessionStatus", () => {
     expect(resolveSessionStatus(undefined, undefined)).toBe("idle");
   });
 });
+
+describe("attach", () => {
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "pidex-chat-manager-attach-"));
+  const workspaceId = "attach_workspace_1";
+
+  afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
+
+  layer(makeMetadataLayer(stateDir))((effectIt) => {
+    effectIt.effect("reports a live running status for a prompt that outlived its chat", () =>
+      Effect.gen(function* () {
+        // Crash recovery rewrites `accepted`/`running` rows to `interrupted` when the database
+        // opens, so a persisted active run cannot survive a restart. It can still survive a
+        // chat: disposing one drops the owner entry without settling the run, and the next
+        // attach for the same session key reads the row back as active.
+        const metadata = yield* Metadata;
+        const manager = makeChatManager(stubPiService(), metadata);
+        yield* manager.openWorkspace(workspaceId, "/tmp/pidex-attach-workspace");
+        const chat = yield* manager.create(workspaceId);
+        const accepted = yield* metadata.acceptPrompt({
+          actionId: "attachaction0001",
+          clientId: "chat_manager_test_client",
+          expectedRevision: 0,
+          requestDigest: requestDigest({ text: "Prompt that never settles" }),
+          sessionKey: chat.sessionKey,
+        });
+        yield* manager.startPrompt(chat, "Prompt that never settles", accepted);
+        yield* manager.dispose(chat);
+        assert.strictEqual(
+          (yield* metadata.sessionState(chat.sessionKey)).run?.status,
+          "running",
+          "disposing a chat must leave the persisted run active",
+        );
+
+        const reattached = yield* manager.create(workspaceId);
+
+        assert.strictEqual(reattached.runStatus, "running");
+        assert.strictEqual(reattached.run?.runId, accepted.runId);
+      }),
+    );
+  });
+});
+
+/**
+ * A Pi service whose one session never settles, so a started run stays active until the chat
+ * holding it is disposed. Both `createSession` calls hand back that same session, which is what
+ * makes the second attach land on the session key the first one left a run behind on.
+ */
+function stubPiService(): PiSdkServiceApi {
+  const session: EffectAdapterSession = {
+    state: {
+      nativeId: "attach_session_key",
+      nativePath: undefined,
+      messages: [],
+      toolOutputs: new Map(),
+      model: undefined,
+      thinkingLevel: "off",
+      sessionName: undefined,
+      contextUsage: undefined,
+      isIdle: true,
+    },
+    events: Stream.never,
+    prompt: () => Effect.never,
+    steer: () => Effect.void,
+    followUp: () => Effect.void,
+    abort: () => Effect.void,
+    clearQueue: () => Effect.void,
+    configure: () => Effect.void,
+    rename: () => Effect.void,
+    compact: () => Effect.void,
+    getStats: () =>
+      Effect.succeed({ messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false }),
+    respondToDialog: () => Effect.void,
+  };
+  return {
+    inspectWorkspace: () =>
+      Effect.succeed({
+        models: [],
+        sessions: [],
+        trusted: true,
+        protectedResourcesSkipped: false,
+        resourceDiagnostics: [],
+        commands: [],
+      }),
+    createSession: () => Effect.succeed(session),
+    resumeSession: () => Effect.succeed(session),
+    setWorkspaceTrust: () => Effect.void,
+    inheritWorkspaceTrust: () => Effect.void,
+    clearWorkspaceTrust: () => Effect.void,
+  };
+}
