@@ -10,11 +10,11 @@ strings are e2e selectors, so drift is pinned by tests in three places. Move the
 
 Read these five files before editing:
 
-- `apps/web/src/routes/tasks/[taskId]/_components/copyState.svelte.ts` — the whole helper (23 lines)
-- `apps/web/src/routes/tasks/[taskId]/_components/UserMessage.svelte:20-33`
-- `apps/web/src/routes/tasks/[taskId]/_components/AgentMessage.svelte:59-72`
-- `apps/web/src/routes/tasks/[taskId]/_components/AgentMessageCodeBlock.svelte:196-211`
-- `apps/web/src/routes/_components/Icon.svelte:34-63` — confirms `check` and `copy` map to lucide
+- `packages/web/src/routes/tasks/[taskId]/_components/copyState.svelte.ts` — the whole helper (23 lines)
+- `packages/web/src/routes/tasks/[taskId]/_components/UserMessage.svelte:20-33`
+- `packages/web/src/routes/tasks/[taskId]/_components/AgentMessage.svelte:59-72`
+- `packages/web/src/routes/tasks/[taskId]/_components/AgentMessageCodeBlock.svelte:196-211`
+- `packages/web/src/routes/_components/Icon.svelte:34-63` — confirms `check` and `copy` map to lucide
   `Check` and `Copy`, the same icons `AgentMessageCodeBlock` imports directly
 
 ### Reference: the verified three-site divergence
@@ -40,7 +40,7 @@ site.
 
 ## Step 2 — Add `CopyButton.svelte`
 
-Create `apps/web/src/routes/tasks/[taskId]/_components/CopyButton.svelte`. All three consumers live
+Create `packages/web/src/routes/tasks/[taskId]/_components/CopyButton.svelte`. All three consumers live
 in this directory, so the component belongs here — the routes-level `_components/` directory is for
 multi-route consumers only.
 
@@ -62,7 +62,7 @@ the same lucide components the code block imports today, so the rendered icon is
 
 **Done when:** `CopyButton.svelte` renders the button, the tooltip span with `role="tooltip"`, and
 the icon, and holds the only `navigator.clipboard.writeText` call under
-`apps/web/src/routes/tasks/`.
+`packages/web/src/routes/tasks/`.
 
 ## Step 3 — Replace the three call sites
 
@@ -74,13 +74,13 @@ needs it — `CopyButton` should own that span. Pass the row from the table in S
 keeping `WrapText`.
 
 **Done when:** each of the three call sites renders `CopyButton` in at most two lines, and
-`grep -rn "createCopyState" apps/web` returns only the definition.
+`grep -rn "createCopyState" packages/web` returns only the definition.
 
 ## Step 4 — Delete the helper
 
-Delete `apps/web/src/routes/tasks/[taskId]/_components/copyState.svelte.ts`.
+Delete `packages/web/src/routes/tasks/[taskId]/_components/copyState.svelte.ts`.
 
-**Done when:** the file is gone and `grep -rn "createCopyState\|copyState" apps/web` returns zero
+**Done when:** the file is gone and `grep -rn "createCopyState\|copyState" packages/web` returns zero
 hits.
 
 ## Step 5 — Verify
@@ -95,7 +95,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass with no edits to any test file. Test edits mean behaviour changed —
@@ -106,7 +106,7 @@ compare against the invariants below and fix the component instead.
 These are the observable behaviours the refactor preserves. Each has an existing proof:
 
 - **Aria labels per site are unchanged.** `UserMessage.test.ts` asserts `aria-label="Copy message"`
-  is present for non-empty text and absent for blank text; `e2e/conversation.spec.ts:119` clicks
+  is present for non-empty text and absent for blank text; `packages/e2e/conversation.spec.ts:119` clicks
   `getByRole("button", { name: "Copy response" })` and polls the clipboard.
 - **The code block keeps its below/right tooltip placement** and its `markdown-codeblock__action`
   button class — it sits in a dense header row where the default above-placement would clip.

@@ -13,7 +13,7 @@
     "package:desktop": "pnpm build && pnpm --filter @pidex/desktop run package",
     "start": "pnpm --filter @pidex/server start",
     "start:desktop": "pnpm --filter @pidex/desktop start",
-    "smoke:pi": "node scripts/pi-smoke.mjs",
+    "smoke:pi": "node packages/tooling/pi-smoke.mjs",
     "pretest": "pnpm --filter @pidex/api build && pnpm --filter @pidex/web exec svelte-kit sync",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -37,7 +37,7 @@
       ".": {
         "svelte": false
       },
-      "apps/desktop": {
+      "packages/desktop": {
         "entry": [
           "src/preload.cts"
         ]

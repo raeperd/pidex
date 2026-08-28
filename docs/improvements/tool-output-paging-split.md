@@ -15,11 +15,11 @@ of this refactor worth the most.
 
 - `packages/api/src/index.ts:282-290` — `toolOutputChunkSchema`: `resourceId`, `offset`,
   `nextOffset`, `total`, `text`, `complete`, `sourceTruncated`
-- `apps/web/src/routes/_components/AppShellApiClient.ts:116-122` — the request, with `limit: 16_384`
-- `apps/web/src/routes/_components/AppShellContext.svelte.ts:12-20` — `TaskToolOutput`
-- `apps/web/src/routes/_components/AppShell.svelte:174, 1334-1375` — `toolOutputs` and `loadToolOutput`
-- `apps/web/src/routes/tasks/[taskId]/_components/TaskTranscript.svelte:159-190` — the `toolCall` snippet
-- `apps/web/src/routes/tasks/[taskId]/_components/ToolCall.svelte:156-183, 282-297` — props and `hasDetails`
+- `packages/web/src/routes/_components/AppShellApiClient.ts:116-122` — the request, with `limit: 16_384`
+- `packages/web/src/routes/_components/AppShellContext.svelte.ts:12-20` — `TaskToolOutput`
+- `packages/web/src/routes/_components/AppShell.svelte:174, 1334-1375` — `toolOutputs` and `loadToolOutput`
+- `packages/web/src/routes/tasks/[taskId]/_components/TaskTranscript.svelte:159-190` — the `toolCall` snippet
+- `packages/web/src/routes/tasks/[taskId]/_components/ToolCall.svelte:156-183, 282-297` — props and `hasDetails`
 
 ### Reference: what the chunk fields mean
 
@@ -58,7 +58,7 @@ Keep the existing scalar props that are **not** paging: `startedAt`, `endedAt`, 
 Thread `fetchChunk` the same way `loadToolOutput` travels today — context to `TaskTranscript`
 (`:89-101`), then down as a prop. That path already exists; only the state moves.
 
-**Done when:** `grep -rn "detailsAvailable" apps/web` returns zero hits.
+**Done when:** `grep -rn "detailsAvailable" packages/web` returns zero hits.
 
 ## Step 3 — Fold the load-more UI into the component
 
@@ -82,7 +82,7 @@ The re-entrancy guard moves with them: `if (current?.loading || current?.complet
 After this, `TaskTranscript`'s `toolCall` snippet is a plain `<ToolCall {item} … />` with no
 `{@const}` merge and no children.
 
-**Done when:** `grep -rn "Load complete output" apps/web` matches only `ToolCall.svelte`.
+**Done when:** `grep -rn "Load complete output" packages/web` matches only `ToolCall.svelte`.
 
 ## Step 4 — Delete the shell's copy and rehome the limit
 
@@ -106,13 +106,13 @@ Accept this. The output is re-fetchable, the cache is unbounded and never cleare
 shell-level record this refactor exists to delete. Say so in the commit message rather than leaving
 it for someone to discover.
 
-**Done when:** `grep -rn "TaskToolOutput\|loadToolOutput" apps/web` returns zero hits.
+**Done when:** `grep -rn "TaskToolOutput\|loadToolOutput" packages/web` returns zero hits.
 
 ## Step 5 — Test the state machine
 
 `ToolCall.test.ts` covers only the pure helpers today — `toolCallHeader`, `toolCallPreview`,
 `toolCallExpanded`, `formatToolDuration`. Nothing covers accumulation, at any level: grepping
-`e2e/` for `Load more`, `Load complete output`, or `sourceTruncated` returns nothing.
+`packages/e2e/` for `Load more`, `Load complete output`, or `sourceTruncated` returns nothing.
 
 Add a component test that drives a stub `fetchChunk` through the full sequence and asserts the
 rendered state after each step:
@@ -141,7 +141,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass, with `ToolCall.test.ts` the only test file changed.

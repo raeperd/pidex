@@ -56,8 +56,8 @@ actions but not `prompt`: a prompt's durable status is driven by the run lifecyc
 `markPromptStatus`, not by the handler returning. Forcing `prompt` through `settleAction` would record
 a completion the moment the run is _forked_.
 
-**Done when:** `grep -n "outcome.replayed" apps/server/src/chat-manager.ts` returns exactly one hit,
-and `grep -n "Math.max(chat.revision" apps/server/src/chat-manager.ts` returns exactly one hit.
+**Done when:** `grep -n "outcome.replayed" packages/server/src/chat-manager.ts` returns exactly one hit,
+and `grep -n "Math.max(chat.revision" packages/server/src/chat-manager.ts` returns exactly one hit.
 
 ## Step 3 — Derive the action-kind list
 
@@ -99,7 +99,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass, with the only test addition being Step 4's.

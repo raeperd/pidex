@@ -62,8 +62,8 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 ### Technical baseline
 
 - Pidex uses pnpm workspaces with one committed lockfile. Direct production dependencies are exact-pinned, including the Pi SDK version matched to the installed Pi CLI during implementation discovery.
-- The initial workspace contains `apps/desktop`, `apps/web`, `apps/server`, and one browser-safe `packages/api` package for shared Valibot schemas and inferred protocol types.
-- `apps/desktop` packages, spawns, and supervises the `apps/server` executable as a child process. The Pi adapter and web connection runtime remain internal modules until reuse justifies extracting them. There is no independently installed daemon or native mobile workspace.
+- The initial workspace contains `packages/desktop`, `packages/web`, `packages/server`, and one browser-safe `packages/api` package for shared Valibot schemas and inferred protocol types.
+- `packages/desktop` packages, spawns, and supervises the `packages/server` executable as a child process. The Pi adapter and web connection runtime remain internal modules until reuse justifies extracting them. There is no independently installed daemon or native mobile workspace.
 - The same Svelte/Vite production build runs in Electron and in mobile Chrome. Mobile web is not implemented with React, Expo, React Native, or React Native Web.
 - Valibot validates protocol boundaries, Effect Schema validates persisted metadata, `ws` provides the server transport, and Drizzle ORM over `node:sqlite` stores Pidex metadata while Pi JSONL remains the transcript source of truth.
 - Electron's renderer is sandboxed and context-isolated with Node integration disabled. The preload carries only one-time desktop bootstrap material and desktop-only capabilities; session traffic uses the authenticated host protocol.

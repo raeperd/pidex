@@ -20,16 +20,16 @@ this document:
 So the fix is not "make the status travel with the error" — that fights the framework. The fix is to
 stop hand-writing the map: derive it from one table that the throw sites also read.
 
-Read `apps/server/src/http-api.ts:299-310` (the `protocolErrors` middleware, which converts a typed
+Read `packages/server/src/http-api.ts:299-310` (the `protocolErrors` middleware, which converts a typed
 error into `new ORPCError(code, { message })` and by design carries no status) and
-`apps/server/src/main.ts:56-79` (the map) before continuing.
+`packages/server/src/main.ts:56-79` (the map) before continuing.
 
 **Done when:** you can state why the throw site's `status` field is ignored on the oRPC path but
 honoured on the raw-Node path (`main.ts:99-100`).
 
 ## Step 2 — Add the status table to `errors.ts`
 
-In `apps/server/src/errors.ts`, add one table and one constructor:
+In `packages/server/src/errors.ts`, add one table and one constructor:
 
 ```ts
 export const apiErrorStatus = {/* code: status, from the table below */} as const;
@@ -92,7 +92,7 @@ In `main.ts`, the map becomes:
 errorStatusMap: { ...COMMON_ERROR_STATUS_MAP, ...apiErrorStatus, csrf: 403, internal_error: 500 },
 ```
 
-**Done when:** `grep -nE "workspace_forbidden|worktree_has_tasks|stale_revision" apps/server/src/main.ts`
+**Done when:** `grep -nE "workspace_forbidden|worktree_has_tasks|stale_revision" packages/server/src/main.ts`
 returns nothing, and no `HttpError.make` in `http-api.ts`, `project-catalog.ts`, or the table's
 `security.ts` sites passes a numeric `status` literal.
 
@@ -125,7 +125,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass with **no test file edited**. Any test change means a status moved.

@@ -3,17 +3,17 @@
 ## Repository
 
 ```text
-apps/
+packages/
 ├── desktop/   # Electron shell and server process supervisor
 ├── web/       # Responsive Svelte, Vite, and Tailwind client
-└── server/    # HTTP, WebSocket, Pi, SQLite, auth, and Tailscale
-
-packages/
-└── api/       # Browser-safe Valibot schemas, oRPC contract, and inferred types
+├── server/    # HTTP, WebSocket, Pi, SQLite, auth, and Tailscale
+├── api/       # Browser-safe Valibot schemas, oRPC contract, and inferred types
+├── e2e/       # Cross-application Playwright workflows
+└── tooling/   # Repository scripts
 ```
 
-- Keep the web connection code inside `apps/web`.
-- Keep the Pi SDK integration inside `apps/server`.
+- Keep the web connection code inside `packages/web`.
+- Keep the Pi SDK integration inside `packages/server`.
 - Add more packages only when there is a second consumer.
 
 ## Runtime
@@ -36,16 +36,16 @@ Electron main ──spawns and supervises──> server child process ──> Pi
 ## Dependencies
 
 ```text
-apps/web ───────────────> packages/api <────────────── apps/server
-apps/desktop ───────────> packages/api
+packages/web ───────────────> packages/api <────────────── packages/server
+packages/desktop ───────────> packages/api
 
-apps/desktop ──spawns at runtime──> apps/server executable
+packages/desktop ──spawns at runtime──> packages/server executable
 ```
 
 - `packages/api` contains Valibot schemas, the oRPC contract, DTOs, and protocol versions.
 - `packages/api` contains no Electron, browser, or Node implementation.
-- `apps/web` never imports from `apps/server` or `apps/desktop`.
-- `apps/server` runs independently from the Electron process.
+- `packages/web` never imports from `packages/server` or `packages/desktop`.
+- `packages/server` runs independently from the Electron process.
 
 ## Storage
 
@@ -63,11 +63,11 @@ Browser storage  unsent drafts and local UI preferences
 - Valibot for API validation and Effect Schema for persisted-data validation.
 - oRPC 2 native RPC for contract-first request/response calls.
 - Effect 4 beta for server workflows, dependency injection, and resource lifecycles.
-- Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `apps/server`.
+- Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `packages/server`.
 
 ## Server composition
 
-`apps/server/src/main.ts` is the server composition root. One managed runtime builds
+`packages/server/src/main.ts` is the server composition root. One managed runtime builds
 the Pi SDK, metadata, and chat services. SQLite and live chat sessions are scoped resources,
 so runtime disposal closes them in dependency order. oRPC handlers and Node callbacks are
 the only Promise and callback boundaries.
