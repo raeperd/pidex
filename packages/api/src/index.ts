@@ -1,4 +1,4 @@
-import { oc, type RouterContractClient } from "@orpc/contract";
+import { asyncIteratorObject, oc, type RouterContractClient, type Schema } from "@orpc/contract";
 import * as v from "valibot";
 
 export { safeParse } from "valibot";
@@ -215,16 +215,10 @@ export const serverEventSchema = v.variant("type", [
     dialog: v.optional(extensionDialogSchema),
   }),
 ]);
-export const wsClientMessageSchema = v.variant("type", [
-  v.object({
-    type: v.literal("hello"),
-    protocolVersion: v.literal(PROTOCOL_VERSION),
-    chatId: idSchema,
-    lastEventId: v.optional(nonnegativeInteger()),
-  }),
-  v.object({ type: v.literal("ack"), eventId: positiveInteger() }),
-  v.object({ type: v.literal("pong") }),
-]);
+const serverEventsSchema: Schema<
+  AsyncIteratorObject<v.InferInput<typeof serverEventSchema>>,
+  AsyncIteratorObject<v.InferOutput<typeof serverEventSchema>>
+> = asyncIteratorObject(serverEventSchema);
 const openWorkspaceSchema = v.object({
   path: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)),
   remember: v.optional(v.boolean()),
@@ -296,6 +290,11 @@ const transcriptPageSchema = v.object({
 
 const emptyInputSchema = v.object({});
 const chatIdInputSchema = v.object({ chatId: idSchema });
+const chatEventsInputSchema = v.object({
+  protocolVersion: v.literal(PROTOCOL_VERSION),
+  chatId: idSchema,
+  lastEventId: v.optional(nonnegativeInteger()),
+});
 const workspaceIdInputSchema = v.object({ workspaceId: idSchema });
 const toolOutputInputSchema = v.object({
   chatId: idSchema,
@@ -339,6 +338,9 @@ export const pidexApiContract = {
     rename: oc.input(renameRequestSchema).output(chatSnapshotSchema),
     compact: oc.input(compactRequestSchema).output(chatSnapshotSchema),
     answerDialog: oc.input(dialogResponseSchema).output(okResponseSchema),
+  },
+  live: {
+    events: oc.input(chatEventsInputSchema).output(serverEventsSchema),
   },
 };
 

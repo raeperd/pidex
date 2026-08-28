@@ -35,13 +35,19 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
   const workspaceRoots = [...roots, managedWorktreeRoot];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
-    if (context.req.headers["x-pidex-csrf"] !== csrf)
+    if (context.req?.headers["x-pidex-csrf"] !== csrf)
       throw new ORPCError("csrf", { message: "Invalid CSRF token" });
+    return next();
+  });
+  const requireWebSocket = base.middleware(async ({ context, next }) => {
+    if (context.transport !== "websocket")
+      throw new ORPCError("transport", { message: "This procedure requires WebSocket transport" });
     return next();
   });
   const implementation = base.use(protocolErrors);
   const workspaces = implementation.workspaces.use(requireCsrf);
   const chats = implementation.chats.use(requireCsrf);
+  const live = implementation.live.use(requireWebSocket);
 
   return implementation.router({
     system: {
@@ -277,6 +283,12 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
         return { ok: true };
       }),
     }),
+    live: {
+      events: live.events.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.events(chat, input.lastEventId);
+      }),
+    },
   });
 });
 
@@ -294,7 +306,8 @@ const protocolErrors = os.middleware(async ({ next }) => {
 });
 
 interface RpcApiContext {
-  req: IncomingMessage;
+  req?: IncomingMessage;
+  transport: "http" | "websocket";
 }
 
 function actionInput(

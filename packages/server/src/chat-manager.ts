@@ -13,8 +13,8 @@ import type {
   ToolItem,
   Workspace,
 } from "@pidex/api";
-import type { WebSocket } from "ws";
-import { Effect, Exit, Scope, Stream } from "effect";
+import { Effect, Exit, Queue, Scope, Stream } from "effect";
+import { streamToAsyncIteratorObject } from "@orpc/server";
 import type {
   AdapterEvent,
   AdapterSession,
@@ -53,7 +53,7 @@ interface ChatRecord {
   resources: Map<string, AdapterToolOutput>;
   eventId: number;
   events: ServerEvent[];
-  sockets: Set<WebSocket>;
+  subscribers: Set<Queue.Queue<ServerEvent>>;
   generation: number;
   abortRequested: boolean;
 }
@@ -206,7 +206,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         resources: new Map(session.state.toolOutputs),
         eventId: 0,
         events: [],
-        sockets: new Set<WebSocket>(),
+        subscribers: new Set(),
         generation: 1,
         abortRequested: false,
       };
@@ -317,39 +317,43 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     });
   }
 
-  function sendSnapshot(chat: ChatRecord, socket: WebSocket) {
-    return snapshot(chat).pipe(
-      Effect.tap((currentSnapshot) =>
-        Effect.sync(() => {
-          const event = {
-            type: "snapshot",
-            eventId: ++chat.eventId,
-            chatId: chat.id,
-            snapshot: currentSnapshot,
-          } as ServerEvent;
-          chat.events.push(event);
-          socket.send(JSON.stringify(event));
-        }),
-      ),
-      Effect.asVoid,
-    );
-  }
-
-  function connect(chat: ChatRecord, socket: WebSocket, lastEventId?: number) {
+  function events(chat: ChatRecord, lastEventId?: number) {
     return Effect.gen(function* () {
-      chat.sockets.add(socket);
+      const queue = yield* Queue.unbounded<ServerEvent>();
+      chat.subscribers.add(queue);
       const first = chat.events[0]?.eventId;
-      if (
+      const replay =
         lastEventId !== undefined &&
         first !== undefined &&
         lastEventId >= first - 1 &&
         lastEventId <= chat.eventId
-      ) {
-        for (const event of chat.events)
-          if (event.eventId > lastEventId) socket.send(JSON.stringify(event));
-      } else yield* sendSnapshot(chat, socket);
-      socket.once("close", () => chat.sockets.delete(socket));
+          ? chat.events.filter((event) => event.eventId > lastEventId)
+          : [yield* snapshotEvent(chat)];
+      const stream = Stream.concat(Stream.fromIterable(replay), Stream.fromQueue(queue)).pipe(
+        Stream.ensuring(
+          Effect.gen(function* () {
+            chat.subscribers.delete(queue);
+            yield* Queue.shutdown(queue);
+          }),
+        ),
+      );
+      return streamToAsyncIteratorObject(Stream.toReadableStream(stream));
     });
+  }
+
+  function snapshotEvent(chat: ChatRecord) {
+    return snapshot(chat).pipe(
+      Effect.map((currentSnapshot) => {
+        const event = {
+          type: "snapshot",
+          eventId: ++chat.eventId,
+          chatId: chat.id,
+          snapshot: currentSnapshot,
+        } satisfies ServerEvent;
+        appendEvent(chat, event);
+        return event;
+      }),
+    );
   }
 
   function handle(chat: ChatRecord, event: AdapterEvent) {
@@ -570,11 +574,12 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function dispose(chat: ChatRecord) {
     return Scope.close(chat.scope, Exit.void).pipe(
       Effect.andThen(
-        Effect.sync(() => {
+        Effect.gen(function* () {
           chat.generation++;
           owners.delete(chat.sessionKey);
           chats.delete(chat.id);
-          for (const socket of chat.sockets) socket.close(1001, "Chat disposed");
+          yield* Effect.forEach(chat.subscribers, Queue.shutdown, { discard: true });
+          chat.subscribers.clear();
         }),
       ),
     );
@@ -605,7 +610,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     resume,
     chat: getChat,
     snapshot,
-    connect,
+    events,
     startPrompt,
     deliverDuringRun,
     abort,
@@ -669,11 +674,14 @@ function liveOnlySession(chat: ChatRecord): SessionSummary {
 }
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
-  const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } as ServerEvent;
-  chat.events.push(full);
+  const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } satisfies ServerEvent;
+  appendEvent(chat, full);
+  for (const queue of chat.subscribers) Queue.offerUnsafe(queue, full);
+}
+
+function appendEvent(chat: ChatRecord, event: ServerEvent) {
+  chat.events.push(event);
   if (chat.events.length > 500) chat.events.shift();
-  const data = JSON.stringify(full);
-  for (const socket of chat.sockets) if (socket.readyState === 1) socket.send(data);
 }
 
 function upsert(chat: ChatRecord, item: TranscriptItem) {

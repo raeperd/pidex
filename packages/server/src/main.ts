@@ -7,10 +7,10 @@ import { pathToFileURL } from "node:url";
 import { NodeRuntime } from "@effect/platform-node";
 import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
+import { RPCHandler as WebSocketRPCHandler } from "@orpc/server/websocket";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
-import { safeParse, wsClientMessageSchema } from "@pidex/api";
 import { Context, Effect, ManagedRuntime } from "effect";
-import { WebSocketServer, type RawData } from "ws";
+import { WebSocketServer } from "ws";
 import { makeChatManager, type ChatManager } from "./chat-manager.js";
 import { apiErrorStatus, applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
@@ -67,6 +67,7 @@ export async function createPidexApplication() {
       },
       plugins: [new RequestLimitHandlerPlugin({ maxBodySize: 64 * 1024 })],
     });
+    const webSocketHandler = new WebSocketRPCHandler(apiRouter);
 
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       securityHeaders(res, webScriptHashes);
@@ -75,7 +76,7 @@ export async function createPidexApplication() {
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
         const { matched } = await apiHandler.handle(req, res, {
           prefix: "/api/rpc",
-          context: { req },
+          context: { req, transport: "http" },
         });
         if (matched) return;
         if (route.startsWith("/api/"))
@@ -106,31 +107,22 @@ export async function createPidexApplication() {
       return true;
     };
     wss.on("connection", (socket) => {
-      let connected = false;
       let alive = true;
+      socket.on("pong", () => (alive = true));
       socket.on("message", (data) => {
-        const message = parseClientMessage(data);
-        if (!message) return socket.close(1008, "Invalid protocol message");
-        if (!connected && message.type !== "hello") return socket.close(1008, "Hello required");
-        if (message.type === "hello") {
-          if (connected) return socket.close(1008, "Already connected");
-          connected = true;
-          void runtime
-            .runPromise(
-              Effect.gen(function* () {
-                const chat = yield* chatManager.chat(message.chatId);
-                yield* chatManager.connect(chat, socket, message.lastEventId);
-              }),
-            )
-            .catch(() => socket.close(1008, "Chat not found"));
-        } else if (message.type === "pong") alive = true;
+        void webSocketHandler.message(socket, data.toString(), {
+          context: { transport: "websocket" },
+        });
       });
       const timer = setInterval(() => {
         if (!alive) return socket.terminate();
         alive = false;
-        socket.send(JSON.stringify({ type: "ping" }));
+        socket.ping();
       }, 20_000);
-      socket.once("close", () => clearInterval(timer));
+      socket.once("close", () => {
+        clearInterval(timer);
+        void webSocketHandler.close(socket);
+      });
     });
     let closed = false;
     return {
@@ -185,15 +177,6 @@ function serveWebApp(res: ServerResponse, route: string, webRoot: string) {
     file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
   );
   createReadStream(file).pipe(res);
-}
-
-function parseClientMessage(data: RawData) {
-  try {
-    const result = safeParse(wsClientMessageSchema, JSON.parse(data.toString()));
-    return result.success ? result.output : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function contentTypeFor(file: string) {
