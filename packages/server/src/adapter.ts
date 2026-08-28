@@ -157,7 +157,7 @@ function releaseAdapterSession(session: AdapterSession): Effect.Effect<void> {
     Effect.andThen(
       Effect.try({
         try: () => session.dispose(),
-        catch: (cause) => cause,
+        catch: () => undefined,
       }).pipe(Effect.ignore),
     ),
   );
