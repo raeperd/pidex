@@ -2,10 +2,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { Effect, Fiber, Stream } from "effect";
-import { acquireAdapterSession, type AdapterEvent, type AdapterSession } from "./adapter.js";
-import { makePiSdk, makePiSdkService } from "./pi-sdk.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Effect, Fiber, Queue, Stream } from "effect";
+import {
+  acquireAdapterSession,
+  type AdapterEvent,
+  type EffectAdapterSession,
+  makePiSdk,
+  makePiSdkService,
+} from "./pi-sdk.js";
 
 describe("Effect Pi adapter", () => {
   it.effect("streams events in order and unsubscribes when the stream ends", () =>
@@ -42,11 +47,11 @@ describe("Effect Pi adapter", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fixture = makeSessionFixture();
-        fixture.promptFailure = new Error("prompt failed");
+        fixture.failPrompt(new Error("prompt failed"));
         const session = yield* acquireAdapterSession(Effect.succeed(fixture));
 
         assert.strictEqual(session.state.thinkingLevel, "minimal");
-        assert.strictEqual(session.state.messages[0]?.id, fixture.sessionManager.getLeafId());
+        assert.strictEqual(session.state.messages[0]?.id, "fixture-message");
         const error = yield* session.prompt("hello").pipe(Effect.flip);
 
         assert.propertyVal(error, "_tag", "AdapterSessionError");
@@ -168,9 +173,9 @@ Diagnose the failure before proposing a fix.
           (session) => Effect.sync(() => session.dispose()),
         );
         const events: AdapterEvent[] = [];
-        const unsubscribe = commandSession.subscribe((event) => events.push(event));
+        const unsubscribe = commandSession.lifecycle.subscribe((event) => events.push(event));
 
-        yield* Effect.tryPromise(() => commandSession.prompt("/finish"));
+        yield* commandSession.prompt("/finish");
         unsubscribe();
 
         assert.deepEqual(events, [
@@ -488,53 +493,74 @@ function waitForSubscription(fixture: SessionFixture): Effect.Effect<void> {
     : Effect.yieldNow.pipe(Effect.andThen(Effect.suspend(() => waitForSubscription(fixture))));
 }
 
-interface SessionFixture extends AdapterSession {
-  readonly sessionManager: SessionManager;
-  promptFailure: Error | undefined;
+interface SessionFixture extends EffectAdapterSession {
+  failPrompt(error: Error): void;
   readonly abortCount: number;
   readonly disposed: boolean;
   readonly listenerCount: number;
   emit(event: AdapterEvent): void;
+  readonly lifecycle: {
+    subscribe(listener: (event: AdapterEvent) => void): () => void;
+    abort(): Promise<void>;
+    dispose(): void;
+  };
 }
 
 function makeSessionFixture(): SessionFixture {
-  const sessionManager = SessionManager.inMemory("/fixture");
-  const settingsManager = SettingsManager.inMemory({ defaultThinkingLevel: "minimal" });
-  const listeners = new Set<(event: AdapterEvent) => void>();
   let promptFailure: Error | undefined;
   let pendingPrompt: (() => void) | undefined;
   let abortCount = 0;
   let disposed = false;
 
-  const messages: AdapterSession["messages"] = [
-    {
-      type: "user",
-      id: sessionManager.appendMessage({
-        role: "user",
-        content: "fixture prompt",
-        timestamp: 1,
-      }),
-      text: "fixture prompt",
-      complete: true,
-      timestamp: new Date(1).toISOString(),
+  const listeners = new Set<(event: AdapterEvent) => void>();
+  const lifecycle = {
+    subscribe: (listener: (event: AdapterEvent) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
-  ];
-
+    abort: async () => {
+      abortCount += 1;
+      pendingPrompt?.();
+      pendingPrompt = undefined;
+    },
+    dispose: () => {
+      disposed = true;
+      listeners.clear();
+    },
+  };
+  const events = Stream.callback((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        lifecycle.subscribe((event) => {
+          Queue.offerUnsafe(queue, event);
+        }),
+      ),
+      (unsubscribe) => Effect.sync(unsubscribe),
+    ),
+  );
   return {
-    sessionManager,
-    nativeId: sessionManager.getSessionId(),
-    nativePath: undefined,
-    messages,
-    toolOutputs: new Map(),
-    model: undefined,
-    thinkingLevel: settingsManager.getDefaultThinkingLevel() ?? "off",
-    sessionName: undefined,
-    contextUsage: undefined,
-    isIdle: true,
-    get promptFailure() {
-      return promptFailure;
+    state: {
+      nativeId: "fixture-session",
+      nativePath: undefined,
+      messages: [
+        {
+          type: "user",
+          id: "fixture-message",
+          text: "fixture prompt",
+          complete: true,
+          timestamp: new Date(1).toISOString(),
+        },
+      ],
+      toolOutputs: new Map(),
+      model: undefined,
+      thinkingLevel: "minimal",
+      sessionName: undefined,
+      contextUsage: undefined,
+      isIdle: true,
     },
-    set promptFailure(error) {
+    events,
+    lifecycle,
+    failPrompt: (error) => {
       promptFailure = error;
     },
     get abortCount() {
@@ -546,41 +572,23 @@ function makeSessionFixture(): SessionFixture {
     get listenerCount() {
       return listeners.size;
     },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
     emit: (event) => {
       for (const listener of listeners) listener(event);
     },
     prompt: () => {
-      if (promptFailure) return Promise.reject(promptFailure);
-      return new Promise<void>((resolve) => {
-        pendingPrompt = resolve;
-      });
+      if (promptFailure)
+        return Effect.fail({
+          _tag: "AdapterSessionError" as const,
+          operation: "session.prompt",
+          message: promptFailure.message,
+          cause: promptFailure,
+        });
+      return Effect.promise(
+        () =>
+          new Promise<void>((resolve) => {
+            pendingPrompt = resolve;
+          }),
+      ).pipe(Effect.onInterrupt(() => Effect.promise(() => lifecycle.abort())));
     },
-    steer: async () => {},
-    followUp: async () => {},
-    abort: async () => {
-      abortCount += 1;
-      pendingPrompt?.();
-      pendingPrompt = undefined;
-    },
-    clearQueue: () => {},
-    configure: async () => {},
-    rename: () => {},
-    compact: async () => {},
-    getStats: () => ({
-      messages: 0,
-      toolCalls: 0,
-      tokens: 0,
-      cost: 0,
-      subscription: false,
-    }),
-    respondToDialog: () => {},
-    dispose: () => {
-      disposed = true;
-      listeners.clear();
-    },
-  };
+  } as SessionFixture;
 }
