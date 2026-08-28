@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { ProjectCandidate } from "@pidex/api";
 import { Effect } from "effect";
-import { applicationError, HttpError } from "./errors.js";
+import { apiError, applicationError, type ApiErrorCode } from "./errors.js";
 import { isDescendant } from "./security.js";
 
 const execFileAsync = promisify(execFile);
@@ -18,11 +18,7 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
   const relativeProjectPath = path.relative(repository.worktreeRoot, sourceProjectPath);
   if (!isDescendant(repository.worktreeRoot, sourceProjectPath))
     return yield* Effect.fail(
-      HttpError.make({
-        status: 400,
-        code: "project_outside_repository",
-        message: "Project directory is outside its Git working tree",
-      }),
+      apiError("project_outside_repository", "Project directory is outside its Git working tree"),
     );
 
   const token = randomBytes(4).toString("hex");
@@ -58,11 +54,10 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
       rollbackWorktree(repository.worktreeRoot, worktreeRoot, branch).pipe(
         Effect.andThen(
           Effect.fail(
-            HttpError.make({
-              status: 400,
-              code: "project_missing_from_worktree",
-              message: "Project directory does not exist in the current Git revision",
-            }),
+            apiError(
+              "project_missing_from_worktree",
+              "Project directory does not exist in the current Git revision",
+            ),
           ),
         ),
       ),
@@ -90,11 +85,7 @@ export const removeProjectWorktree = Effect.fn("projects.removeWorktree")(functi
     !/^pidex\/[0-9a-f]{8}$/.test(branch)
   )
     return yield* Effect.fail(
-      HttpError.make({
-        status: 400,
-        code: "workspace_not_managed_worktree",
-        message: "Workspace is not a managed Pidex worktree",
-      }),
+      apiError("workspace_not_managed_worktree", "Workspace is not a managed Pidex worktree"),
     );
 
   yield* runGit(
@@ -178,22 +169,18 @@ const inspectRepository = Effect.fn("projects.inspectRepository")(function* (
   const [worktreeRoot, commonGitDirectory] = output.split(/\r?\n/).map((value) => value.trim());
   if (!worktreeRoot || !commonGitDirectory)
     return yield* Effect.fail(
-      HttpError.make({
-        status: 400,
-        code: "project_not_git",
-        message: "Git did not return repository information for this project",
-      }),
+      apiError("project_not_git", "Git did not return repository information for this project"),
     );
   return { worktreeRoot, commonGitDirectory };
 });
 
-function runGit(cwd: string, args: string[], code: string, message: string) {
+function runGit(cwd: string, args: string[], code: ApiErrorCode, message: string) {
   return Effect.tryPromise({
     try: () =>
       execFileAsync("git", args, { cwd, encoding: "utf8", timeout: 120_000 }).then(
         ({ stdout }) => stdout,
       ),
-    catch: () => HttpError.make({ status: 400, code, message }),
+    catch: () => apiError(code, message),
   });
 }
 
@@ -201,14 +188,14 @@ function rollbackWorktree(repositoryRoot: string, worktreeRoot: string, branch: 
   return runGit(
     repositoryRoot,
     ["worktree", "remove", "--force", worktreeRoot],
-    "worktree_rollback_failed",
+    "worktree_remove_failed",
     "Git could not roll back the worktree",
   ).pipe(
     Effect.andThen(
       runGit(
         repositoryRoot,
         ["branch", "-D", branch],
-        "worktree_rollback_failed",
+        "worktree_branch_remove_failed",
         "Git could not roll back the worktree",
       ).pipe(Effect.ignore),
     ),
