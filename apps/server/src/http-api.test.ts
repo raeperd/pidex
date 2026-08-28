@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
+import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
 import {
   pidexApiContract,
   PROTOCOL_VERSION,
@@ -17,7 +18,7 @@ import {
   type ServerEvent,
 } from "@pidex/api";
 import { Effect } from "effect";
-import WebSocket, { type RawData } from "ws";
+import WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPidexServer } from "./main.js";
 
@@ -47,12 +48,14 @@ const coveredEndpoints = [
   "chats.rename",
   "chats.compact",
   "chats.answerDialog",
+  "live.events",
 ] as const;
 
 describe.sequential("HTTP API endpoints", () => {
   let app: Awaited<ReturnType<typeof createPidexServer>>;
   let publicApi: PidexApiContractClient;
   let api: PidexApiContractClient;
+  let websocketApi: PidexApiContractClient;
   let tempRoot: string;
   let workspacePath: string;
   let nonGitWorkspacePath: string;
@@ -61,6 +64,7 @@ describe.sequential("HTTP API endpoints", () => {
   let chatId: string;
   let httpUrl: string;
   let websocketUrl: string;
+  let websocket: WebSocket | undefined;
 
   beforeAll(async () => {
     tempRoot = await mkdtemp(path.join(os.tmpdir(), "pidex-http-api-"));
@@ -111,6 +115,7 @@ describe.sequential("HTTP API endpoints", () => {
     websocketUrl = `ws://127.0.0.1:${address.port}/api/ws`;
 
     publicApi = createClient(rpcUrl);
+    websocketApi = createWebsocketClient(websocketUrl, (socket) => (websocket = socket));
     const bootstrap = await publicApi.system.bootstrap({});
     api = createClient(rpcUrl, bootstrap.csrfToken);
     workspaceId = (await api.workspaces.open({ path: workspacePath, remember: false })).id;
@@ -119,6 +124,7 @@ describe.sequential("HTTP API endpoints", () => {
 
   afterAll(async () => {
     try {
+      websocket?.close();
       await app?.close();
     } finally {
       vi.unstubAllEnvs();
@@ -147,6 +153,43 @@ describe.sequential("HTTP API endpoints", () => {
       warning: expect.any(String),
     });
     expect(result.csrfToken).toHaveLength(43);
+  });
+
+  it("streams chat events through the oRPC WebSocket transport", async () => {
+    const events = await subscribeChatEvents(websocketApi, chatId);
+
+    await expect(events.next()).resolves.toMatchObject({
+      done: false,
+      value: {
+        type: "snapshot",
+        chatId,
+        snapshot: { chatId },
+      },
+    });
+
+    await events.return?.();
+  });
+
+  it("replays chat events from the requested event ID", async () => {
+    const initial = await subscribeChatEvents(websocketApi, chatId);
+    const snapshot = await nextMatchingEvent(initial, (event) => event.type === "snapshot");
+    const chat = await currentChat();
+
+    await api.chats.rename({ ...actionFor(chat), name: "Replay source" });
+
+    const replay = await subscribeChatEvents(websocketApi, chatId, snapshot.eventId);
+    try {
+      await expect(
+        nextMatchingEvent(replay, (event) => event.type === "session"),
+      ).resolves.toMatchObject({
+        type: "session",
+        chatId,
+        name: "Replay source",
+      });
+    } finally {
+      await initial.return?.();
+      await replay.return?.();
+    }
   });
 
   it("preserves typed errors at the Node HTTP boundary", async () => {
@@ -538,9 +581,9 @@ describe.sequential("HTTP API endpoints", () => {
   });
 
   it("broadcasts refreshed context usage after configuration", async () => {
-    const sockets = await Promise.all([
-      connectChatSocket(websocketUrl, chatId),
-      connectChatSocket(websocketUrl, chatId),
+    const streams = await Promise.all([
+      connectChatEvents(websocketApi, chatId),
+      connectChatEvents(websocketApi, chatId),
     ]);
     try {
       const contextUsage = {
@@ -555,8 +598,8 @@ describe.sequential("HTTP API endpoints", () => {
         configurable: true,
         value: contextUsage,
       });
-      const usageEvents = sockets.map((socket) =>
-        waitForSocketEvent(socket, (event) => event.type === "context_usage"),
+      const usageEvents = streams.map((stream) =>
+        nextMatchingEvent(stream, (event) => event.type === "context_usage"),
       );
       const chat = await currentChat();
 
@@ -569,7 +612,7 @@ describe.sequential("HTTP API endpoints", () => {
         if (event.type === "context_usage") expect(event.usage).toEqual(contextUsage);
       }
     } finally {
-      for (const socket of sockets) socket.close();
+      await Promise.all(streams.map((stream) => stream.return?.()));
     }
   });
 
@@ -652,6 +695,20 @@ function createClient(url: string, csrfToken?: string): PidexApiContractClient {
   return createORPCClient(link);
 }
 
+function createWebsocketClient(
+  url: string,
+  onSocket?: (socket: WebSocket) => void,
+): PidexApiContractClient {
+  const link = new WebSocketRPCLink({
+    connect: () => {
+      const socket = new WebSocket(url);
+      onSocket?.(socket);
+      return socket;
+    },
+  });
+  return createORPCClient(link);
+}
+
 async function expectRpcError(operation: Promise<unknown>, code: string, status: number) {
   await expect(operation).rejects.toMatchObject({ code });
   expect(lastRpcResponseStatus).toBe(status);
@@ -666,51 +723,29 @@ function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
   };
 }
 
-async function connectChatSocket(url: string, chatId: string) {
-  const socket = new WebSocket(url);
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    socket.once("error", onError);
-    socket.once("open", () => {
-      socket.off("error", onError);
-      resolve();
-    });
-  });
-  const snapshot = waitForSocketEvent(socket, (event) => event.type === "snapshot");
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, chatId }));
-  await snapshot;
-  return socket;
+async function connectChatEvents(client: PidexApiContractClient, chatId: string) {
+  const events = await subscribeChatEvents(client, chatId);
+  await nextMatchingEvent(events, (event) => event.type === "snapshot");
+  return events;
 }
 
-function waitForSocketEvent(
-  socket: WebSocket,
+function subscribeChatEvents(client: PidexApiContractClient, chatId: string, lastEventId?: number) {
+  return client.live.events({
+    protocolVersion: PROTOCOL_VERSION,
+    chatId,
+    ...(lastEventId === undefined ? {} : { lastEventId }),
+  });
+}
+
+async function nextMatchingEvent(
+  events: AsyncIterator<ServerEvent>,
   matches: (event: ServerEvent) => boolean,
 ): Promise<ServerEvent> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => finish(new Error("Timed out waiting for server event")),
-      5_000,
-    );
-    const onMessage = (data: RawData) => {
-      try {
-        const event = JSON.parse(data.toString()) as ServerEvent;
-        if (matches(event)) finish(undefined, event);
-      } catch {}
-    };
-    const onClose = () => finish(new Error("Socket closed before the expected server event"));
-    const onError = (error: Error) => finish(error);
-    const finish = (error?: Error, event?: ServerEvent) => {
-      clearTimeout(timeout);
-      socket.off("message", onMessage);
-      socket.off("close", onClose);
-      socket.off("error", onError);
-      if (error) reject(error);
-      else resolve(event!);
-    };
-    socket.on("message", onMessage);
-    socket.once("close", onClose);
-    socket.once("error", onError);
-  });
+  while (true) {
+    const result = await events.next();
+    if (result.done) throw new Error("Event stream ended before the expected event");
+    if (matches(result.value)) return result.value;
+  }
 }
 
 function contractEndpoints(value: unknown, prefix: string[] = []): string[] {

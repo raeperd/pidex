@@ -11,7 +11,6 @@ import {
   safeParse,
   serverEventSchema,
   sessionSummarySchema,
-  wsClientMessageSchema,
 } from "../src/index.js";
 
 const actionRequest = {
@@ -100,17 +99,7 @@ describe("Pidex API schemas", () => {
     ).toMatchObject({ success: false });
   });
 
-  it("selects tagged WebSocket messages and server events", () => {
-    expect(
-      safeParse(wsClientMessageSchema, {
-        type: "hello",
-        protocolVersion: PROTOCOL_VERSION,
-        chatId: "chat_123",
-      }),
-    ).toMatchObject({ success: true });
-    expect(safeParse(wsClientMessageSchema, { type: "ack", eventId: 0 })).toMatchObject({
-      success: false,
-    });
+  it("validates tagged server events", () => {
     expect(
       safeParse(serverEventSchema, {
         type: "text_delta",
