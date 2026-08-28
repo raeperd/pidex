@@ -714,7 +714,7 @@ function releasePiSession(session: AcquiredPiSession): Effect.Effect<void> {
     Effect.andThen(
       Effect.try({
         try: () => session.lifecycle.dispose(),
-        catch: (cause) => cause,
+        catch: () => undefined,
       }).pipe(Effect.ignore),
     ),
   );

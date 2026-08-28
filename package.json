@@ -7,6 +7,8 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
     "deadcode": "pnpm --filter @pidex/api build && pnpm --filter @pidex/web exec svelte-kit sync && knip",
     "dev": "pnpm --filter @pidex/api build && pnpm --filter @pidex/web dev",
+    "effect:check": "pnpm exec effect-tsgo diagnostics --project packages/server/tsconfig.json --format github-actions --severity error,warning --strict && pnpm exec effect-tsgo diagnostics --project packages/desktop/tsconfig.json --format github-actions --severity error,warning --strict",
+    "prepare": "effect-tsgo patch",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
@@ -20,12 +22,14 @@
     "typecheck": "pnpm --filter @pidex/api build && pnpm -r --filter=!@pidex/api --if-present typecheck"
   },
   "devDependencies": {
+    "@effect/tsgo": "0.38.0",
     "@playwright/test": "1.56.1",
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "knip": "6.29.0",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
     "svelte": "catalog:",
+    "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "engines": {
@@ -33,6 +37,9 @@
   },
   "packageManager": "pnpm@11.16.0",
   "knip": {
+    "ignoreDependencies": [
+      "@effect/language-service"
+    ],
     "workspaces": {
       ".": {
         "svelte": false
