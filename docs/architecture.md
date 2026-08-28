@@ -67,7 +67,7 @@ Browser storage  unsent drafts and local UI preferences
 
 ## Server composition
 
-`apps/server/src/app-runtime.ts` is the server composition root. One managed runtime builds
+`apps/server/src/main.ts` is the server composition root. One managed runtime builds
 the Pi SDK, metadata, and chat services. SQLite and live chat sessions are scoped resources,
 so runtime disposal closes them in dependency order. oRPC handlers and Node callbacks are
 the only Promise and callback boundaries.
