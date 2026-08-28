@@ -45,28 +45,28 @@ Tailscale is not an implementation or live-test requirement for this proof of co
 Keep the current workspace structure:
 
 ```text
-apps/
+packages/
 ├── desktop/   # Electron shell and server-process supervisor
 ├── web/       # Responsive Svelte/Vite/Tailwind client
-└── server/    # HTTP, WebSocket, Pi adapter, SQLite, and local security
-
-packages/
-└── api/       # Browser-safe Valibot schemas and inferred protocol types
+├── server/    # HTTP, WebSocket, Pi adapter, SQLite, and local security
+├── api/       # Browser-safe Valibot schemas and inferred protocol types
+├── e2e/       # Cross-application Playwright workflows
+└── tooling/   # Repository scripts
 ```
 
 Maintain this dependency direction:
 
 ```text
-apps/web ───────────────> packages/api <────────────── apps/server
-apps/desktop ───────────> packages/api
+packages/web ───────────────> packages/api <────────────── packages/server
+packages/desktop ───────────> packages/api
 
-apps/desktop ──spawns and supervises──> apps/server executable
+packages/desktop ──spawns and supervises──> packages/server executable
 ```
 
 Rules:
 
-- Keep web transport, snapshots, replay, reconnect, and draft logic inside `apps/web`.
-- Keep the Pi SDK integration inside `apps/server`.
+- Keep web transport, snapshots, replay, reconnect, and draft logic inside `packages/web`.
+- Keep the Pi SDK integration inside `packages/server`.
 - Keep `packages/api` free of Electron, Node, browser, and server implementations.
 - Never import server implementation code into the web app or Electron main process.
 - Use HTTP and WebSocket for ordinary renderer traffic rather than Electron IPC.

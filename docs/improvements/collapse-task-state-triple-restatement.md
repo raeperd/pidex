@@ -52,7 +52,7 @@ them is a field access on `context.task.snapshot`.
 runs during the derivation. Destructuring it once into a plain `const` at component setup would not.
 
 Verify this concretely rather than trusting it: with the refactor in place, stream a run and confirm
-the queue counts and the run-status row update live. `e2e/conversation.spec.ts` exercises exactly that
+the queue counts and the run-status row update live. `packages/e2e/conversation.spec.ts` exercises exactly that
 path.
 
 ## Step 3 — Group the actions
@@ -74,14 +74,14 @@ members.
 
 With the composer deriving them, `active`, `selectedModel`, and `selectedThinkingLevel` leave
 `AppShellContext.task` and their getters leave `AppShell`. Check for other consumers first —
-`grep -rn "selectedModel\|context.task.active" apps/web` — because the projectless home screen has
+`grep -rn "selectedModel\|context.task.active" packages/web` — because the projectless home screen has
 its own staged configuration, and `AppShell`'s own markup may read `active` for the header row. Keep
 the local `$derived`; only the context member goes.
 
 Leave the rest of the context alone. `shell`, the remaining `task` members, `taskActions`, and
 `projectActions` are all still consumed.
 
-**Done when:** `grep -n "selectedThinkingLevel" apps/web/src/routes/_components/AppShellContext.svelte.ts`
+**Done when:** `grep -n "selectedThinkingLevel" packages/web/src/routes/_components/AppShellContext.svelte.ts`
 returns zero hits.
 
 ## Step 5 — Migrate the composer tests
@@ -109,7 +109,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass.

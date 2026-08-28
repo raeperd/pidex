@@ -106,7 +106,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass, with `TaskComposer.test.ts` changed only by the added `blocked`

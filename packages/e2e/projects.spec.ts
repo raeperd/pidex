@@ -30,7 +30,7 @@ test("keeps the starter home visible before a project is selected", async ({ pag
 });
 
 test("selects a project and restores it after reload", async ({ page }, testInfo) => {
-  const projectName = testInfo.project.name === "mobile" ? "packages" : "apps";
+  const projectName = testInfo.project.name === "mobile" ? "packages" : "docs";
 
   await page.goto("/");
   await openTasks(page);
@@ -269,24 +269,24 @@ test("manually reorders projects and preserves their order after reload", async 
   const projects = page.getByRole("navigation", { name: "Projects" });
   const projectOrder = async () =>
     (await projectLabels(page)).filter(
-      (label) => label === "apps project" || label === "packages project",
+      (label) => label === "docs project" || label === "packages project",
     );
-  await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
+  await expect.poll(projectOrder).toEqual(["docs project", "packages project"]);
   await expect(page.getByRole("button", { name: /^Reorder / })).toHaveCount(0);
 
   const packagesRow = page.getByRole("button", { name: /^(Collapse|Expand) packages$/ });
   await packagesRow.focus();
   await packagesRow.press("ArrowUp");
-  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
+  await expect.poll(projectOrder).toEqual(["packages project", "docs project"]);
   await expect(page.getByLabel("Add project", { exact: true })).toBeEnabled();
   await packagesRow.press("ArrowDown");
-  await expect.poll(projectOrder).toEqual(["apps project", "packages project"]);
+  await expect.poll(projectOrder).toEqual(["docs project", "packages project"]);
   await expect(page.getByLabel("Add project", { exact: true })).toBeEnabled();
 
-  const appsGroup = projects.getByRole("group", { name: "apps project" });
+  const docsGroup = projects.getByRole("group", { name: "docs project" });
   await packagesRow.evaluate((source) => {
-    const target = document.querySelector<HTMLElement>('[aria-label="apps project"]');
-    if (!target) throw new Error("Expected apps project target");
+    const target = document.querySelector<HTMLElement>('[aria-label="docs project"]');
+    if (!target) throw new Error("Expected docs project target");
     const dataTransfer = new DataTransfer();
     source.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
     const targetBounds = target.getBoundingClientRect();
@@ -299,8 +299,8 @@ test("manually reorders projects and preserves their order after reload", async 
       }),
     );
   });
-  await expect(appsGroup.locator('[data-project-drop-edge="before"]')).toBeVisible();
-  await appsGroup.evaluate((target) => {
+  await expect(docsGroup.locator('[data-project-drop-edge="before"]')).toBeVisible();
+  await docsGroup.evaluate((target) => {
     const targetBounds = target.getBoundingClientRect();
     target.dispatchEvent(
       new DragEvent("dragover", {
@@ -311,17 +311,17 @@ test("manually reorders projects and preserves their order after reload", async 
       }),
     );
   });
-  await expect(appsGroup.locator('[data-project-drop-edge="after"]')).toBeVisible();
+  await expect(docsGroup.locator('[data-project-drop-edge="after"]')).toBeVisible();
   await packagesRow.dispatchEvent("dragend");
 
-  await packagesRow.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) apps$/ }), {
+  await packagesRow.dragTo(page.getByRole("button", { name: /^(Collapse|Expand) docs$/ }), {
     targetPosition: { x: 10, y: 1 },
   });
 
-  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
+  await expect.poll(projectOrder).toEqual(["packages project", "docs project"]);
   await page.reload();
   await openTasks(page);
-  await expect.poll(projectOrder).toEqual(["packages project", "apps project"]);
+  await expect.poll(projectOrder).toEqual(["packages project", "docs project"]);
 });
 
 test("moves against the next visible project while filtering", async ({ page, request }) => {
@@ -406,7 +406,7 @@ test("blocks project additions while saving the manual order", async ({ page, re
   await expect.poll(() => reorderStarted).toBe(true);
   try {
     await expect(page.getByLabel("Add project", { exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "New task in apps" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "New task in docs" })).toBeDisabled();
   } finally {
     releaseReorder?.();
   }
@@ -416,7 +416,7 @@ test("reconciles the manual order when adding project 101", async ({ page, reque
   const { bootstrap, template } = await openWorkspaceTemplate(request);
   const existing = Array.from({ length: 100 }, (_, index) => ({
     id: `workspace_${String(index).padStart(3, "0")}`,
-    path: `${process.cwd()}/apps/project-${String(index).padStart(3, "0")}`,
+    path: `${process.cwd()}/docs/project-${String(index).padStart(3, "0")}`,
   }));
   const added = { id: "workspace_new", path: `${process.cwd()}/packages` };
   let bootstrapCalls = 0;
@@ -574,7 +574,7 @@ test("keeps Add all within the 100-project sidebar boundary", async ({ page, req
     return {
       id: `workspace_${suffix}`,
       name: `project-${suffix}`,
-      path: `${process.cwd()}/apps/project-${suffix}`,
+      path: `${process.cwd()}/docs/project-${suffix}`,
     };
   });
   let bootstrapCalls = 0;
@@ -643,7 +643,7 @@ async function openWorkspaceTemplate(request: APIRequestContext) {
   const template = await rpcRequest<Record<string, unknown>>(
     request,
     "workspaces/open",
-    { path: `${process.cwd()}/apps`, remember: false },
+    { path: `${process.cwd()}/docs`, remember: false },
     bootstrap.result.csrfToken,
   );
   return {
@@ -654,7 +654,7 @@ async function openWorkspaceTemplate(request: APIRequestContext) {
 }
 
 async function rememberOrderedProjects(request: APIRequestContext) {
-  const { csrfToken, workspace: apps } = await rememberWorkspace(request, `${process.cwd()}/apps`);
+  const { csrfToken, workspace: docs } = await rememberWorkspace(request, `${process.cwd()}/docs`);
   const { workspace: packages } = await rememberWorkspace(request, `${process.cwd()}/packages`);
   const remembered = await rpcRequest<{ recentWorkspaces: Array<{ id: string }> }>(
     request,
@@ -663,11 +663,11 @@ async function rememberOrderedProjects(request: APIRequestContext) {
   );
   const otherIds = remembered.result.recentWorkspaces
     .map(({ id }) => id)
-    .filter((id) => id !== apps.id && id !== packages.id);
+    .filter((id) => id !== docs.id && id !== packages.id);
   await rpcRequest(
     request,
     "workspaces/reorder",
-    { workspaceIds: [apps.id, packages.id, ...otherIds] },
+    { workspaceIds: [docs.id, packages.id, ...otherIds] },
     csrfToken,
   );
 }

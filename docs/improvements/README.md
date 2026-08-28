@@ -49,5 +49,5 @@ Every doc ends on the same gate, run from the repo root:
 pnpm format && pnpm check && pnpm test && pnpm test:e2e && pnpm deadcode
 ```
 
-Run from the root: the vitest root config globs `apps/**/*.test.ts`, so `pnpm --filter <pkg> test`
+Run from the root: the vitest root config globs `packages/**/*.test.ts`, so `pnpm --filter <pkg> test`
 reports "No test files found".
