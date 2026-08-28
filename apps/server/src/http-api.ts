@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import type { WithEffectContext } from "@orpc/experimental-effect";
 import "@orpc/experimental-effect/extensions/effect";
 import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex/api";
 import { ORPCError, implement, os } from "@orpc/server";
 import { Effect } from "effect";
-import { Chats, Metadata, PiAgent, type ApplicationServices } from "./app-runtime.js";
+import type { ChatManager } from "./chat-manager.js";
 import { apiError, ActionProtocolError, HttpError } from "./errors.js";
 import { requestDigest, type MetadataService } from "./metadata.js";
+import type { PiSdkServiceApi } from "./pi-sdk.js";
 import {
   createProjectWorktree,
   discoverProjectCandidates,
@@ -19,15 +19,18 @@ import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 interface HttpApiDependencies {
   csrf: string;
   roots: string[];
+  metadata: MetadataService;
+  manager: ChatManager;
+  pi: PiSdkServiceApi;
 }
 
 export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function* ({
   csrf,
   roots,
+  metadata,
+  manager,
+  pi,
 }: HttpApiDependencies) {
-  const metadata = yield* Metadata;
-  const manager = yield* Chats;
-  const pi = yield* PiAgent;
   const managedWorktreeRoot = yield* managedWorktreesRoot();
   const workspaceRoots = [...roots, managedWorktreeRoot];
   const base = implement(pidexApiContract).$context<RpcApiContext>();
@@ -302,7 +305,7 @@ const protocolErrors = os.middleware(async ({ next }) => {
   }
 });
 
-interface RpcApiContext extends WithEffectContext<ApplicationServices> {
+interface RpcApiContext {
   req?: IncomingMessage;
   transport: "http" | "websocket";
 }

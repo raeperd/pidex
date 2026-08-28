@@ -9,11 +9,13 @@ import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { RPCHandler as WebSocketRPCHandler } from "@orpc/server/websocket";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
-import { Context, Effect } from "effect";
+import { Context, Effect, ManagedRuntime } from "effect";
 import { WebSocketServer } from "ws";
-import { Chats, makeApplicationRuntime } from "./app-runtime.js";
+import { makeChatManager, type ChatManager } from "./chat-manager.js";
 import { apiErrorStatus, applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
+import { makeMetadataLayer, Metadata } from "./metadata.js";
+import { makePiSdk, makePiSdkService } from "./pi-sdk.js";
 import {
   allowedRoots,
   parsePort,
@@ -42,15 +44,20 @@ export async function createPidexServer() {
 }
 
 export async function createPidexApplication() {
-  const runtime = makeApplicationRuntime();
+  const runtime = ManagedRuntime.make(makeMetadataLayer());
+  let manager: ChatManager | undefined;
   try {
-    const effectContext = await runtime.context();
-    const manager = Context.get(effectContext, Chats);
+    const metadata = Context.get(await runtime.context(), Metadata);
+    const pi = makePiSdkService(makePiSdk());
+    const chatManager = makeChatManager(pi, metadata);
+    manager = chatManager;
     const csrf = randomBytes(32).toString("base64url");
     const roots = await runtime.runPromise(allowedRoots());
     const webRoot = path.resolve(import.meta.dirname, "../../web/dist");
     const webScriptHashes = inlineScriptHashes(path.join(webRoot, "index.html"));
-    const apiRouter = await runtime.runPromise(createRpcApiRouter({ csrf, roots }));
+    const apiRouter = await runtime.runPromise(
+      createRpcApiRouter({ csrf, roots, metadata, manager: chatManager, pi }),
+    );
     const apiHandler = new RPCHandler(apiRouter, {
       errorStatusMap: {
         ...COMMON_ERROR_STATUS_MAP,
@@ -69,7 +76,7 @@ export async function createPidexApplication() {
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
         const { matched } = await apiHandler.handle(req, res, {
           prefix: "/api/rpc",
-          context: { req, transport: "http", "effect/context": effectContext },
+          context: { req, transport: "http" },
         });
         if (matched) return;
         if (route.startsWith("/api/"))
@@ -104,7 +111,7 @@ export async function createPidexApplication() {
       socket.on("pong", () => (alive = true));
       socket.on("message", (data) => {
         void webSocketHandler.message(socket, data.toString(), {
-          context: { transport: "websocket", "effect/context": effectContext },
+          context: { transport: "websocket" },
         });
       });
       const timer = setInterval(() => {
@@ -125,12 +132,20 @@ export async function createPidexApplication() {
         if (closed) return;
         closed = true;
         for (const socket of wss.clients) socket.close(1001, "Server stopping");
-        await runtime.dispose();
+        try {
+          await runtime.runPromise(chatManager.shutdown());
+        } finally {
+          await runtime.dispose();
+        }
       },
-      manager,
+      manager: chatManager,
     };
   } catch (error) {
-    await runtime.dispose();
+    try {
+      if (manager) await runtime.runPromise(manager.shutdown());
+    } finally {
+      await runtime.dispose();
+    }
     throw error;
   }
 }
