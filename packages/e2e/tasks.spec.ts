@@ -76,7 +76,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await installFakeWebSocket(page);
   await patchRpcResponse(page, "workspaces/open", (json) => ({
     ...json,
-    models: json.path === `${process.cwd()}/apps` ? [e2eModel] : [],
+    models: json.path === `${process.cwd()}/docs` ? [e2eModel] : [],
     resourceDiagnostics: [{ level: "warning", message: "E2E resource warning" }],
   }));
   await patchRpcResponse(page, "chats/create", async (json) => {
@@ -154,9 +154,9 @@ test("creates, navigates, and durably submits the first starter prompt", async (
 
   await page.getByRole("button", { name: "Add project", exact: true }).click();
   const projectDialog = page.getByRole("dialog", { name: "Add a project" });
-  await projectDialog.getByRole("button", { name: /^(Add|Open) apps$/ }).click();
+  await projectDialog.getByRole("button", { name: /^(Add|Open) docs$/ }).click();
   await expect(
-    page.getByRole("heading", { name: "What should we work on in apps?" }),
+    page.getByRole("heading", { name: "What should we work on in docs?" }),
   ).toBeVisible();
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
@@ -194,7 +194,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(thinking).toBeDisabled();
   releaseCreation();
 
-  await expect(page.getByRole("heading", { name: "What should we work on in apps?" })).toHaveCount(
+  await expect(page.getByRole("heading", { name: "What should we work on in docs?" })).toHaveCount(
     0,
   );
   await expect(page.getByLabel("Prompt")).toBeVisible();
@@ -240,7 +240,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await rememberWorkspace(request, otherWorkspacePath);
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "What should we work on in apps?" }),
+    page.getByRole("heading", { name: "What should we work on in docs?" }),
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(taskUrl);
@@ -255,7 +255,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   await expect(page).toHaveURL(taskUrl);
   await expect(page.getByLabel("Prompt")).toBeVisible();
   await expect.poll(() => workspaceOpenRequests.length).toBeGreaterThan(0);
-  expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/apps`, remember: true });
+  expect(workspaceOpenRequests).toContainEqual({ path: `${process.cwd()}/docs`, remember: true });
 });
 
 test("defers worktree creation until the first prompt is sent", async ({ page, request }) => {

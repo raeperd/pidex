@@ -20,7 +20,7 @@ async function stageApplication() {
     "--prod",
     path.join(stageDirectory, "server"),
   ]);
-  await cp(path.join(repositoryRoot, "apps/web/dist"), path.join(stageDirectory, "web/dist"), {
+  await cp(path.join(repositoryRoot, "packages/web/dist"), path.join(stageDirectory, "web/dist"), {
     recursive: true,
   });
 }

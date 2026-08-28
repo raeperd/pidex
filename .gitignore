@@ -1,7 +1,7 @@
 node_modules/
 dist/
-apps/desktop/.package/
-apps/desktop/release/
+packages/desktop/.package/
+packages/desktop/release/
 .svelte-kit/
 test-results/
 playwright-report/

@@ -1,4 +1,4 @@
-import { makePiSdk } from "../apps/server/dist/pi-sdk.js";
+import { makePiSdk } from "../server/dist/pi-sdk.js";
 
 const cwd = process.argv[2] ? new URL(`file://${process.argv[2]}`).pathname : process.cwd();
 const promptIndex = process.argv.indexOf("--prompt");

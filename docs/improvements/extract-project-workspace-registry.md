@@ -22,7 +22,7 @@ you work:
 
 Unit-testability is a consequence, not the justification. `AppShell.svelte` cannot be rendered by
 vitest at all today: `:102` reads `window.pidexDesktop` and `:185` calls `makePidexApiClient()`,
-which touches `localStorage` — both at component-script scope. That is why `e2e/projects.spec.ts` is
+which touches `localStorage` — both at component-script scope. That is why `packages/e2e/projects.spec.ts` is
 680 lines doing unit-test work.
 
 **Done when:** you can state the concept in one sentence without using the word "test".
@@ -78,7 +78,7 @@ functions, whether it moves.
 
 ## Step 4 — Design the surface, and collapse the options bag
 
-Create `apps/web/src/routes/_components/WorkspaceRegistry.svelte.ts`. It stays in this directory
+Create `packages/web/src/routes/_components/WorkspaceRegistry.svelte.ts`. It stays in this directory
 because both the sidebar (`AppShell`) and route components consume it.
 
 Target surface — narrow, and stated in terms of what a caller wants, not how it is done:
@@ -141,7 +141,7 @@ stub client and no DOM. Cover at minimum:
 - reorder rollback when persistence fails
 - expansion and task-limit state surviving a workspace refresh
 
-Leave `e2e/projects.spec.ts` in place for now. Trimming it is a separate decision, and shrinking the
+Leave `packages/e2e/projects.spec.ts` in place for now. Trimming it is a separate decision, and shrinking the
 safety net during the move is the wrong order.
 
 **Done when:** each bullet has a test that fails when its behaviour is removed.
@@ -158,10 +158,10 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
-**Done when:** all five pass, `grep -n "workspaceCache" apps/web/src/routes/_components/AppShell.svelte`
+**Done when:** all five pass, `grep -n "workspaceCache" packages/web/src/routes/_components/AppShell.svelte`
 returns zero hits, and `AppShell.svelte` is meaningfully shorter than 2,244 lines.
 
 ## Invariants

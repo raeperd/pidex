@@ -42,7 +42,7 @@ Two details to carry across exactly:
   `contextUsage`, and `isIdle` are getters over mutable Pi state (`pi-sdk.ts:398-420`). Keep them
   getters; copying them into a plain object would freeze the transcript.
 
-**Done when:** `grep -n "toEffectAdapterSession" apps/server/src` returns zero hits and the mapper is
+**Done when:** `grep -n "toEffectAdapterSession" packages/server/src` returns zero hits and the mapper is
 deleted.
 
 ## Step 3 — Narrow the lifecycle contract
@@ -60,7 +60,7 @@ What they do _not_ need is a 13-member input type. The lifecycle code touches ex
 Delete `AdapterSession` once nothing references it. Note `chat-manager.ts:536` derives
 `Parameters<AdapterSession["configure"]>[0]` — repoint it at the `EffectAdapterSession` equivalent.
 
-**Done when:** `grep -rn "AdapterSession\b" apps/server/src` matches only `EffectAdapterSession` and
+**Done when:** `grep -rn "AdapterSession\b" packages/server/src` matches only `EffectAdapterSession` and
 `AdapterSessionInfo`, and the contract `adapter.ts` declares for the lifecycle bridge has at most four
 members.
 
@@ -70,7 +70,7 @@ members.
 (`:102, 121, 122, 236, 251, 252, 258`). They format Pi transcript payloads; they are not part of any
 boundary contract. Move them into `pi-sdk.ts`, unexported, per the repo's one-use-code rule.
 
-**Done when:** `grep -n "bounded" apps/server/src/adapter.ts` returns zero hits.
+**Done when:** `grep -n "bounded" packages/server/src/adapter.ts` returns zero hits.
 
 ## Step 5 — Reshape the test fixture
 
@@ -99,7 +99,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the root,
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the root,
 so `pnpm --filter <pkg> test` reports "No test files found".
 
 `pnpm deadcode` matters here: `knip` will flag any adapter export left without a consumer, which is the

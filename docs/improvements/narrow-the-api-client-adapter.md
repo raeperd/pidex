@@ -14,7 +14,7 @@ and backoff is a deep module and the model to keep.
 
 The deletions in Step 3 only hold if calling the contract client inline stays as well typed as the
 wrapper. Verify once, cheaply: pick `getChat`, replace its single call site
-(`apps/web/src/routes/_components/AppShell.svelte:1404`) with
+(`packages/web/src/routes/_components/AppShell.svelte:1404`) with
 `api.client.chats.get({ chatId: snapshot.chatId })`, and run `pnpm check` from the repo root.
 
 Reference: `makePidexApiClient` builds `const client: PidexApiContractClient = createORPCClient(link)`
@@ -70,7 +70,7 @@ becomes.
 | `disposeChat`       | 897                             | `await client.chats.dispose({ chatId })`                                                                                        |
 
 **Done when:** `AppShellApiClient.ts` returns exactly thirteen members (the twelve from Step 2 plus
-`client`), and `grep -n "api\." apps/web/src/routes/_components/AppShell.svelte` shows no call to any
+`client`), and `grep -n "api\." packages/web/src/routes/_components/AppShell.svelte` shows no call to any
 deleted name.
 
 ## Step 4 — Verify
@@ -85,7 +85,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 `pnpm check` is the real proof here — the whole refactor is a typing claim, and typecheck settles

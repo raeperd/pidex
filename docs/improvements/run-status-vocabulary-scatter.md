@@ -14,7 +14,7 @@ into one module, and the convention becomes a checkable property.
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------- |
 | live `runStatus`       | `idle` `running` `stopping` `compacting` `error`                    | `packages/api/src/index.ts:10`    |
 | durable `ActionStatus` | `accepted` `running` `completed` `cancelled` `failed` `interrupted` | `packages/api/src/index.ts:11-18` |
-| `PersistedRunStatus`   | `ActionStatus                                                       | "stopping"`                       | `apps/server/src/metadata.ts:618`, column schema at `:686` |
+| `PersistedRunStatus`   | `ActionStatus                                                       | "stopping"`                       | `packages/server/src/metadata.ts:618`, column schema at `:686` |
 | `SessionStatus`        | `running` `error` `idle`                                            | `packages/api/src/index.ts:39`    |
 
 The translation sites, which Step 3 consolidates:
@@ -53,13 +53,13 @@ safe to remove rather than migrate.
 - `metadata.ts:618` — `type PersistedRunStatus = ActionStatus`
 - `metadata.ts:686` — column schema becomes `Schema.NullOr(Schema.Literals([...actionStatuses]))`
 
-**Done when:** `grep -n "stopping" apps/server/src/metadata.ts` returns zero hits, and
+**Done when:** `grep -n "stopping" packages/server/src/metadata.ts` returns zero hits, and
 `PersistedRunStatus` is an alias of `ActionStatus` — at which point deleting the alias entirely is
 also reasonable.
 
 ## Step 3 — Add `run-state.ts` and name the transitions
 
-Create `apps/server/src/run-state.ts` holding, in this order (callers before callees, per
+Create `packages/server/src/run-state.ts` holding, in this order (callers before callees, per
 `AGENTS.md`):
 
 1. `LiveRunStatus` and `DurableRunStatus` type aliases over the API schemas.
@@ -94,7 +94,7 @@ assignments with calls to it.
 `Effect.ensuring` (`:562-566`) while `startPrompt` broadcasts after persisting (`:454`) — and moving
 it into the transition helper would reorder WebSocket events.
 
-**Done when:** `grep -n "chat.runStatus = " apps/server/src/chat-manager.ts` returns zero hits, and
+**Done when:** `grep -n "chat.runStatus = " packages/server/src/chat-manager.ts` returns zero hits, and
 every `markPromptStatus` call site is either the transition helper or crash recovery.
 
 ## Step 4 — Resolve the attach branch
@@ -124,7 +124,7 @@ pnpm test:e2e
 pnpm deadcode
 ```
 
-Run every command from the repo root: the vitest root config globs `apps/**/*.test.ts` against the
+Run every command from the repo root: the vitest root config globs `packages/**/*.test.ts` against the
 root, so `pnpm --filter <pkg> test` reports "No test files found".
 
 **Done when:** all five pass, with the only test edits being the `resolveSessionStatus` import path
