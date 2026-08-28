@@ -149,14 +149,31 @@ async function installFakeWebSocket(page: Page) {
     const CLOSED = 3;
     type FakeWebSocket = EventTarget & {
       readyState: number;
-      send: () => void;
+      requestId?: string;
+      send: (data: string) => void;
       close: () => void;
     };
 
     const makeFakeWebSocket = (): FakeWebSocket => {
       const socket = Object.assign(new EventTarget(), {
         readyState: 0,
-        send() {},
+        requestId: undefined as string | undefined,
+        send(data: string) {
+          const message = JSON.parse(data) as { id?: string; kind?: string };
+          if (message.kind !== "request" || !message.id) return;
+          socket.requestId = message.id;
+          setTimeout(() => {
+            socket.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  id: message.id,
+                  kind: "response",
+                  json: { status: 200, headers: { "standard-server": "event-stream" } },
+                }),
+              }),
+            );
+          });
+        },
         close() {
           if (socket.readyState === CLOSED) return;
           socket.readyState = CLOSED;
@@ -183,9 +200,19 @@ async function installFakeWebSocket(page: Page) {
 
 async function emitServerEvent(page: Page, event: unknown) {
   await page.evaluate((serverEvent) => {
-    const scope = globalThis as typeof globalThis & { pidexTestSocket?: EventTarget };
-    scope.pidexTestSocket?.dispatchEvent(
-      new MessageEvent("message", { data: JSON.stringify(serverEvent) }),
+    const scope = globalThis as typeof globalThis & {
+      pidexTestSocket?: EventTarget & { requestId?: string };
+    };
+    const { pidexTestSocket } = scope;
+    if (!pidexTestSocket?.requestId) throw new Error("Expected an active oRPC WebSocket request");
+    pidexTestSocket.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify({
+          id: pidexTestSocket.requestId,
+          kind: "event-stream",
+          json: { data: { json: serverEvent } },
+        }),
+      }),
     );
   }, event);
 }
