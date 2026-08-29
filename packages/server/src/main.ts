@@ -21,7 +21,7 @@ import {
   validateRequest,
 } from "./security.js";
 
-export async function createPidexServer() {
+async function createPidexServer() {
   const application = await createPidexApplication();
   const server = createServer((req, res) => void application.handleRequest(req, res));
   return {
