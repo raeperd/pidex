@@ -13,8 +13,9 @@ import {
   type TranscriptPage,
   type Workspace,
 } from "@pidex/api";
-import { createORPCClient } from "@orpc/client";
+import { createORPCClient, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
+import { RetryLinkPlugin } from "@orpc/client/plugins";
 import { ResponseValidationLinkPlugin } from "@orpc/contract/plugins";
 
 type ChatConfiguration = Partial<Pick<ChatSnapshot, "model" | "thinkingLevel">>;
@@ -29,7 +30,17 @@ export function makePidexApiClient() {
   const link = new RPCLink({
     url: "/api/rpc",
     headers: () => ({ "X-Pidex-CSRF": csrfToken }),
-    plugins: [new ResponseValidationLinkPlugin(pidexApiContract)],
+    plugins: [
+      new RetryLinkPlugin({
+        default: {
+          retry: 0,
+          shouldRetry: ({ error }) =>
+            !(error instanceof ORPCError) &&
+            (typeof navigator === "undefined" || navigator.onLine !== false),
+        },
+      }),
+      new ResponseValidationLinkPlugin(pidexApiContract),
+    ],
   });
   const client: PidexApiContractClient = createORPCClient(link);
 
@@ -81,7 +92,10 @@ export function makePidexApiClient() {
     input: { chatId: string; lastEventId?: number },
     options: { signal: AbortSignal },
   ): Promise<AsyncIterator<ServerEvent>> {
-    return client.live.events({ protocolVersion: PROTOCOL_VERSION, ...input }, options);
+    return client.live.events(
+      { protocolVersion: PROTOCOL_VERSION, ...input },
+      { ...options, context: { retry: Number.POSITIVE_INFINITY } },
+    );
   }
 
   async function disposeChat(chatId: string): Promise<void> {

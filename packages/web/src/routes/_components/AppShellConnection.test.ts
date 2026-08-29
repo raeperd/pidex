@@ -1,10 +1,14 @@
 import type { ServerEvent } from "@pidex/api";
+import { ORPCError } from "@orpc/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { makeChatConnection, type ConnectionState } from "./AppShellConnection";
 
 describe("ChatConnection", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("delivers typed events from the stream", async () => {
     const event = runStatusEvent(1);
@@ -70,6 +74,53 @@ describe("ChatConnection", () => {
     expect(stream.return).toHaveBeenCalledOnce();
     expect(states.at(-1)).toBe("disconnected");
   });
+
+  it("does not schedule a second retry after a transport-owned stream error", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { onLine: true });
+    const transport = makeTransport([errorStream()]);
+    const states: ConnectionState[] = [];
+    const connection = makeChatConnection(
+      {
+        onEvent: vi.fn(),
+        onInvalidChat: vi.fn(),
+        onStateChange: (state) => states.push(state),
+      },
+      transport,
+    );
+
+    connection.connect("chat_12345");
+    await vi.waitFor(() => expect(transport.inputs).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(transport.inputs).toHaveLength(1);
+    expect(states.at(-1)).toBe("disconnected");
+    connection.close();
+  });
+
+  it("disconnects once for a permanent invalid-chat error", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { onLine: true });
+    const onInvalidChat = vi.fn();
+    const transport = makeTransport([errorStream(new ORPCError("internal_error"))]);
+    const states: ConnectionState[] = [];
+    const connection = makeChatConnection(
+      {
+        onEvent: vi.fn(),
+        onInvalidChat,
+        onStateChange: (state) => states.push(state),
+      },
+      transport,
+    );
+
+    connection.connect("chat_12345");
+    await vi.waitFor(() => expect(onInvalidChat).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(transport.inputs).toHaveLength(1);
+    expect(states.at(-1)).toBe("disconnected");
+    connection.close();
+  });
 });
 
 function runStatusEvent(eventId: number): ServerEvent {
@@ -110,6 +161,10 @@ function pendingStream(): AsyncIterator<ServerEvent> {
       }),
     ),
   };
+}
+
+function errorStream(error = new Error("connection lost")): AsyncIterator<ServerEvent> {
+  return { next: vi.fn().mockRejectedValue(error) };
 }
 
 function makeTransport(streams: AsyncIterator<ServerEvent>[]) {

@@ -14,7 +14,7 @@ import type {
   Workspace,
 } from "@pidex/api";
 import { Effect, Exit, Queue, Scope, Stream } from "effect";
-import { streamToAsyncIteratorObject } from "@orpc/server";
+import { streamToAsyncIteratorObject, withEventMeta } from "@orpc/server";
 import type {
   AdapterEvent,
   AdapterSessionInfo,
@@ -61,6 +61,7 @@ type EventPayload = ServerEvent extends infer Event
     ? Omit<Event, "eventId" | "chatId">
     : never
   : never;
+const LIVE_EVENT_RETRY_MS = 2_000;
 
 export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) {
   const workspaces = new Map<string, WorkspaceRecord>();
@@ -349,8 +350,12 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
           chatId: chat.id,
           snapshot: currentSnapshot,
         } satisfies ServerEvent;
-        appendEvent(chat, event);
-        return event;
+        const eventWithMeta = withEventMeta(event, {
+          id: String(event.eventId),
+          retry: LIVE_EVENT_RETRY_MS,
+        });
+        appendEvent(chat, eventWithMeta);
+        return eventWithMeta;
       }),
     );
   }
@@ -674,8 +679,12 @@ function liveOnlySession(chat: ChatRecord): SessionSummary {
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
   const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } satisfies ServerEvent;
-  appendEvent(chat, full);
-  for (const queue of chat.subscribers) Queue.offerUnsafe(queue, full);
+  const eventWithMeta = withEventMeta(full, {
+    id: String(full.eventId),
+    retry: LIVE_EVENT_RETRY_MS,
+  });
+  appendEvent(chat, eventWithMeta);
+  for (const queue of chat.subscribers) Queue.offerUnsafe(queue, eventWithMeta);
 }
 
 function appendEvent(chat: ChatRecord, event: ServerEvent) {
