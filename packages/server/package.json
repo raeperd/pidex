@@ -1,0 +1,29 @@
+{
+  "name": "@pidex/server",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@effect/platform-node": "catalog:",
+    "@orpc/experimental-effect": "catalog:",
+    "@orpc/server": "catalog:",
+    "@pidex/api": "workspace:*",
+    "drizzle-orm": "1.0.0-rc.4",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@orpc/client": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

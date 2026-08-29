@@ -1,0 +1,354 @@
+import { randomBytes } from "node:crypto";
+import type { IncomingMessage } from "node:http";
+import "@orpc/experimental-effect/extensions/effect";
+import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex/api";
+import { ORPCError, implement, os } from "@orpc/server";
+import { Effect } from "effect";
+import type { ChatManager } from "./chat-manager.js";
+import { apiError, ActionProtocolError, HttpError } from "./errors.js";
+import { requestDigest, type MetadataService } from "./metadata.js";
+import type { PiSdkServiceApi } from "./pi-sdk.js";
+import {
+  createProjectWorktree,
+  discoverProjectCandidates,
+  managedWorktreesRoot,
+  removeProjectWorktree,
+} from "./project-catalog.js";
+import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
+
+interface HttpApiDependencies {
+  csrf: string;
+  roots: string[];
+  metadata: MetadataService;
+  manager: ChatManager;
+  pi: PiSdkServiceApi;
+}
+
+export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function* ({
+  csrf,
+  roots,
+  metadata,
+  manager,
+  pi,
+}: HttpApiDependencies) {
+  const managedWorktreeRoot = yield* managedWorktreesRoot();
+  const workspaceRoots = [...roots, managedWorktreeRoot];
+  const base = implement(pidexApiContract).$context<RpcApiContext>();
+  const requireCsrf = base.middleware(async ({ context, next }) => {
+    if (context.req?.headers["x-pidex-csrf"] !== csrf)
+      throw new ORPCError("csrf", { message: "Invalid CSRF token" });
+    return next();
+  });
+  const implementation = base.use(protocolErrors);
+  const workspaces = implementation.workspaces.use(requireCsrf);
+  const chats = implementation.chats.use(requireCsrf);
+  const live = implementation.live.use(requireCsrf);
+
+  return implementation.router({
+    system: {
+      health: implementation.system.health.handler(() => ({
+        ok: true,
+        protocolVersion: PROTOCOL_VERSION,
+      })),
+      bootstrap: implementation.system.bootstrap.effect(function* () {
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata, managedWorktreeRoot);
+        const projectCandidates = yield* discoverProjectCandidates(roots);
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          csrfToken: csrf,
+          piVersion: "0.80.10",
+          recentWorkspaces,
+          projectCandidates,
+          warning: "Pi runs with your host user permissions and has no built-in sandbox.",
+        };
+      }),
+    },
+    workspaces: workspaces.router({
+      open: workspaces.open.effect(function* (_, input) {
+        const canonical = yield* canonicalWorkspace(input.path, workspaceRoots);
+        if (!roots.some((root) => isDescendant(root, canonical))) {
+          const rememberedId = yield* metadata.workspaceId(canonical);
+          const sourceWorkspaceId = rememberedId
+            ? yield* metadata.workspaceProjectId(rememberedId)
+            : undefined;
+          if (!rememberedId || sourceWorkspaceId === rememberedId)
+            return yield* Effect.fail(
+              apiError("workspace_forbidden", "Project is outside WORKSPACE_ROOTS"),
+            );
+        }
+        let id: string;
+        if (input.remember === false) {
+          const existing = yield* metadata.workspaceId(canonical);
+          id = existing ?? randomBytes(16).toString("hex");
+        } else {
+          id = yield* metadata.rememberWorkspace(canonical);
+        }
+        return yield* manager.openWorkspace(id, canonical);
+      }),
+      createWorktree: workspaces.createWorktree.effect(function* (_, input) {
+        const source = yield* manager.workspace(input.workspaceId);
+        const canonicalSource = yield* canonicalWorkspace(source.path, workspaceRoots);
+        const worktreePath = yield* createProjectWorktree(canonicalSource);
+        let id: string | undefined;
+        return yield* Effect.gen(function* () {
+          yield* pi.inheritWorkspaceTrust(canonicalSource, worktreePath);
+          const sourceWorkspaceId = yield* metadata.workspaceProjectId(source.id);
+          const createdWorkspaceId = yield* metadata.rememberWorkspace(
+            worktreePath,
+            sourceWorkspaceId,
+          );
+          id = createdWorkspaceId;
+          const opened = yield* manager.openWorkspace(createdWorkspaceId, worktreePath);
+          yield* manager.markWorkspaceDisposable(createdWorkspaceId);
+          return opened;
+        }).pipe(
+          Effect.onError(() =>
+            Effect.gen(function* () {
+              yield* removeProjectWorktree(canonicalSource, worktreePath).pipe(
+                Effect.catch(() => Effect.void),
+              );
+              yield* pi.clearWorkspaceTrust(worktreePath).pipe(Effect.catch(() => Effect.void));
+              const createdWorkspaceId = id;
+              if (createdWorkspaceId)
+                yield* metadata
+                  .forgetWorkspace(createdWorkspaceId)
+                  .pipe(Effect.catch(() => Effect.void));
+            }),
+          ),
+        );
+      }),
+      removeWorktree: workspaces.removeWorktree.effect(function* (_, input) {
+        const worktree = yield* manager.workspace(input.workspaceId);
+        const sourceWorkspaceId = yield* metadata.workspaceProjectId(input.workspaceId);
+        if (sourceWorkspaceId === input.workspaceId)
+          return yield* Effect.fail(
+            apiError("workspace_not_managed_worktree", "Workspace is not a managed Pidex worktree"),
+          );
+        const source = yield* manager.workspace(sourceWorkspaceId);
+        const canRemove = yield* manager.workspaceCanBeRemoved(worktree.id);
+        if (!canRemove)
+          return yield* Effect.fail(
+            apiError(
+              "worktree_has_tasks",
+              "Only a newly created worktree without task history can be removed",
+            ),
+          );
+        yield* removeProjectWorktree(source.path, worktree.path);
+        yield* pi.clearWorkspaceTrust(worktree.path).pipe(Effect.catch(() => Effect.void));
+        yield* manager.forgetWorkspace(worktree.id);
+        yield* metadata.forgetWorkspace(worktree.id);
+        return { ok: true };
+      }),
+      reorder: workspaces.reorder.effect(function* (_, input) {
+        yield* metadata.reorderWorkspaces(input.workspaceIds);
+        const recentWorkspaces = yield* recentWorkspaceRecords(metadata, managedWorktreeRoot);
+        return { recentWorkspaces };
+      }),
+      sessions: workspaces.sessions.effect(function* (_, input) {
+        const sessions = yield* manager.refreshSessions(input.workspaceId);
+        return { sessions };
+      }),
+      trust: workspaces.trust.effect(function* (_, input) {
+        const record = yield* manager.workspace(input.workspaceId);
+        yield* pi.setWorkspaceTrust(record.path, input.trusted);
+        return yield* manager.openWorkspace(record.id, record.path);
+      }),
+    }),
+    chats: chats.router({
+      create: chats.create.effect(function* (_, input) {
+        const chat = yield* manager.create(input.workspaceId);
+        return yield* manager.snapshot(chat);
+      }),
+      resume: chats.resume.effect(function* (_, input) {
+        const chat = yield* manager.resume(input.taskId);
+        return yield* manager.snapshot(chat);
+      }),
+      get: chats.get.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.snapshot(chat);
+      }),
+      dispose: chats.dispose.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        yield* manager.dispose(chat);
+        return { ok: true };
+      }),
+      sendMessage: chats.sendMessage.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        const action = actionInput(chat, input, {
+          text: input.text,
+          delivery: input.delivery,
+          runId: input.runId ?? null,
+        });
+        if (input.delivery === "normal") {
+          const outcome = yield* metadata.acceptPrompt(action);
+          yield* manager.startPrompt(chat, input.text, outcome);
+          return outcome;
+        }
+        const runId = input.runId;
+        const delivery = input.delivery;
+        if (!runId)
+          return yield* Effect.fail(
+            apiError("validation", "An active run ID is required for queued instructions"),
+          );
+        const outcome = yield* metadata.acceptRunMutation({ ...action, runId, kind: delivery });
+        return yield* manager.deliverDuringRun(chat, input.text, delivery, outcome);
+      }),
+      abort: chats.abort.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptStop({
+          ...actionInput(chat, input, { runId: input.runId }),
+          runId: input.runId,
+        });
+        return yield* manager.abort(chat, outcome);
+      }),
+      acknowledgeInterrupted: chats.acknowledgeInterrupted.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acknowledgeInterrupted(
+          actionInput(chat, input, { acknowledge: chat.run?.runId ?? null }),
+        );
+        manager.acknowledgeInterrupted(chat, outcome);
+        return outcome;
+      }),
+      toolOutput: chats.toolOutput.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.toolOutput(chat, input.resourceId, input.offset, input.limit);
+      }),
+      transcript: chats.transcript.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        return manager.transcriptPage(chat, input.before, input.limit);
+      }),
+      clearQueue: chats.clearQueue.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptSessionMutation({
+          ...actionInput(chat, input, { clearQueue: true }),
+          kind: "clear-queue",
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.clear(chat));
+        return yield* manager.snapshot(chat);
+      }),
+      configure: chats.configure.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        yield* requireIdle(chat.session.state.isIdle, "Configuration can only change while idle");
+        const workspace = yield* manager.workspace(chat.workspaceId);
+        const modelAvailable = workspace.info.models.some((model) => model.id === input.model);
+        if (input.model && !modelAvailable)
+          return yield* Effect.fail(apiError("model_unavailable", "Model is no longer available"));
+        const patch = {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
+        };
+        const outcome = yield* metadata.acceptSessionMutation({
+          ...actionInput(chat, input, patch),
+          kind: "config",
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.configure(chat, patch));
+        return yield* manager.snapshot(chat);
+      }),
+      rename: chats.rename.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        const outcome = yield* metadata.acceptSessionMutation({
+          ...actionInput(chat, input, { name: input.name }),
+          kind: "rename",
+        });
+        yield* manager.performMutation(chat, outcome, () => manager.rename(chat, input.name));
+        return yield* manager.snapshot(chat);
+      }),
+      compact: chats.compact.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        yield* requireIdle(chat.session.state.isIdle, "Compaction can only run while idle");
+        const outcome = yield* metadata.acceptSessionMutation({
+          ...actionInput(chat, input, { instructions: input.instructions ?? null }),
+          kind: "compact",
+        });
+        yield* manager.performMutation(chat, outcome, () =>
+          manager.compact(chat, input.instructions),
+        );
+        return yield* manager.snapshot(chat);
+      }),
+      answerDialog: chats.answerDialog.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        yield* validateDialogResponse(chat.extensionDialog, input.requestId, input.value);
+        const outcome = yield* metadata.acceptSessionMutation({
+          ...actionInput(chat, input, { requestId: input.requestId, value: input.value }),
+          kind: "dialog",
+        });
+        yield* manager.performMutation(chat, outcome, () =>
+          chat.session.respondToDialog(input.requestId, input.value),
+        );
+        return { ok: true };
+      }),
+    }),
+    live: {
+      events: live.events.effect(function* (_, input) {
+        const chat = yield* manager.chat(input.chatId);
+        return yield* manager.events(chat, input.lastEventId);
+      }),
+    },
+  });
+});
+
+const protocolErrors = os.middleware(async ({ next }) => {
+  try {
+    return await next();
+  } catch (error) {
+    if (error instanceof ORPCError) throw error;
+    const protocolError =
+      error instanceof HttpError || error instanceof ActionProtocolError ? error : undefined;
+    throw new ORPCError(protocolError?.code ?? "internal_error", {
+      message: safeError(error),
+    });
+  }
+});
+
+interface RpcApiContext {
+  req?: IncomingMessage;
+}
+
+function actionInput(
+  chat: { sessionKey: string },
+  input: { actionId: string; clientId: string; expectedRevision: number },
+  digest: unknown,
+) {
+  return {
+    actionId: input.actionId,
+    clientId: input.clientId,
+    expectedRevision: input.expectedRevision,
+    sessionKey: chat.sessionKey,
+    requestDigest: requestDigest(digest),
+  };
+}
+
+function recentWorkspaceRecords(metadata: MetadataService, managedWorktreeRoot: string) {
+  return metadata.recent().pipe(
+    Effect.map((records) =>
+      records.map((record) => ({
+        ...record,
+        worktree: isDescendant(managedWorktreeRoot, record.path),
+      })),
+    ),
+  );
+}
+
+function requireIdle(isIdle: boolean, message: string) {
+  return isIdle
+    ? Effect.void
+    : Effect.fail(ActionProtocolError.make({ code: "session_busy", message }));
+}
+
+function validateDialogResponse(
+  dialog: ExtensionDialog | undefined,
+  requestId: string,
+  value: string | boolean | null,
+) {
+  if (!dialog || dialog.id !== requestId)
+    return Effect.fail(apiError("dialog_mismatch", "Extension dialog is no longer pending"));
+  if (value === null) return Effect.void;
+  if (dialog.kind === "confirm" && typeof value === "boolean") return Effect.void;
+  if (dialog.kind === "select" && typeof value === "string" && dialog.options?.includes(value))
+    return Effect.void;
+  if ((dialog.kind === "input" || dialog.kind === "editor") && typeof value === "string")
+    return Effect.void;
+  return Effect.fail(
+    apiError("dialog_value_invalid", "Extension response does not match the pending dialog"),
+  );
+}

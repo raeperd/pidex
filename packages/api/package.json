@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@orpc/contract": "2.0.0-beta.21",
+    "@orpc/contract": "catalog:",
     "valibot": "1.4.2"
   },
   "devDependencies": {

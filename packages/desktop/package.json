@@ -1,0 +1,37 @@
+{
+  "name": "@pidex/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A focused desktop interface for Pi",
+  "author": {
+    "name": "raeperd",
+    "url": "https://github.com/raeperd"
+  },
+  "files": [
+    "assets",
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "package": "node scripts/package.mjs && electron-builder --projectDir .package/app --config electron-builder.yml --mac --dir --publish never",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@orpc/client": "catalog:",
+    "@pidex/api": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "electron": "41.5.0",
+    "electron-builder": "26.15.6",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "productName": "pidex"
+}
