@@ -32,6 +32,7 @@ import { taggedAttempt, type TaggedOperationError } from "./errors.js";
 type AdapterSessionError = TaggedOperationError<"AdapterSessionError">;
 
 export type AdapterEvent =
+  | { type: "pi"; event: AgentSessionEvent }
   | { type: "message"; item: TextItem | SkillItem }
   | { type: "delta"; itemId: string; delta: string; channel: "text" | "thinking" }
   | { type: "tool"; item: ToolItem; output?: { text: string; sourceTruncated: boolean } }
@@ -265,6 +266,7 @@ function makePiSession(session: AgentSession): PiSession {
     emit({ type: "settled" });
   }
   function handle(event: AgentSessionEvent) {
+    emit({ type: "pi", event });
     if (
       event.type === "message_start" ||
       event.type === "message_end" ||
@@ -280,23 +282,7 @@ function makePiSession(session: AgentSession): PiSession {
     else if (event.type === "queue_update")
       emit({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
     else if (event.type === "agent_settled") emitSettled();
-    else if (event.type === "compaction_start")
-      emit({ type: "notice", level: "info", text: `Compaction started (${event.reason}).` });
-    else if (event.type === "compaction_end") {
-      emit({
-        type: "notice",
-        level: event.errorMessage ? "error" : "info",
-        text: event.errorMessage ?? "Compaction complete.",
-      });
-      scheduleContextUsage();
-    } else if (event.type === "auto_retry_start")
-      emit({
-        type: "notice",
-        level: "warning",
-        text: `Retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`,
-      });
-    else if (event.type === "auto_retry_end" && !event.success)
-      emit({ type: "notice", level: "error", text: event.finalError ?? "Retry failed." });
+    else if (event.type === "compaction_end") scheduleContextUsage();
   }
   function handleMessage(event: SessionMessageEvent) {
     if (event.type === "message_update") {

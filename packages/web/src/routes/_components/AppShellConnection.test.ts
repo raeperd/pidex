@@ -125,11 +125,14 @@ describe("ChatConnection", () => {
 
 function runStatusEvent(eventId: number): ServerEvent {
   return {
-    type: "run_status",
+    source: "pidex",
     eventId,
     chatId: "chat_12345",
-    status: "idle",
-    revision: 0,
+    event: {
+      type: "run_status",
+      status: "idle",
+      revision: 0,
+    },
   };
 }
 

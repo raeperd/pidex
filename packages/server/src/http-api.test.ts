@@ -163,9 +163,9 @@ describe.sequential("HTTP API endpoints", () => {
     expect(result).toMatchObject({
       done: false,
       value: {
-        type: "snapshot",
+        source: "pidex",
         chatId,
-        snapshot: { chatId },
+        event: { type: "snapshot", snapshot: { chatId } },
       },
     });
     if (result.done) throw new Error("Expected a snapshot event");
@@ -179,7 +179,10 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("uses the oRPC Last-Event-ID header as the replay cursor", async () => {
     const initial = await subscribeChatEvents(api, chatId);
-    const snapshot = await nextMatchingEvent(initial, (event) => event.type === "snapshot");
+    const snapshot = await nextMatchingEvent(
+      initial,
+      (event) => event.source === "pidex" && event.event.type === "snapshot",
+    );
     const chat = await currentChat();
     await api.chats.rename({ ...actionFor(chat), name: "Header cursor" });
 
@@ -189,11 +192,14 @@ describe.sequential("HTTP API endpoints", () => {
     );
     try {
       await expect(
-        nextMatchingEvent(replay, (event) => event.type === "session"),
+        nextMatchingEvent(
+          replay,
+          (event) => event.source === "pidex" && event.event.type === "session",
+        ),
       ).resolves.toMatchObject({
-        type: "session",
+        source: "pidex",
         chatId,
-        name: "Header cursor",
+        event: { type: "session", name: "Header cursor" },
       });
     } finally {
       await initial.return?.();
@@ -247,7 +253,10 @@ describe.sequential("HTTP API endpoints", () => {
 
   it("replays chat events from the requested event ID", async () => {
     const initial = await subscribeChatEvents(api, chatId);
-    const snapshot = await nextMatchingEvent(initial, (event) => event.type === "snapshot");
+    const snapshot = await nextMatchingEvent(
+      initial,
+      (event) => event.source === "pidex" && event.event.type === "snapshot",
+    );
     const chat = await currentChat();
 
     await api.chats.rename({ ...actionFor(chat), name: "Replay source" });
@@ -255,11 +264,14 @@ describe.sequential("HTTP API endpoints", () => {
     const replay = await subscribeChatEvents(api, chatId, snapshot.eventId);
     try {
       await expect(
-        nextMatchingEvent(replay, (event) => event.type === "session"),
+        nextMatchingEvent(
+          replay,
+          (event) => event.source === "pidex" && event.event.type === "session",
+        ),
       ).resolves.toMatchObject({
-        type: "session",
+        source: "pidex",
         chatId,
-        name: "Replay source",
+        event: { type: "session", name: "Replay source" },
       });
     } finally {
       await initial.return?.();
@@ -283,9 +295,9 @@ describe.sequential("HTTP API endpoints", () => {
         await expect(events.next()).resolves.toMatchObject({
           done: false,
           value: {
-            type: "snapshot",
+            source: "pidex",
             chatId: created.chatId,
-            snapshot: { chatId: created.chatId },
+            event: { type: "snapshot", snapshot: { chatId: created.chatId } },
           },
         });
       } finally {
@@ -293,6 +305,27 @@ describe.sequential("HTTP API endpoints", () => {
       }
     } finally {
       await api.chats.dispose({ chatId: created.chatId });
+    }
+  });
+
+  it("forwards native Pi session events without translating their payload", async () => {
+    const events = await connectChatEvents(api, chatId);
+    try {
+      const chat = await currentChat();
+      const nativeEvent = nextMatchingEvent(
+        events,
+        (event) => event.source === "pi" && event.event.type === "session_info_changed",
+      );
+
+      await api.chats.rename({ ...actionFor(chat), name: "Native event" });
+
+      await expect(nativeEvent).resolves.toMatchObject({
+        source: "pi",
+        chatId,
+        event: { type: "session_info_changed", name: "Native event" },
+      });
+    } finally {
+      await events.return?.();
     }
   });
 
@@ -703,7 +736,10 @@ describe.sequential("HTTP API endpoints", () => {
         value: contextUsage,
       });
       const usageEvents = streams.map((stream) =>
-        nextMatchingEvent(stream, (event) => event.type === "context_usage"),
+        nextMatchingEvent(
+          stream,
+          (event) => event.source === "pidex" && event.event.type === "context_usage",
+        ),
       );
       const chat = await currentChat();
 
@@ -712,8 +748,9 @@ describe.sequential("HTTP API endpoints", () => {
       const events = await Promise.all(usageEvents);
       expect(events).toHaveLength(2);
       for (const event of events) {
-        expect(event).toMatchObject({ type: "context_usage", chatId });
-        if (event.type === "context_usage") expect(event.usage).toEqual(contextUsage);
+        expect(event).toMatchObject({ source: "pidex", chatId });
+        if (event.source === "pidex" && event.event.type === "context_usage")
+          expect(event.event.usage).toEqual(contextUsage);
       }
     } finally {
       await Promise.all(streams.map((stream) => stream.return?.()));
@@ -815,7 +852,10 @@ function actionFor(chat: ChatSnapshot, revisionOffset = 0) {
 
 async function connectChatEvents(client: PidexApiContractClient, chatId: string) {
   const events = await subscribeChatEvents(client, chatId);
-  await nextMatchingEvent(events, (event) => event.type === "snapshot");
+  await nextMatchingEvent(
+    events,
+    (event) => event.source === "pidex" && event.event.type === "snapshot",
+  );
   return events;
 }
 

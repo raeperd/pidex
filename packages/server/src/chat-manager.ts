@@ -3,6 +3,7 @@ import type {
   ActionOutcome,
   ChatSnapshot,
   ExtensionDialog,
+  PidexEvent,
   RunOutcome,
   ServerEvent,
   SessionSummary,
@@ -13,6 +14,7 @@ import type {
   ToolItem,
   Workspace,
 } from "@pidex/api";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { Effect, Exit, Queue, Scope, Stream } from "effect";
 import { streamToAsyncIteratorObject, withEventMeta } from "@orpc/server";
 import type {
@@ -56,11 +58,7 @@ interface ChatRecord {
   generation: number;
   abortRequested: boolean;
 }
-type EventPayload = ServerEvent extends infer Event
-  ? Event extends ServerEvent
-    ? Omit<Event, "eventId" | "chatId">
-    : never
-  : never;
+type EventPayload = PidexEvent;
 const LIVE_EVENT_RETRY_MS = 2_000;
 
 export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) {
@@ -345,10 +343,10 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     return snapshot(chat).pipe(
       Effect.map((currentSnapshot) => {
         const event = {
-          type: "snapshot",
           eventId: ++chat.eventId,
           chatId: chat.id,
-          snapshot: currentSnapshot,
+          source: "pidex",
+          event: { type: "snapshot", snapshot: currentSnapshot },
         } satisfies ServerEvent;
         const eventWithMeta = withEventMeta(event, {
           id: String(event.eventId),
@@ -361,6 +359,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   }
 
   function handle(chat: ChatRecord, event: AdapterEvent) {
+    if (event.type === "pi") return Effect.sync(() => broadcastPi(chat, event.event));
     if (event.type === "settled")
       return Effect.gen(function* () {
         const outcome = chat.abortRequested ? "cancelled" : "completed";
@@ -379,19 +378,12 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function handleImmediate(chat: ChatRecord, event: Exclude<AdapterEvent, { type: "settled" }>) {
     if (event.type === "message") {
       upsert(chat, event.item);
-      broadcast(chat, { type: "message", item: event.item });
     } else if (event.type === "delta") {
       const item = chat.items.find((entry) => entry.type !== "notice" && entry.id === event.itemId);
       if (item?.type === "assistant") {
         if (event.channel === "text") item.text += event.delta;
         else item.thinking = `${item.thinking ?? ""}${event.delta}`;
       }
-      broadcast(chat, {
-        type: "text_delta",
-        itemId: event.itemId,
-        delta: event.delta,
-        channel: event.channel,
-      });
     } else if (event.type === "tool") {
       const previous = chat.items.find(
         (entry): entry is ToolItem => entry.type === "tool" && entry.id === event.item.id,
@@ -410,11 +402,9 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         item = { ...item, resourceId, outputSize: event.output.text.length, truncated: true };
       }
       upsert(chat, item);
-      broadcast(chat, { type: "tool", item });
     } else if (event.type === "queue") {
       chat.steering = event.steering;
       chat.followUp = event.followUp;
-      broadcast(chat, { type: "queue", steering: event.steering, followUp: event.followUp });
     } else if (event.type === "notice") {
       handleNotice(chat, event);
     } else if (event.type === "context_usage") {
@@ -678,9 +668,28 @@ function liveOnlySession(chat: ChatRecord): SessionSummary {
 }
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
-  const full = { ...event, eventId: ++chat.eventId, chatId: chat.id } satisfies ServerEvent;
-  const eventWithMeta = withEventMeta(full, {
-    id: String(full.eventId),
+  const full = {
+    eventId: ++chat.eventId,
+    chatId: chat.id,
+    source: "pidex",
+    event,
+  } satisfies ServerEvent;
+  broadcastWithMeta(chat, full);
+}
+
+function broadcastPi(chat: ChatRecord, event: AgentSessionEvent) {
+  const full = {
+    eventId: ++chat.eventId,
+    chatId: chat.id,
+    source: "pi",
+    event,
+  } satisfies ServerEvent;
+  broadcastWithMeta(chat, full);
+}
+
+function broadcastWithMeta(chat: ChatRecord, event: ServerEvent) {
+  const eventWithMeta = withEventMeta(event, {
+    id: String(event.eventId),
     retry: LIVE_EVENT_RETRY_MS,
   });
   appendEvent(chat, eventWithMeta);

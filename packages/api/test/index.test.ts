@@ -99,31 +99,29 @@ describe("Pidex API schemas", () => {
     ).toMatchObject({ success: false });
   });
 
-  it("validates tagged server events", () => {
+  it("preserves raw Pi event payloads in the live contract", () => {
     expect(
       safeParse(serverEventSchema, {
-        type: "text_delta",
+        source: "pi",
         eventId: 1,
         chatId: "chat_123",
-        itemId: "item",
-        delta: "hello",
-        channel: "text",
-      }),
-    ).toMatchObject({ success: true });
-    expect(
-      safeParse(serverEventSchema, {
-        type: "message",
-        eventId: 2,
-        chatId: "chat_123",
-        item: {
-          type: "skill",
-          id: "skill_123",
-          name: "diagnose",
-          content: "Diagnose the failure before proposing a fix.",
-          timestamp: "2026-08-05T00:00:00.000Z",
+        event: {
+          type: "message_update",
+          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+          assistantMessageEvent: { type: "text_delta", delta: "hello" },
         },
       }),
-    ).toMatchObject({ success: true });
+    ).toMatchObject({
+      success: true,
+      output: {
+        source: "pi",
+        event: {
+          type: "message_update",
+          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+          assistantMessageEvent: { type: "text_delta", delta: "hello" },
+        },
+      },
+    });
   });
 
   it("parses a session summary status as an optional coarse tri-state", () => {
