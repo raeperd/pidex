@@ -336,6 +336,48 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(page.getByText("Thought", { exact: true })).toHaveCount(0);
 });
 
+test("shows Pi recovery notices without translating the live event", async ({ page, request }) => {
+  const { chatId } = await startStreamingTask(page, request);
+
+  await emitServerEvent(page, { type: "compaction_start", eventId: 1, chatId });
+  await expect(page.getByText("Context compaction started.", { exact: true })).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "compaction_end",
+    eventId: 2,
+    chatId,
+    errorMessage: "Compaction failed: context window is unavailable.",
+  });
+  await expect(
+    page.getByText("Compaction failed: context window is unavailable.", { exact: true }),
+  ).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "auto_retry_start",
+    eventId: 3,
+    chatId,
+    attempt: 1,
+    maxAttempts: 2,
+    errorMessage: "The provider is temporarily unavailable",
+  });
+  await expect(
+    page.getByText("Retrying request (attempt 1/2): The provider is temporarily unavailable", {
+      exact: true,
+    }),
+  ).toBeVisible();
+
+  await emitServerEvent(page, {
+    type: "auto_retry_end",
+    eventId: 4,
+    chatId,
+    success: false,
+    finalError: "Automatic retry failed after 2 attempts.",
+  });
+  await expect(
+    page.getByText("Automatic retry failed after 2 attempts.", { exact: true }),
+  ).toBeVisible();
+});
+
 test("preserves edits made while slash compaction is pending", async ({
   page,
   request,

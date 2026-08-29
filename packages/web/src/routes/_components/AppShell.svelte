@@ -1120,6 +1120,189 @@
     pendingTextDeltas = new Map();
     pendingTextDeltaChatId = "";
   }
+  function applyEvent(event: ServerEvent) {
+    if (!snapshot) return;
+    if (event.source === "pi") {
+      function applyMessage(piEvent: PiEvent) {
+        const message = objectValue(piEvent.message);
+        const role = stringValue(message?.role);
+        if (role !== "user" && role !== "assistant") return;
+        const timestamp = numberValue(message?.timestamp) ?? Date.now();
+        replaceItem({
+          type: role,
+          id: stringValue(message?.id) ?? `${role}-${timestamp}`,
+          text: textValue(message?.content),
+          thinking: thinkingValue(message?.content) || undefined,
+          complete: piEvent.type === "message_end",
+          timestamp: new Date(timestamp).toISOString(),
+        });
+      }
+      function applyMessageUpdate(piEvent: PiEvent) {
+        const currentSnapshot = snapshot;
+        if (!currentSnapshot) return;
+        const message = objectValue(piEvent.message);
+        const update = objectValue(piEvent.assistantMessageEvent);
+        const role = stringValue(message?.role);
+        const updateType = stringValue(update?.type);
+        const delta = stringValue(update?.delta);
+        if (
+          (role !== "assistant" && role !== "user") ||
+          !delta ||
+          (updateType !== "text_delta" && updateType !== "thinking_delta")
+        )
+          return;
+        const timestamp = numberValue(message?.timestamp) ?? Date.now();
+        queueTextDelta(
+          event.chatId,
+          stringValue(message?.id) ?? `${role}-${timestamp}`,
+          delta,
+          updateType === "text_delta" ? "text" : "thinking",
+        );
+      }
+      function applyTool(piEvent: PiEvent) {
+        const toolCallId = stringValue(piEvent.toolCallId);
+        const toolName = stringValue(piEvent.toolName);
+        if (!toolCallId || !toolName) return;
+        const args = boundedText(piEvent.args, 800);
+        const currentSnapshot = snapshot;
+        if (!currentSnapshot) return;
+        const previous = currentSnapshot.items.find(
+          (item): item is ToolItem => item.type === "tool" && item.id === toolCallId,
+        );
+        const result =
+          piEvent.type === "tool_execution_start"
+            ? { text: "", truncated: false }
+            : boundedText(
+                piEvent.type === "tool_execution_update" ? piEvent.partialResult : piEvent.result,
+                16_384,
+              );
+        const item: ToolItem = {
+          type: "tool",
+          id: toolCallId,
+          name: toolName,
+          argumentSummary: args.text || previous?.argumentSummary || "",
+          state:
+            piEvent.type === "tool_execution_end"
+              ? piEvent.isError === true
+                ? "error"
+                : "success"
+              : "running",
+          preview: result.text,
+          truncated: args.truncated || result.truncated,
+        };
+        recordToolTiming(item);
+        replaceItem(item);
+      }
+      function applyLifecycle(piEvent: PiEvent) {
+        const currentSnapshot = snapshot;
+        if (!currentSnapshot) return;
+        function applyRecoveryNotice(recoveryEvent: PiEvent) {
+          const recoverySnapshot = snapshot;
+          if (!recoverySnapshot) return;
+          if (recoveryEvent.type === "compaction_start") {
+            snapshot = { ...recoverySnapshot, runStatus: "compacting" };
+            replaceItem({
+              type: "notice",
+              id: crypto.randomUUID().replaceAll("-", ""),
+              level: "info",
+              text: "Context compaction started.",
+            });
+          } else if (recoveryEvent.type === "compaction_end") {
+            snapshot = { ...recoverySnapshot, runStatus: "idle" };
+            replaceItem({
+              type: "notice",
+              id: crypto.randomUUID().replaceAll("-", ""),
+              level: recoveryEvent.errorMessage ? "error" : "info",
+              text: stringValue(recoveryEvent.errorMessage) ?? "Context compaction completed.",
+            });
+          } else if (recoveryEvent.type === "auto_retry_start") {
+            replaceItem({
+              type: "notice",
+              id: crypto.randomUUID().replaceAll("-", ""),
+              level: "warning",
+              text: `Retrying request (attempt ${numberValue(recoveryEvent.attempt) ?? "?"}/${numberValue(recoveryEvent.maxAttempts) ?? "?"})${stringValue(recoveryEvent.errorMessage) ? `: ${recoveryEvent.errorMessage}` : "."}`,
+            });
+          } else if (recoveryEvent.type === "auto_retry_end" && recoveryEvent.success !== true) {
+            replaceItem({
+              type: "notice",
+              id: crypto.randomUUID().replaceAll("-", ""),
+              level: "error",
+              text: stringValue(recoveryEvent.finalError) ?? "Automatic retry failed.",
+            });
+          }
+        }
+        if (piEvent.type === "agent_start") snapshot = { ...currentSnapshot, runStatus: "running" };
+        else if (
+          piEvent.type === "compaction_start" ||
+          piEvent.type === "compaction_end" ||
+          piEvent.type === "auto_retry_start" ||
+          piEvent.type === "auto_retry_end"
+        )
+          applyRecoveryNotice(piEvent);
+        else if (piEvent.type === "agent_settled")
+          snapshot = { ...currentSnapshot, runStatus: "idle" };
+        else if (piEvent.type === "session_info_changed") {
+          const name = stringValue(piEvent.name);
+          snapshot = { ...currentSnapshot, ...(name ? { sessionName: name } : {}) };
+          void refreshSessions();
+        } else if (piEvent.type === "thinking_level_changed") {
+          const level = stringValue(piEvent.level);
+          if (
+            level === "off" ||
+            level === "minimal" ||
+            level === "low" ||
+            level === "medium" ||
+            level === "high" ||
+            level === "xhigh" ||
+            level === "max"
+          )
+            snapshot = { ...currentSnapshot, thinkingLevel: level };
+        }
+      }
+      function applyPiEvent(chatId: string, piEvent: PiEvent) {
+        if (piEvent.type === "message_start" || piEvent.type === "message_end")
+          applyMessage(piEvent);
+        else if (piEvent.type === "message_update") applyMessageUpdate(piEvent);
+        else if (
+          piEvent.type === "tool_execution_start" ||
+          piEvent.type === "tool_execution_update" ||
+          piEvent.type === "tool_execution_end"
+        )
+          applyTool(piEvent);
+        else if (piEvent.type === "queue_update") {
+          const currentSnapshot = snapshot;
+          if (!currentSnapshot) return;
+          snapshot = {
+            ...currentSnapshot,
+            steeringQueue: stringArrayValue(piEvent.steering),
+            followUpQueue: stringArrayValue(piEvent.followUp),
+          };
+        } else applyLifecycle(piEvent);
+      }
+      applyPiEvent(event.chatId, event.event);
+      taskViews.scrollIfNearBottom();
+      return;
+    }
+    flushScheduledTextDeltas();
+    if (event.event.type === "snapshot") {
+      if (event.event.snapshot.revision < snapshot.revision) return;
+      snapshot = event.event.snapshot;
+      if (pendingPrompt && event.event.snapshot.run?.actionId === pendingPrompt.actionId)
+        clearPendingPrompt();
+    } else if (event.event.type === "run_status") applyRunStatus(event.event);
+    else if (event.event.type === "notice") replaceItem(event.event.item);
+    else if (event.event.type === "context_usage")
+      snapshot = { ...snapshot, contextUsage: event.event.usage };
+    else if (event.event.type === "session") {
+      snapshot = {
+        ...snapshot,
+        ...(event.event.name ? { sessionName: event.event.name } : {}),
+        stats: event.event.stats,
+      };
+      void refreshSessions();
+    } else if (event.event.type === "extension_dialog") applyExtensionDialog(event.event.dialog);
+    taskViews.scrollIfNearBottom();
+  }
   function objectValue(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value))
@@ -1168,147 +1351,6 @@
           : (JSON.stringify(value) ?? String(value));
     if (text.length <= maximum) return { text, truncated: false };
     return { text: text.slice(0, maximum), truncated: true };
-  }
-  function applyEvent(event: ServerEvent) {
-    if (!snapshot) return;
-    if (event.source === "pi") {
-      applyPiEvent(event.chatId, event.event);
-      taskViews.scrollIfNearBottom();
-      return;
-    }
-    flushScheduledTextDeltas();
-    if (event.event.type === "snapshot") {
-      if (event.event.snapshot.revision < snapshot.revision) return;
-      snapshot = event.event.snapshot;
-      if (pendingPrompt && event.event.snapshot.run?.actionId === pendingPrompt.actionId)
-        clearPendingPrompt();
-    } else if (event.event.type === "run_status") applyRunStatus(event.event);
-    else if (event.event.type === "notice") replaceItem(event.event.item);
-    else if (event.event.type === "context_usage")
-      snapshot = { ...snapshot, contextUsage: event.event.usage };
-    else if (event.event.type === "session") {
-      snapshot = {
-        ...snapshot,
-        ...(event.event.name ? { sessionName: event.event.name } : {}),
-        stats: event.event.stats,
-      };
-      void refreshSessions();
-    } else if (event.event.type === "extension_dialog") applyExtensionDialog(event.event.dialog);
-    taskViews.scrollIfNearBottom();
-  }
-  function applyPiEvent(chatId: string, event: PiEvent) {
-    if (event.type === "message_start" || event.type === "message_end") applyPiMessage(event);
-    else if (event.type === "message_update") applyPiMessageUpdate(chatId, event);
-    else if (
-      event.type === "tool_execution_start" ||
-      event.type === "tool_execution_update" ||
-      event.type === "tool_execution_end"
-    )
-      applyPiTool(event);
-    else if (event.type === "queue_update") applyPiQueue(event);
-    else applyPiLifecycleEvent(event);
-  }
-  function applyPiMessage(event: PiEvent) {
-    const message = objectValue(event.message);
-    const role = stringValue(message?.role);
-    if (role !== "user" && role !== "assistant") return;
-    const timestamp = numberValue(message?.timestamp) ?? Date.now();
-    replaceItem({
-      type: role,
-      id: stringValue(message?.id) ?? `${role}-${timestamp}`,
-      text: textValue(message?.content),
-      thinking: thinkingValue(message?.content) || undefined,
-      complete: event.type === "message_end",
-      timestamp: new Date(timestamp).toISOString(),
-    });
-  }
-  function applyPiMessageUpdate(chatId: string, event: PiEvent) {
-    const message = objectValue(event.message);
-    const role = stringValue(message?.role);
-    const update = objectValue(event.assistantMessageEvent);
-    const updateType = stringValue(update?.type);
-    if ((role !== "assistant" && role !== "user") || !update) return;
-    const delta = stringValue(update.delta);
-    if (!delta || (updateType !== "text_delta" && updateType !== "thinking_delta")) return;
-    const timestamp = numberValue(message?.timestamp) ?? Date.now();
-    queueTextDelta(
-      chatId,
-      stringValue(message?.id) ?? `${role}-${timestamp}`,
-      delta,
-      updateType === "text_delta" ? "text" : "thinking",
-    );
-  }
-  function applyPiTool(event: PiEvent) {
-    const currentSnapshot = snapshot;
-    if (!currentSnapshot) return;
-    const toolCallId = stringValue(event.toolCallId);
-    const toolName = stringValue(event.toolName);
-    if (!toolCallId || !toolName) return;
-    const args = boundedText(event.args, 800);
-    const previous = currentSnapshot.items.find(
-      (item): item is ToolItem => item.type === "tool" && item.id === toolCallId,
-    );
-    const result =
-      event.type === "tool_execution_start"
-        ? { text: "", truncated: false }
-        : boundedText(
-            event.type === "tool_execution_update" ? event.partialResult : event.result,
-            16_384,
-          );
-    const item: ToolItem = {
-      type: "tool",
-      id: toolCallId,
-      name: toolName,
-      argumentSummary: args.text || previous?.argumentSummary || "",
-      state:
-        event.type === "tool_execution_end"
-          ? event.isError === true
-            ? "error"
-            : "success"
-          : "running",
-      preview: result.text,
-      truncated: args.truncated || result.truncated,
-    };
-    recordToolTiming(item);
-    replaceItem(item);
-  }
-  function applyPiQueue(event: PiEvent) {
-    const currentSnapshot = snapshot;
-    if (!currentSnapshot) return;
-    snapshot = {
-      ...currentSnapshot,
-      steeringQueue: stringArrayValue(event.steering),
-      followUpQueue: stringArrayValue(event.followUp),
-    };
-  }
-  function applyPiLifecycleEvent(event: PiEvent) {
-    const currentSnapshot = snapshot;
-    if (!currentSnapshot) return;
-    if (event.type === "agent_start") snapshot = { ...currentSnapshot, runStatus: "running" };
-    else if (event.type === "compaction_start")
-      snapshot = { ...currentSnapshot, runStatus: "compacting" };
-    else if (event.type === "agent_settled" || event.type === "compaction_end")
-      snapshot = { ...currentSnapshot, runStatus: "idle" };
-    else if (event.type === "session_info_changed") {
-      const name = stringValue(event.name);
-      snapshot = { ...currentSnapshot, ...(name ? { sessionName: name } : {}) };
-      void refreshSessions();
-    } else if (event.type === "thinking_level_changed") applyPiThinkingLevel(event);
-  }
-  function applyPiThinkingLevel(event: PiEvent) {
-    const currentSnapshot = snapshot;
-    if (!currentSnapshot) return;
-    const level = stringValue(event.level);
-    if (
-      level === "off" ||
-      level === "minimal" ||
-      level === "low" ||
-      level === "medium" ||
-      level === "high" ||
-      level === "xhigh" ||
-      level === "max"
-    )
-      snapshot = { ...currentSnapshot, thinkingLevel: level };
   }
   function applyRunStatus(event: Extract<PidexEvent, { type: "run_status" }>) {
     if (!snapshot) return;

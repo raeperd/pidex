@@ -25,6 +25,7 @@ import type {
   EffectAdapterSession,
   PiSdkServiceApi,
 } from "./pi-sdk.js";
+import { bounded, boundedResource, messageId, messageItems, textOf, thinkingOf } from "./pi-sdk.js";
 import { applicationError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
 import { safeError } from "./security.js";
@@ -342,12 +343,10 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function snapshotEvent(chat: ChatRecord) {
     return snapshot(chat).pipe(
       Effect.map((currentSnapshot) => {
-        const event = {
-          eventId: ++chat.eventId,
-          chatId: chat.id,
-          source: "pidex",
-          event: { type: "snapshot", snapshot: currentSnapshot },
-        } satisfies ServerEvent;
+        const event = makeServerEvent(chat, "pidex", {
+          type: "snapshot",
+          snapshot: currentSnapshot,
+        });
         const eventWithMeta = withEventMeta(event, {
           id: String(event.eventId),
           retry: LIVE_EVENT_RETRY_MS,
@@ -359,7 +358,97 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   }
 
   function handle(chat: ChatRecord, event: AdapterEvent) {
-    if (event.type === "pi") return Effect.sync(() => broadcastPi(chat, event.event));
+    function applyMessage(
+      piEvent: Extract<AgentSessionEvent, { type: "message_start" | "message_end" }>,
+    ) {
+      if (piEvent.message.role !== "user" && piEvent.message.role !== "assistant") return;
+      const thinking = thinkingOf(piEvent.message.content);
+      const item: TextItem = {
+        type: piEvent.message.role,
+        id: messageId(piEvent.message),
+        text: textOf(piEvent.message.content),
+        ...(thinking ? { thinking } : {}),
+        complete: piEvent.type === "message_end",
+        timestamp: new Date(piEvent.message.timestamp ?? Date.now()).toISOString(),
+      };
+      for (const message of messageItems(item)) upsert(chat, message);
+    }
+    function applyMessageUpdate(piEvent: Extract<AgentSessionEvent, { type: "message_update" }>) {
+      const update = piEvent.assistantMessageEvent;
+      if (update.type !== "text_delta" && update.type !== "thinking_delta") return;
+      const item = chat.items.find(
+        (entry) => entry.type === "assistant" && entry.id === messageId(piEvent.message),
+      );
+      if (!item || item.type !== "assistant") return;
+      if (update.type === "text_delta") item.text += update.delta;
+      else item.thinking = `${item.thinking ?? ""}${update.delta}`;
+    }
+    function applyTool(
+      piEvent: Extract<
+        AgentSessionEvent,
+        { type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end" }
+      >,
+    ) {
+      if (piEvent.type === "tool_execution_start") {
+        const args = bounded(piEvent.args, 800);
+        upsert(chat, {
+          type: "tool",
+          id: piEvent.toolCallId,
+          name: piEvent.toolName,
+          argumentSummary: args.text,
+          state: "running",
+          preview: "",
+          truncated: args.truncated,
+        });
+        return;
+      }
+      const running = piEvent.type === "tool_execution_update";
+      const output = boundedResource(running ? piEvent.partialResult : piEvent.result);
+      const preview = bounded(output.text);
+      const previous = chat.items.find(
+        (entry): entry is ToolItem => entry.type === "tool" && entry.id === piEvent.toolCallId,
+      );
+      let item: ToolItem = {
+        type: "tool",
+        id: piEvent.toolCallId,
+        name: piEvent.toolName,
+        argumentSummary: running ? bounded(piEvent.args, 800).text : "",
+        state: running ? "running" : piEvent.isError ? "error" : "success",
+        preview: preview.text,
+        truncated: preview.truncated || output.sourceTruncated,
+      };
+      if (!item.argumentSummary && previous)
+        item = { ...item, argumentSummary: previous.argumentSummary };
+      if (item.truncated || output.sourceTruncated) {
+        const resourceId = previous?.resourceId ?? randomUUID().replaceAll("-", "");
+        chat.resources.set(resourceId, {
+          id: resourceId,
+          text: output.text,
+          sourceTruncated: output.sourceTruncated,
+        });
+        item = { ...item, resourceId, outputSize: output.text.length, truncated: true };
+      }
+      upsert(chat, item);
+    }
+    function applyPiEvent(piEvent: AgentSessionEvent) {
+      if (piEvent.type === "message_start" || piEvent.type === "message_end") applyMessage(piEvent);
+      else if (piEvent.type === "message_update") applyMessageUpdate(piEvent);
+      else if (
+        piEvent.type === "tool_execution_start" ||
+        piEvent.type === "tool_execution_update" ||
+        piEvent.type === "tool_execution_end"
+      )
+        applyTool(piEvent);
+      else if (piEvent.type === "queue_update") {
+        chat.steering = [...piEvent.steering];
+        chat.followUp = [...piEvent.followUp];
+      }
+    }
+    if (event.type === "pi")
+      return Effect.sync(() => {
+        broadcastPi(chat, event.event);
+        applyPiEvent(event.event);
+      });
     if (event.type === "settled")
       return Effect.gen(function* () {
         const outcome = chat.abortRequested ? "cancelled" : "completed";
@@ -372,50 +461,19 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         broadcastRun(chat);
         yield* broadcastSession(chat);
       });
-    return Effect.sync(() => handleImmediate(chat, event));
-  }
-
-  function handleImmediate(chat: ChatRecord, event: Exclude<AdapterEvent, { type: "settled" }>) {
-    if (event.type === "message") {
-      upsert(chat, event.item);
-    } else if (event.type === "delta") {
-      const item = chat.items.find((entry) => entry.type !== "notice" && entry.id === event.itemId);
-      if (item?.type === "assistant") {
-        if (event.channel === "text") item.text += event.delta;
-        else item.thinking = `${item.thinking ?? ""}${event.delta}`;
-      }
-    } else if (event.type === "tool") {
-      const previous = chat.items.find(
-        (entry): entry is ToolItem => entry.type === "tool" && entry.id === event.item.id,
-      );
-      let item =
-        event.item.argumentSummary || !previous
-          ? event.item
-          : { ...event.item, argumentSummary: previous.argumentSummary };
-      if (event.output && (item.truncated || event.output.sourceTruncated)) {
-        const resourceId = previous?.resourceId ?? randomUUID().replaceAll("-", "");
-        chat.resources.set(resourceId, {
-          id: resourceId,
-          text: event.output.text,
-          sourceTruncated: event.output.sourceTruncated,
+    return Effect.sync(() => {
+      if (event.type === "notice") {
+        handleNotice(chat, event);
+      } else if (event.type === "context_usage") {
+        broadcast(chat, { type: "context_usage", usage: event.usage });
+      } else if (event.type === "dialog") {
+        chat.extensionDialog = event.dialog;
+        broadcast(chat, {
+          type: "extension_dialog",
+          ...(event.dialog ? { dialog: event.dialog } : {}),
         });
-        item = { ...item, resourceId, outputSize: event.output.text.length, truncated: true };
       }
-      upsert(chat, item);
-    } else if (event.type === "queue") {
-      chat.steering = event.steering;
-      chat.followUp = event.followUp;
-    } else if (event.type === "notice") {
-      handleNotice(chat, event);
-    } else if (event.type === "context_usage") {
-      broadcast(chat, { type: "context_usage", usage: event.usage });
-    } else if (event.type === "dialog") {
-      chat.extensionDialog = event.dialog;
-      broadcast(chat, {
-        type: "extension_dialog",
-        ...(event.dialog ? { dialog: event.dialog } : {}),
-      });
-    }
+    });
   }
 
   function handleNotice(
@@ -668,23 +726,32 @@ function liveOnlySession(chat: ChatRecord): SessionSummary {
 }
 
 function broadcast(chat: ChatRecord, event: EventPayload) {
-  const full = {
-    eventId: ++chat.eventId,
-    chatId: chat.id,
-    source: "pidex",
-    event,
-  } satisfies ServerEvent;
-  broadcastWithMeta(chat, full);
+  broadcastWithMeta(chat, makeServerEvent(chat, "pidex", event));
 }
 
 function broadcastPi(chat: ChatRecord, event: AgentSessionEvent) {
-  const full = {
-    eventId: ++chat.eventId,
-    chatId: chat.id,
-    source: "pi",
-    event,
-  } satisfies ServerEvent;
-  broadcastWithMeta(chat, full);
+  broadcastWithMeta(chat, makeServerEvent(chat, "pi", event));
+}
+
+function makeServerEvent(
+  chat: ChatRecord,
+  source: "pidex",
+  event: PidexEvent,
+): Extract<ServerEvent, { source: "pidex" }>;
+function makeServerEvent(
+  chat: ChatRecord,
+  source: "pi",
+  event: AgentSessionEvent,
+): Extract<ServerEvent, { source: "pi" }>;
+function makeServerEvent(
+  chat: ChatRecord,
+  source: "pidex" | "pi",
+  event: PidexEvent | AgentSessionEvent,
+): ServerEvent {
+  const envelope = { eventId: ++chat.eventId, chatId: chat.id, source, event };
+  return source === "pi"
+    ? (envelope as Extract<ServerEvent, { source: "pi" }>)
+    : (envelope as Extract<ServerEvent, { source: "pidex" }>);
 }
 
 function broadcastWithMeta(chat: ChatRecord, event: ServerEvent) {
