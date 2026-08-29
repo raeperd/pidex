@@ -21,19 +21,6 @@ import {
   validateRequest,
 } from "./security.js";
 
-async function createPidexServer() {
-  const application = await createPidexApplication();
-  const server = createServer((req, res) => void application.handleRequest(req, res));
-  return {
-    server,
-    close: async () => {
-      await application.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
-    manager: application.manager,
-  };
-}
-
 export async function createPidexApplication() {
   const runtime = ManagedRuntime.make(makeMetadataLayer());
   let manager: ChatManager | undefined;
@@ -170,7 +157,17 @@ const main = Effect.scoped(
       catch: (cause) => applicationError("server.port", cause),
     });
     const app = yield* Effect.acquireRelease(
-      attemptOperation("server.create", createPidexServer),
+      attemptOperation("server.create", async () => {
+        const application = await createPidexApplication();
+        const server = createServer((req, res) => void application.handleRequest(req, res));
+        return {
+          server,
+          close: async () => {
+            await application.close();
+            await new Promise<void>((resolve) => server.close(() => resolve()));
+          },
+        };
+      }),
       (server) =>
         Effect.promise(() =>
           server.close().catch((error) => {
