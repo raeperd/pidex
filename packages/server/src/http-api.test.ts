@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -18,7 +18,7 @@ import {
 } from "@pidex/api";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createPidexServer } from "./main.js";
+import { createPidexApplication } from "./main.js";
 
 const execFileAsync = promisify(execFile);
 let lastRpcResponseStatus: number | undefined;
@@ -50,7 +50,8 @@ const coveredEndpoints = [
 ] as const;
 
 describe.sequential("HTTP API endpoints", () => {
-  let app: Awaited<ReturnType<typeof createPidexServer>>;
+  let app: Awaited<ReturnType<typeof createPidexApplication>>;
+  let server: ReturnType<typeof createServer> | undefined;
   let publicApi: PidexApiContractClient;
   let api: PidexApiContractClient;
   let tempRoot: string;
@@ -102,9 +103,13 @@ describe.sequential("HTTP API endpoints", () => {
     vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
     vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
 
-    app = await createPidexServer();
-    await listen(app);
-    const address = app.server.address() as AddressInfo;
+    app = await createPidexApplication();
+    server = createServer((req, res) => void app.handleRequest(req, res));
+    await new Promise<void>((resolve, reject) => {
+      server?.once("error", reject);
+      server?.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address() as AddressInfo;
     httpUrl = `http://127.0.0.1:${address.port}`;
     const rpcUrl = `${httpUrl}/api/rpc`;
 
@@ -117,7 +122,11 @@ describe.sequential("HTTP API endpoints", () => {
 
   afterAll(async () => {
     try {
-      await app?.close();
+      try {
+        await app?.close();
+      } finally {
+        if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     } finally {
       vi.unstubAllEnvs();
       if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
@@ -805,13 +814,6 @@ function contractEndpoints(value: unknown, prefix: string[] = []): string[] {
   return Object.entries(value).flatMap(([key, child]) =>
     contractEndpoints(child, [...prefix, key]),
   );
-}
-
-async function listen(app: Awaited<ReturnType<typeof createPidexServer>>) {
-  await new Promise<void>((resolve, reject) => {
-    app.server.once("error", reject);
-    app.server.listen(0, "127.0.0.1", resolve);
-  });
 }
 
 async function requestJson(url: string, headers: Record<string, string>) {
