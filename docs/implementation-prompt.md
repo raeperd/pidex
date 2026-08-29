@@ -16,7 +16,7 @@ When the documents use different implementation technologies, preserve the behav
 
 - use the existing pnpm workspace rather than creating a new npm project;
 - use Svelte 5, Vite, and Tailwind CSS 4 rather than React;
-- use Node HTTP and WebSocket rather than Express and Server-Sent Events;
+- use Node HTTP and an SSE-compatible event stream rather than Express or a separate realtime server;
 - keep Electron as the server-process supervisor and desktop shell;
 - keep shared browser-safe Valibot schemas and types in `packages/api`;
 - keep Pi JSONL as the conversation source of truth and use SQLite only for Pidex metadata;
@@ -48,7 +48,7 @@ Keep the current workspace structure:
 packages/
 ├── desktop/   # Electron shell and server-process supervisor
 ├── web/       # Responsive Svelte/Vite/Tailwind client
-├── server/    # HTTP, WebSocket, Pi adapter, SQLite, and local security
+├── server/    # HTTP/SSE, Pi adapter, SQLite, and local security
 ├── api/       # Browser-safe Valibot schemas and inferred protocol types
 ├── e2e/       # Cross-application Playwright workflows
 └── tooling/   # Repository scripts
@@ -69,7 +69,7 @@ Rules:
 - Keep the Pi SDK integration inside `packages/server`.
 - Keep `packages/api` free of Electron, Node, browser, and server implementations.
 - Never import server implementation code into the web app or Electron main process.
-- Use HTTP and WebSocket for ordinary renderer traffic rather than Electron IPC.
+- Use authenticated HTTP and SSE-compatible event streams for ordinary renderer traffic rather than Electron IPC.
 - The Electron preload, if needed, must remain narrow, context-isolated, and limited to desktop bootstrap capabilities.
 - Add another package only if a genuine second consumer appears.
 - Preserve strict TypeScript, native ESM, exact-pinned direct dependencies, the existing pnpm catalog, and one committed `pnpm-lock.yaml`.
@@ -110,7 +110,7 @@ Use the technologies fixed by `docs/architecture.md` and the existing manifests:
 - Svelte 5, Vite, and Tailwind CSS 4;
 - Valibot for browser-safe API validation and Effect Schema for persisted-data validation;
 - Node's built-in HTTP and `node:sqlite` modules, with Drizzle ORM for typed database access;
-- `ws` on the server and native `WebSocket` in the browser;
+- `@orpc/server/node` and `@orpc/client/fetch` for typed HTTP and SSE-compatible event streams;
 - Pi's exact-matched Node SDK;
 - Vitest and Playwright Chromium for verification.
 
@@ -139,7 +139,7 @@ Electron must spawn and supervise the compiled server child process, wait for re
 
 1. Complete environment discovery and version matching.
 2. Define the shared Valibot protocol, then connect the matched Pi SDK.
-3. Complete one end-to-end vertical slice: open project, create session, send, stream through WebSocket, settle, reconnect, restart, and resume.
+3. Complete one end-to-end vertical slice: open project, create session, send, stream through HTTP event streaming, settle, reconnect, restart, and resume.
 4. Add the remaining Pi session controls.
 5. Add local security, responsive polish, production serving, Electron supervision, tests, and documentation.
 6. Run the full suite after every material fix and finish without TODO replacements for required behavior.
@@ -188,14 +188,14 @@ Do not mark a run complete at an ordinary message-end or agent-end event if retr
 
 An idle Send uses Pi's prompt API. While busy, Steer must use the matched SDK's steering semantics and Follow-up must use its queued continuation semantics. Stop aborts Pi, clears supported queues, and remains visibly in Stopping state until the run settles.
 
-## Native RPC and WebSocket Contract
+## Native RPC and HTTP Event-Stream Contract
 
 Expose the reference operations through native oRPC under `/api/rpc`:
 
 - `system.health` and `system.bootstrap`;
 - workspace open, session listing, and trust procedures;
 - chat creation, resume, lookup, and disposal procedures;
-- a WebSocket endpoint for snapshot, replay, live events, and connection state;
+- an SSE-compatible HTTP event-stream procedure for snapshot, replay, live events, and connection state;
 - message operations for normal, steer, and follow-up delivery;
 - abort, queue-clear, config, rename, compact, extension-dialog response, and dispose operations.
 
@@ -203,18 +203,18 @@ Apply small explicit request and message limits. Use one consistent JSON error s
 
 Define a browser-safe discriminated union for snapshots, connection state, run status, messages, text and thinking deltas, tool activity, queues, notices, extension UI requests, and session metadata.
 
-For WebSocket continuity:
+For event-stream continuity:
 
-- negotiate a protocol version on connection;
+- negotiate a protocol version in the typed event-stream input;
 - use monotonically increasing event IDs and a bounded recent-event buffer per chat;
 - send a complete authoritative snapshot on initial connection;
 - replay from the last acknowledged event ID only when the full range remains available, otherwise replace state with a fresh snapshot;
 - reconcile by stable item IDs so reconnect never duplicates content;
-- use heartbeat and liveness checks and clean up subscribers on close;
+- clean up subscribers when the HTTP request is aborted or the stream is returned;
 - show Connected, Reconnecting, and Disconnected states in the UI;
-- never stop Pi because a socket closed.
+- never stop Pi because an HTTP event stream closed.
 
-Bound tool output before sending it to the browser. Include a concise argument summary, running/success/error state, truncated preview, and only reasonably sized safe results. Never place multi-megabyte output in a WebSocket message.
+Bound tool output before sending it to the browser. Include a concise argument summary, running/success/error state, truncated preview, and only reasonably sized safe results. Never place multi-megabyte output in an event-stream message.
 
 ## Finished Interface
 

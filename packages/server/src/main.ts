@@ -2,15 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
-import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { NodeRuntime } from "@effect/platform-node";
 import { COMMON_ERROR_STATUS_MAP } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
-import { RPCHandler as WebSocketRPCHandler } from "@orpc/server/websocket";
 import { RequestLimitHandlerPlugin } from "@orpc/server/plugins";
 import { Context, Effect, ManagedRuntime } from "effect";
-import { WebSocketServer } from "ws";
 import { makeChatManager, type ChatManager } from "./chat-manager.js";
 import { apiErrorStatus, applicationError, attemptOperation, HttpError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
@@ -27,17 +24,11 @@ import {
 export async function createPidexServer() {
   const application = await createPidexApplication();
   const server = createServer((req, res) => void application.handleRequest(req, res));
-  server.on("upgrade", (req, socket, head) => {
-    if (!application.handleUpgrade(req, socket, head)) {
-      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-    }
-  });
   return {
     server,
     close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
       await application.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     },
     manager: application.manager,
   };
@@ -67,16 +58,18 @@ export async function createPidexApplication() {
       },
       plugins: [new RequestLimitHandlerPlugin({ maxBodySize: 64 * 1024 })],
     });
-    const webSocketHandler = new WebSocketRPCHandler(apiRouter);
-
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       securityHeaders(res, webScriptHashes);
       try {
         await runtime.runPromise(validateRequest(req));
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
+        if (route === "/api/rpc/live/events") {
+          res.setHeader("Cache-Control", "no-cache, no-transform");
+          res.setHeader("X-Accel-Buffering", "no");
+        }
         const { matched } = await apiHandler.handle(req, res, {
           prefix: "/api/rpc",
-          context: { req, transport: "http" },
+          context: { req },
         });
         if (matched) return;
         if (route.startsWith("/api/"))
@@ -94,44 +87,12 @@ export async function createPidexApplication() {
         );
       }
     };
-    const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-    const handleUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/api/ws") return false;
-      try {
-        runtime.runSync(validateRequest(req));
-        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-      } catch {
-        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-      }
-      return true;
-    };
-    wss.on("connection", (socket) => {
-      let alive = true;
-      socket.on("pong", () => (alive = true));
-      socket.on("message", (data) => {
-        void webSocketHandler.message(socket, data.toString(), {
-          context: { transport: "websocket" },
-        });
-      });
-      const timer = setInterval(() => {
-        if (!alive) return socket.terminate();
-        alive = false;
-        socket.ping();
-      }, 20_000);
-      socket.once("close", () => {
-        clearInterval(timer);
-        void webSocketHandler.close(socket);
-      });
-    });
     let closed = false;
     return {
       handleRequest: handler,
-      handleUpgrade,
       close: async () => {
         if (closed) return;
         closed = true;
-        for (const socket of wss.clients) socket.close(1001, "Server stopping");
         try {
           await runtime.runPromise(chatManager.shutdown());
         } finally {

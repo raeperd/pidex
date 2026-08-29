@@ -6,12 +6,12 @@ import {
   emitServerEvent,
   fulfillAccepted,
   fulfillJson,
-  installFakeWebSocket,
+  installFakeEventStream,
   patchRpcResponse,
   routeInput,
   rpcRequest,
   startNewTask,
-  waitForFakeWebSocket,
+  waitForFakeEventStream,
 } from "./support";
 
 test("renders assistant markdown as safe interactive components", async ({
@@ -340,7 +340,7 @@ test("preserves edits made while slash compaction is pending", async ({
   page,
   request,
 }, testInfo) => {
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const { promise: compactionPending, resolve: releaseCompaction } = Promise.withResolvers<void>();
   let compactInput: Record<string, unknown> | undefined;
   let compactRequests = 0;
@@ -477,7 +477,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   page,
   request,
 }) => {
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const { csrfToken, workspace, task: firstTask } = await createTask(request, process.cwd());
   const second = await rpcRequest<Record<string, unknown>>(
     request,
@@ -607,7 +607,7 @@ test("opens and dismisses context usage details with pointer and keyboard", asyn
   request,
 }, testInfo) => {
   if (testInfo.project.name === "mobile") await page.setViewportSize({ width: 390, height: 844 });
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const { task } = await createTask(request, process.cwd());
   let snapshot: Record<string, unknown> = task;
   const taskId = String(snapshot.taskId);
@@ -739,7 +739,7 @@ test("persists idle configuration immediately without overwriting the draft", as
   page,
   request,
 }, testInfo) => {
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const mutations: Array<{ procedure: "configure" | "send"; input: Record<string, unknown> }> = [];
   const { promise: configurationPending, resolve: releaseConfiguration } =
     Promise.withResolvers<void>();
@@ -772,7 +772,7 @@ test("persists idle configuration immediately without overwriting the draft", as
   const prompt = page.getByLabel("Prompt");
   const thinking = page.getByLabel("Thinking level");
   await expect(prompt).toBeVisible();
-  await waitForFakeWebSocket(page);
+  await waitForFakeEventStream(page);
 
   const chatId = String(snapshot.current?.chatId);
   const contextUsage = {
@@ -882,11 +882,12 @@ test("persists idle configuration immediately without overwriting the draft", as
 });
 
 async function startStreamingTask(page: Page, request: APIRequestContext) {
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const snapshot = await captureCreatedChat(page);
   await startNewTask(page, request);
   await expect.poll(() => snapshot.current?.chatId).toEqual(expect.any(String));
-  await waitForFakeWebSocket(page);
+  await page.waitForURL((url) => url.pathname === `/tasks/${snapshot.current?.taskId}`);
+  await waitForFakeEventStream(page);
   return { snapshot, chatId: String(snapshot.current?.chatId) };
 }
 

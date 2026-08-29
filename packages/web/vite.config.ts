@@ -40,8 +40,6 @@ function pidexApplication(): Plugin {
     async configureServer(vite) {
       if (!vite.httpServer) throw new Error("Pidex requires Vite's HTTP server");
       const application = await createPidexApplication();
-      const upgrade = application.handleUpgrade.bind(application);
-      vite.httpServer.prependListener("upgrade", upgrade);
       vite.middlewares.use((req, res, next) => {
         const route = new URL(req.url ?? "/", "http://localhost").pathname;
         if (!route.startsWith("/api/")) return next();
@@ -51,7 +49,6 @@ function pidexApplication(): Plugin {
       const closeApplication = async () => {
         if (closed) return;
         closed = true;
-        vite.httpServer?.off("upgrade", upgrade);
         await application.close();
       };
       close = closeApplication;

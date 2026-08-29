@@ -185,11 +185,14 @@
   const api = makePidexApiClient();
   const snapshotCache = makeTaskSnapshotCache();
   const taskViews = createTaskViewControllerRegistry();
-  const chatConnection = makeChatConnection({
-    onEvent: applyEvent,
-    onInvalidChat: () => void recoverInvalidChat(),
-    onStateChange: (state) => (connection = state),
-  });
+  const chatConnection = makeChatConnection(
+    {
+      onEvent: applyEvent,
+      onInvalidChat: () => void recoverInvalidChat(),
+      onStateChange: (state) => (connection = state),
+    },
+    { events: api.events, close: () => {} },
+  );
   let pendingTextDeltas = new Map<string, { text: string; thinking: string }>();
   let pendingTextDeltaFrame: number | undefined;
   let pendingTextDeltaChatId = "";
@@ -965,7 +968,7 @@
     const sequence = ++routeSequence;
     persistDraft();
     chatConnection.close();
-    // The chat's WebSocket for the task we're leaving just closed, so if its run settles
+    // The chat's event stream for the task we're leaving just closed, so if its run settles
     // while we're gone, its idle run_status event never arrives and refreshSessions never
     // fires for it. Captured now (before `snapshot` gets reassigned below) so the mitigation
     // refresh below targets the task actually being left.

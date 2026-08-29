@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import {
   createTask,
   fulfillJson,
-  installFakeWebSocket,
+  installFakeEventStream,
   openTasks,
   rememberWorkspace,
   routeInput,
@@ -162,7 +162,7 @@ test("keeps a departed task's sidebar status correct when session-list responses
   // response happens to RESOLVE last wins the cache write -- so a slow, early-issued response
   // that still says "running" can silently revert a faster, later-issued response that
   // correctly observed the task had gone idle.
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   const { csrfToken, workspace, task: taskA } = await createTask(request, process.cwd());
   const taskB = await rpcRequest<Record<string, unknown> & { taskId: string }>(
     request,

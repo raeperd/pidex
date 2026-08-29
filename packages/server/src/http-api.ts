@@ -39,15 +39,10 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
       throw new ORPCError("csrf", { message: "Invalid CSRF token" });
     return next();
   });
-  const requireWebSocket = base.middleware(async ({ context, next }) => {
-    if (context.transport !== "websocket")
-      throw new ORPCError("transport", { message: "This procedure requires WebSocket transport" });
-    return next();
-  });
   const implementation = base.use(protocolErrors);
   const workspaces = implementation.workspaces.use(requireCsrf);
   const chats = implementation.chats.use(requireCsrf);
-  const live = implementation.live.use(requireWebSocket);
+  const live = implementation.live.use(requireCsrf);
 
   return implementation.router({
     system: {
@@ -307,7 +302,6 @@ const protocolErrors = os.middleware(async ({ next }) => {
 
 interface RpcApiContext {
   req?: IncomingMessage;
-  transport: "http" | "websocket";
 }
 
 function actionInput(

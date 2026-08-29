@@ -5,14 +5,14 @@ import {
   emitServerEvent,
   fulfillAccepted,
   fulfillJson,
-  installFakeWebSocket,
+  installFakeEventStream,
   installIntegratedTitleBar,
   makeChatSnapshot,
   openTasks,
   patchRpcResponse,
   rememberWorkspace,
   routeInput,
-  waitForFakeWebSocket,
+  waitForFakeEventStream,
   workspaceName,
 } from "./support";
 
@@ -73,7 +73,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
     )
       starterRequests.push(path);
   });
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   await patchRpcResponse(page, "workspaces/open", (json) => ({
     ...json,
     models: json.path === `${process.cwd()}/docs` ? [e2eModel] : [],
@@ -95,7 +95,11 @@ test("creates, navigates, and durably submits the first starter prompt", async (
       revision: Number(input.expectedRevision) + 1,
     };
     connectedDuringConfiguration = await page.evaluate(() =>
-      Boolean((globalThis as typeof globalThis & { pidexTestSocket?: WebSocket }).pidexTestSocket),
+      Boolean(
+        (
+          globalThis as typeof globalThis & { pidexTestEventStreams?: Array<{ open: boolean }> }
+        ).pidexTestEventStreams?.some((stream) => stream.open),
+      ),
     );
     await fulfillJson(route, taskSnapshot);
   });
@@ -225,7 +229,7 @@ test("creates, navigates, and durably submits the first starter prompt", async (
   ]);
   expect(connectedDuringConfiguration).toBe(false);
   if (!initialTaskSnapshot) throw new Error("Expected the starter task's initial snapshot");
-  await waitForFakeWebSocket(page);
+  await waitForFakeEventStream(page);
   await emitServerEvent(page, {
     type: "snapshot",
     eventId: 1,
@@ -271,7 +275,7 @@ test("defers worktree creation until the first prompt is sent", async ({ page, r
   const disposedChats: string[] = [];
   const removedWorktrees: string[] = [];
   const sentPrompts: Record<string, unknown>[] = [];
-  await installFakeWebSocket(page);
+  await installFakeEventStream(page);
   await page.route("**/api/rpc/system/bootstrap", async (route) => {
     const response = await route.fetch();
     if (worktreeChatCreations === 3 && !worktreeBootstrapPending) {

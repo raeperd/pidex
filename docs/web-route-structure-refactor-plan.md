@@ -7,7 +7,7 @@ SvelteKit route-owned structure. The root layout will remain the single composit
 root and persistent application shell. The task route will own transcript, agent
 message, tool-call, and composer presentation.
 
-The refactor is structural. It must preserve URLs, API contracts, WebSocket behavior,
+The refactor is historical and predates the current HTTP event-stream transport. It must preserve URLs and API behavior,
 draft recovery, task switching, streaming updates, Markdown safety, and responsive UI
 behavior. Every commit must compile, typecheck, and pass the relevant tests before the
 next commit begins.
@@ -27,7 +27,7 @@ This plan is based on repository revision `330d29a`.
 
 ## Non-goals
 
-- Change the HTTP, oRPC, WebSocket, or `@pidex/api` contracts.
+- Change the HTTP, oRPC, or `@pidex/api` contracts.
 - Redesign the UI or alter existing CSS intentionally.
 - Change task URLs or introduce new SvelteKit routes.
 - Replace Marked, Shiki, Tailwind, or the current icon package.
@@ -134,7 +134,7 @@ Keep these concerns inside their owning Svelte components:
 Keep these concerns in separate prefixed TypeScript files:
 
 - HTTP and oRPC transport behavior.
-- WebSocket lifecycle, reconnect behavior, and event delivery.
+- Event-stream lifecycle, reconnect behavior, and event delivery.
 - Task snapshot caching and public URL construction.
 - Agent-message parsing and URL sanitization.
 

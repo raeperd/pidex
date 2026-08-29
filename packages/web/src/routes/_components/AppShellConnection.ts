@@ -1,6 +1,5 @@
-import { createORPCClient, ORPCError } from "@orpc/client";
-import { RPCLink } from "@orpc/client/websocket";
-import { PROTOCOL_VERSION, type PidexApiContractClient, type ServerEvent } from "@pidex/api";
+import { ORPCError } from "@orpc/client";
+import type { ServerEvent } from "@pidex/api";
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
@@ -10,7 +9,7 @@ interface ChatConnectionHandlers {
   onStateChange: (state: ConnectionState) => void;
 }
 
-interface ChatEventTransport {
+export interface ChatEventTransport {
   events: (
     input: { chatId: string; lastEventId?: number },
     options: { signal: AbortSignal },
@@ -20,7 +19,7 @@ interface ChatEventTransport {
 
 export function makeChatConnection(
   handlers: ChatConnectionHandlers,
-  transport: ChatEventTransport = makeWebSocketTransport(),
+  transport: ChatEventTransport,
 ) {
   let activeChatId: string | undefined;
   let lastEventId = 0;
@@ -114,25 +113,4 @@ export function makeChatConnection(
   }
 
   return { connect, reconnect, disconnect, close };
-}
-
-function makeWebSocketTransport(): ChatEventTransport {
-  let socket: WebSocket | undefined;
-  const endpoint = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`;
-  return {
-    events: (input, options) => {
-      const link = new RPCLink({
-        connect: () => {
-          socket = new WebSocket(endpoint);
-          return socket;
-        },
-      });
-      const client: PidexApiContractClient = createORPCClient(link);
-      return client.live.events({ protocolVersion: PROTOCOL_VERSION, ...input }, options);
-    },
-    close: () => {
-      socket?.close();
-      socket = undefined;
-    },
-  };
 }

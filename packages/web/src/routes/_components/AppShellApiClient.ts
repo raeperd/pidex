@@ -1,5 +1,6 @@
 import {
   pidexApiContract,
+  PROTOCOL_VERSION,
   type ActionOutcome,
   type Bootstrap,
   type ChatSnapshot,
@@ -7,6 +8,7 @@ import {
   type PidexApiContractClient,
   type RecentWorkspace,
   type SessionSummary,
+  type ServerEvent,
   type ToolOutputChunk,
   type TranscriptPage,
   type Workspace,
@@ -73,6 +75,13 @@ export function makePidexApiClient() {
 
   function getChat(chatId: string): Promise<ChatSnapshot> {
     return client.chats.get({ chatId });
+  }
+
+  function events(
+    input: { chatId: string; lastEventId?: number },
+    options: { signal: AbortSignal },
+  ): Promise<AsyncIterator<ServerEvent>> {
+    return client.live.events({ protocolVersion: PROTOCOL_VERSION, ...input }, options);
   }
 
   async function disposeChat(chatId: string): Promise<void> {
@@ -193,6 +202,7 @@ export function makePidexApiClient() {
     createChat,
     resumeTask,
     getChat,
+    events,
     disposeChat,
     sendMessage,
     abort,

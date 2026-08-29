@@ -48,6 +48,28 @@ describe("ChatConnection", () => {
     expect(transport.inputs[1]).toEqual({ chatId: "chat_12345", lastEventId: 7 });
     connection.close();
   });
+
+  it("cancels the active HTTP stream when disconnected", async () => {
+    const stream = pendingStream();
+    const transport = makeTransport([stream]);
+    const states: ConnectionState[] = [];
+    const connection = makeChatConnection(
+      {
+        onEvent: vi.fn(),
+        onInvalidChat: vi.fn(),
+        onStateChange: (state) => states.push(state),
+      },
+      transport,
+    );
+
+    connection.connect("chat_12345");
+    await vi.waitFor(() => expect(transport.options).toHaveLength(1));
+    connection.disconnect();
+
+    expect(transport.options[0]?.signal.aborted).toBe(true);
+    expect(stream.return).toHaveBeenCalledOnce();
+    expect(states.at(-1)).toBe("disconnected");
+  });
 });
 
 function runStatusEvent(eventId: number): ServerEvent {
@@ -78,16 +100,36 @@ function errorAfter(event: ServerEvent): AsyncIterator<ServerEvent> {
   };
 }
 
+function pendingStream(): AsyncIterator<ServerEvent> {
+  return {
+    next: vi.fn(() => new Promise<IteratorResult<ServerEvent>>(() => {})),
+    return: vi.fn(
+      async (): Promise<IteratorResult<ServerEvent>> => ({
+        done: true,
+        value: undefined,
+      }),
+    ),
+  };
+}
+
 function makeTransport(streams: AsyncIterator<ServerEvent>[]) {
   const inputs: Array<{ chatId: string; lastEventId?: number }> = [];
+  const requests: Array<{ signal: AbortSignal }> = [];
   return {
     inputs,
+    options: requests,
     close: vi.fn(),
-    events: vi.fn(async (input: { chatId: string; lastEventId?: number }) => {
-      inputs.push(input);
-      const stream = streams.shift();
-      if (!stream) throw new Error("No stream available");
-      return stream;
-    }),
+    events: vi.fn(
+      async (
+        input: { chatId: string; lastEventId?: number },
+        transportOptions: { signal: AbortSignal },
+      ) => {
+        inputs.push(input);
+        requests.push(transportOptions);
+        const stream = streams.shift();
+        if (!stream) throw new Error("No stream available");
+        return stream;
+      },
+    ),
   };
 }

@@ -6,7 +6,7 @@
 packages/
 ├── desktop/   # Electron shell and server process supervisor
 ├── web/       # Responsive Svelte, Vite, and Tailwind client
-├── server/    # HTTP, WebSocket, Pi, SQLite, auth, and Tailscale
+├── server/    # HTTP/SSE, Pi, SQLite, auth, and Tailscale
 ├── api/       # Browser-safe Valibot schemas, oRPC contract, and inferred types
 ├── e2e/       # Cross-application Playwright workflows
 └── tooling/   # Repository scripts
@@ -21,14 +21,14 @@ packages/
 ```text
 Electron main ──spawns and supervises──> server child process ──> Pi SDK
       │                                         │
-      │                                         ├──HTTP/WS──> Electron renderer
-      │                                         └──HTTPS/WS─> mobile browser
+      │                                         ├──HTTP/SSE──> Electron renderer
+      │                                         └──HTTPS/SSE─> mobile browser
       └──loads the shared Svelte web app
 ```
 
 - Electron starts the packaged server executable as a child process.
 - Electron checks readiness and owns restart, logs, and shutdown.
-- The renderer never imports server code; it uses HTTP and WebSocket.
+- The renderer never imports server code; it uses authenticated HTTP and SSE-compatible event streams.
 - Mobile uses the same web build and API through Tailscale Serve.
 - Closing the window may keep Electron and the server running.
 - Explicit Quit stops the child process and remote access.
@@ -63,7 +63,7 @@ Browser storage  unsent drafts and local UI preferences
 - Valibot for API validation and Effect Schema for persisted-data validation.
 - oRPC 2 native RPC for contract-first request/response calls.
 - Effect 4 beta for server workflows, dependency injection, and resource lifecycles.
-- Node HTTP, `ws`, and Drizzle ORM over `node:sqlite` in `packages/server`.
+- Node HTTP with SSE-compatible event streams and Drizzle ORM over `node:sqlite` in `packages/server`.
 
 ## Server composition
 
