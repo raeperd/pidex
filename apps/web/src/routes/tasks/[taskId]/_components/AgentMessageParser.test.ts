@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  parseCodeInfo,
   parseAgentMessage,
   safeAgentMessageHref,
   type AgentMessageNode,
@@ -60,6 +59,22 @@ describe("parseAgentMessage", () => {
     expect(node).toMatchObject({ type: "code", language: "ts", code: "const value = 1;" });
   });
 
+  it("extracts code fence language and filename metadata", () => {
+    const [node] = parseAgentMessage('```tsx title="src/AgentMessage.svelte"\nconst value = 1;');
+
+    expect(node).toMatchObject({
+      type: "code",
+      language: "tsx",
+      title: "src/AgentMessage.svelte",
+    });
+  });
+
+  it("falls back to plain text for an unannotated code fence", () => {
+    const [node] = parseAgentMessage("```\nconst value = 1;");
+
+    expect(node).toMatchObject({ type: "code", language: "text" });
+  });
+
   it("decodes entities in text while preserving code spans", () => {
     const [paragraph] = parseAgentMessage("AT&amp;T &copy; &#169; &copy `&amp; &copy;`");
     expect(paragraph?.type).toBe("paragraph");
@@ -95,19 +110,6 @@ describe("safeAgentMessageHref", () => {
       expect(safeAgentMessageHref(href, "https://pidex.example/tasks/1")).toBeNull();
     },
   );
-});
-
-describe("parseCodeInfo", () => {
-  it("extracts a language and filename", () => {
-    expect(parseCodeInfo('tsx title="src/AgentMessage.svelte"')).toEqual({
-      language: "tsx",
-      title: "src/AgentMessage.svelte",
-    });
-  });
-
-  it("falls back to plain text", () => {
-    expect(parseCodeInfo(undefined)).toEqual({ language: "text" });
-  });
 });
 
 function flattenText(nodes: AgentMessageNode[]): string {

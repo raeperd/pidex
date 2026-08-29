@@ -68,21 +68,6 @@ export function safeAgentMessageHref(value: string, baseHref = browserHref()): s
   }
 }
 
-export function parseCodeInfo(info: string | undefined): {
-  language: string;
-  title?: string;
-} {
-  const normalized = info?.trim() ?? "";
-  if (!normalized) return { language: "text" };
-
-  const [language = "text", ...metadata] = normalized.split(/\s+/);
-  const titleMatch = normalized.match(
-    /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i,
-  );
-  const title = titleMatch?.[1] ?? titleMatch?.[2] ?? titleMatch?.[3] ?? inferredFileName(metadata);
-  return { language: language.toLowerCase(), ...(title ? { title } : {}) };
-}
-
 function parseTokens(tokens: Token[], parentKey: string): AgentMessageNode[] {
   return tokens.flatMap((token, index) =>
     parseToken(token as MarkedToken, `${parentKey}.${index}`),
@@ -101,8 +86,22 @@ function parseToken(token: MarkedToken, position: string): AgentMessageNode[] {
     case "blockquote":
       return [{ type: "blockquote", key, children: parseTokens(token.tokens, key) }];
     case "code": {
-      const info = parseCodeInfo(token.lang);
-      return [{ type: "code", key, code: token.text, ...info }];
+      const normalized = token.lang?.trim() ?? "";
+      const [language = "text", ...metadata] = normalized ? normalized.split(/\s+/) : [];
+      const titleMatch = normalized.match(
+        /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i,
+      );
+      const title =
+        titleMatch?.[1] ?? titleMatch?.[2] ?? titleMatch?.[3] ?? inferredFileName(metadata);
+      return [
+        {
+          type: "code",
+          key,
+          code: token.text,
+          language: language.toLowerCase(),
+          ...(title ? { title } : {}),
+        },
+      ];
     }
     case "heading":
       return [
