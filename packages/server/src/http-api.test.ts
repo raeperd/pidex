@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createORPCClient } from "@orpc/client";
+import { getEventMeta, createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
   pidexApiContract,
@@ -150,7 +150,8 @@ describe.sequential("HTTP API endpoints", () => {
   it("streams chat events through the oRPC HTTP event stream", async () => {
     const events = await subscribeChatEvents(api, chatId);
 
-    await expect(events.next()).resolves.toMatchObject({
+    const result = await events.next();
+    expect(result).toMatchObject({
       done: false,
       value: {
         type: "snapshot",
@@ -158,8 +159,37 @@ describe.sequential("HTTP API endpoints", () => {
         snapshot: { chatId },
       },
     });
+    if (result.done) throw new Error("Expected a snapshot event");
+    expect(getEventMeta(result.value)).toEqual({
+      id: String(result.value.eventId),
+      retry: 2_000,
+    });
 
     await events.return?.();
+  });
+
+  it("uses the oRPC Last-Event-ID header as the replay cursor", async () => {
+    const initial = await subscribeChatEvents(api, chatId);
+    const snapshot = await nextMatchingEvent(initial, (event) => event.type === "snapshot");
+    const chat = await currentChat();
+    await api.chats.rename({ ...actionFor(chat), name: "Header cursor" });
+
+    const replay = await api.live.events(
+      { protocolVersion: PROTOCOL_VERSION, chatId, lastEventId: 0 },
+      { lastEventId: String(snapshot.eventId) },
+    );
+    try {
+      await expect(
+        nextMatchingEvent(replay, (event) => event.type === "session"),
+      ).resolves.toMatchObject({
+        type: "session",
+        chatId,
+        name: "Header cursor",
+      });
+    } finally {
+      await initial.return?.();
+      await replay.return?.();
+    }
   });
 
   it("serves typed chat events as SSE over the Node HTTP boundary", async () => {

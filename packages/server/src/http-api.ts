@@ -279,9 +279,12 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
       }),
     }),
     live: {
-      events: live.events.effect(function* (_, input) {
+      events: live.events.effect(function* (options, input) {
         const chat = yield* manager.chat(input.chatId);
-        return yield* manager.events(chat, input.lastEventId);
+        return yield* manager.events(
+          chat,
+          parseReplayCursor(options.lastEventId) ?? input.lastEventId,
+        );
       }),
     },
   });
@@ -351,4 +354,10 @@ function validateDialogResponse(
   return Effect.fail(
     apiError("dialog_value_invalid", "Extension response does not match the pending dialog"),
   );
+}
+
+function parseReplayCursor(value: string | undefined) {
+  if (value === undefined || !/^\d+$/.test(value)) return undefined;
+  const cursor = Number(value);
+  return Number.isSafeInteger(cursor) ? cursor : undefined;
 }

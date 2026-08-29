@@ -23,7 +23,6 @@ export function makeChatConnection(
 ) {
   let activeChatId: string | undefined;
   let lastEventId = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let stream: AsyncIterator<ServerEvent> | undefined;
   let controller: AbortController | undefined;
   let generation = 0;
@@ -39,8 +38,6 @@ export function makeChatConnection(
   }
 
   function disconnect() {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = undefined;
     generation++;
     controller?.abort();
     controller = undefined;
@@ -60,8 +57,6 @@ export function makeChatConnection(
     const chatId = activeChatId;
     if (!chatId) return;
 
-    clearTimeout(reconnectTimer);
-    reconnectTimer = undefined;
     controller?.abort();
     void stream?.return?.();
     stream = undefined;
@@ -103,12 +98,11 @@ export function makeChatConnection(
         handlers.onInvalidChat();
         return;
       }
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
         handlers.onStateChange("disconnected");
         return;
       }
-      handlers.onStateChange("reconnecting");
-      reconnectTimer = setTimeout(open, 800);
+      handlers.onStateChange("disconnected");
     }
   }
 
