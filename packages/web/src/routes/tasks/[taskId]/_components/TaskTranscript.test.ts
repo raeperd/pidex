@@ -5,7 +5,6 @@ import {
   groupTranscriptItems,
   resolveFollowing,
   toolActivitySummary,
-  type TranscriptRow,
 } from "./TaskTranscript.svelte";
 import TaskTranscript from "./TaskTranscript.svelte";
 
@@ -42,8 +41,8 @@ describe("TaskTranscript", () => {
     ]);
 
     expect(
-      rows.map((row: TranscriptRow) =>
-        row.kind === "tools" ? row.items.map((item) => item.id) : row.item.id,
+      rows.map((row) =>
+        row.kind === "tools" ? row.items.map((item: ToolItem) => item.id) : row.item.id,
       ),
     ).toEqual(["request", ["read-one", "read-two"], "answer", ["shell-one"]]);
   });

@@ -9,7 +9,7 @@ interface ChatConnectionHandlers {
   onStateChange: (state: ConnectionState) => void;
 }
 
-export interface ChatEventTransport {
+interface ChatEventTransport {
   events: (
     input: { chatId: string; lastEventId?: number },
     options: { signal: AbortSignal },

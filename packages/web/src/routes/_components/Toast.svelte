@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  export interface ToastTimer {
+  interface ToastTimer {
     readonly start: () => void;
     readonly pause: () => void;
     readonly resume: () => void;

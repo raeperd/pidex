@@ -22,7 +22,7 @@
     return event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches;
   }
 
-  export type ComposerCommand = Workspace["commands"][number];
+  type ComposerCommand = Workspace["commands"][number];
 
   export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
     return [

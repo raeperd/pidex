@@ -2,7 +2,7 @@
   import type { SkillItem, TranscriptItem, ToolItem } from "@pidex/api";
   import { toolCallKind } from "./ToolCall.svelte";
 
-  export type TranscriptRow =
+  type TranscriptRow =
     | { kind: "item"; item: Exclude<TranscriptItem, ToolItem> }
     | { kind: "tools"; id: string; items: ToolItem[] };
 
