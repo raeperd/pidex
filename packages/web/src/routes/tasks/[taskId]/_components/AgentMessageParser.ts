@@ -3,11 +3,8 @@ import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 
 type AgentMessageAlignment = "center" | "left" | "right" | null;
 
-interface AgentMessageNodeBase {
+interface AgentMessageContainerNode {
   key: string;
-}
-
-interface AgentMessageContainerNode extends AgentMessageNodeBase {
   children: AgentMessageNode[];
 }
 
