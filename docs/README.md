@@ -21,5 +21,5 @@ The POC is implemented far enough for the local verification suite, but it is no
 product. In particular, managed Tailscale setup, pairing, device credentials, revocation, and
 packaged release acceptance remain outside the current implementation.
 
-Documents in [archive](archive/) are historical inputs, completed plans, or future-only research.
-They are retained for context and should not be treated as current requirements.
+Documents in [archive](archive/) are historical inputs or future-only research. They are retained
+for context and should not be treated as current requirements.

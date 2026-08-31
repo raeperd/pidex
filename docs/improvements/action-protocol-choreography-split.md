@@ -118,7 +118,5 @@ The wire behaviour is unchanged:
   action and after a failed one, and still suppresses the broadcast on replay (`:515`).
 - **Prompt actions keep their separate status path** via `markPromptStatus`, not `markActionStatus`.
 
-Related: `docs/archive/completed-improvements/http-error-status-double-table.md` also edits `http-api.ts`, but only its
-error middleware and throw sites — the scopes are disjoint. If both land,
-`docs/improvements/run-status-vocabulary-scatter.md` is the one that formalises the prompt-status path
-this document leaves alone.
+`docs/improvements/run-status-vocabulary-scatter.md` is the one that formalises the prompt-status
+path this document leaves alone.

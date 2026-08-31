@@ -6,8 +6,8 @@ survive. Reach for one when its friction is the thing blocking you; they are ind
 "Related" line says otherwise.
 
 Line references were last verified against an earlier tree. Re-check them before editing. The
-current branch keeps only plans that still describe unfinished work; completed plans are in
-`../archive/completed-improvements/`.
+current branch keeps only plans that still describe unfinished work. Optional future-only cleanups
+are in `../archive/future-cleanups/`.
 
 ## Server
 
