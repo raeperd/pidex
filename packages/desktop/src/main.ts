@@ -231,7 +231,9 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     Stream.decodeText(),
     Stream.splitLines,
     Stream.filter((line) => line.length > 0),
-    Stream.runForEach((line) => remember(logs, line)),
+    Stream.runForEach((line) =>
+      Ref.update(logs, (current) => [...current, line.slice(0, 2000)].slice(-200)),
+    ),
     Effect.catch((error) => Effect.logWarning(`Pidex server output stopped: ${String(error)}`)),
     Effect.forkScoped,
   );
@@ -241,10 +243,6 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     ),
   );
 });
-
-function remember(logs: Ref.Ref<ReadonlyArray<string>>, line: string) {
-  return Ref.update(logs, (current) => [...current, line.slice(0, 2000)].slice(-200));
-}
 
 const checkServerHealth = Effect.tryPromise({
   try: () => apiClient.system.health({}),
