@@ -13,8 +13,7 @@ NodeRuntime.runMain(
       yield* Effect.sync(() => app.setName("pidex"));
       yield* Effect.tryPromise({
         try: () => app.whenReady(),
-        catch: (cause) =>
-          desktopServerError("electron.ready", "Electron did not become ready", cause),
+        catch: (cause) => desktopServerError("Electron did not become ready", cause),
       });
 
       const stateDirectory =
@@ -43,7 +42,6 @@ NodeRuntime.runMain(
               Effect.flatMap((recentLogs) =>
                 Effect.fail(
                   desktopServerError(
-                    "server.ready",
                     `Pidex server did not become ready. Recent logs:\n${recentLogs.slice(-20).join("\n")}`,
                     error,
                   ),
@@ -69,17 +67,12 @@ NodeRuntime.runMain(
 
 interface DesktopServerError {
   readonly _tag: "DesktopServerError";
-  readonly operation: string;
   readonly message: string;
   readonly cause: unknown;
 }
 
-function desktopServerError(
-  operation: string,
-  message: string,
-  cause: unknown,
-): DesktopServerError {
-  return { _tag: "DesktopServerError", operation, message, cause };
+function desktopServerError(message: string, cause: unknown): DesktopServerError {
+  return { _tag: "DesktopServerError", message, cause };
 }
 
 function registerIpcHandler() {
@@ -168,13 +161,11 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
       });
       return created;
     },
-    catch: (cause) =>
-      desktopServerError("electron.window.create", "Electron could not create a window", cause),
+    catch: (cause) => desktopServerError("Electron could not create a window", cause),
   });
   yield* Effect.tryPromise({
     try: () => window.loadURL(targetUrl),
-    catch: (cause) =>
-      desktopServerError("electron.window.load", "Electron could not load the application", cause),
+    catch: (cause) => desktopServerError("Electron could not load the application", cause),
   });
 });
 
@@ -206,7 +197,7 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   );
   const handle = yield* command.pipe(
     Effect.mapError((cause) =>
-      desktopServerError("server.spawn", "Pidex could not start its server process", cause),
+      desktopServerError("Pidex could not start its server process", cause),
     ),
   );
   yield* handle.all.pipe(
@@ -220,27 +211,19 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     Effect.forkScoped,
   );
   yield* handle.exitCode.pipe(
-    Effect.mapError((cause) =>
-      desktopServerError("server.process", "The Pidex server process failed", cause),
-    ),
+    Effect.mapError((cause) => desktopServerError("The Pidex server process failed", cause)),
   );
 });
 
 const checkServerHealth = Effect.tryPromise({
   try: () => apiClient.system.health({}),
-  catch: (cause) => desktopServerError("server.health", "Pidex could not reach its server", cause),
+  catch: (cause) => desktopServerError("Pidex could not reach its server", cause),
 }).pipe(
   Effect.flatMap((health) => {
     const result = safeParse(healthSchema, health);
     return result.success
       ? Effect.void
-      : Effect.fail(
-          desktopServerError(
-            "server.health",
-            "Pidex received an invalid health response",
-            result.issues,
-          ),
-        );
+      : Effect.fail(desktopServerError("Pidex received an invalid health response", result.issues));
   }),
 );
 
