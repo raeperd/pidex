@@ -190,7 +190,114 @@ async function installFakeEventStream(page: Page) {
 }
 
 async function emitServerEvent(page: Page, event: unknown) {
-  await page.evaluate((serverEvent) => {
+  const wireEvent = (() => {
+    if (typeof event !== "object" || event === null || Array.isArray(event)) return event;
+    const input = event as Record<string, unknown>;
+    if (typeof input.source === "string") return event;
+    const eventId = input.eventId;
+    const chatId = input.chatId;
+    if (typeof eventId !== "number" || typeof chatId !== "string") return event;
+    const { eventId: _, chatId: __, type, ...payload } = input;
+    if (typeof type !== "string") return event;
+    const metadata = { eventId, chatId };
+    function convertMessage() {
+      const item =
+        typeof payload.item === "object" && payload.item !== null && !Array.isArray(payload.item)
+          ? (payload.item as Record<string, unknown>)
+          : {};
+      const role = item.type === "user" || item.type === "assistant" ? item.type : "assistant";
+      const timestamp =
+        typeof item.timestamp === "string" ? Date.parse(item.timestamp) : Date.now();
+      return {
+        ...metadata,
+        source: "pi",
+        event: {
+          type: "message_end",
+          message: {
+            id: item.id,
+            role,
+            content: [
+              ...(typeof item.thinking === "string"
+                ? [{ type: "thinking", thinking: item.thinking }]
+                : []),
+              { type: "text", text: typeof item.text === "string" ? item.text : "" },
+            ],
+            timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+          },
+        },
+      };
+    }
+    function convertTool() {
+      const item =
+        typeof payload.item === "object" && payload.item !== null && !Array.isArray(payload.item)
+          ? (payload.item as Record<string, unknown>)
+          : {};
+      const argumentSummary =
+        typeof item.argumentSummary === "string" ? item.argumentSummary : "{}";
+      let args: unknown = argumentSummary;
+      try {
+        args = JSON.parse(argumentSummary);
+      } catch {
+        // Keep the original summary when the fixture is intentionally not JSON.
+      }
+      if (item.state === "running")
+        return {
+          ...metadata,
+          source: "pi",
+          event: { type: "tool_execution_start", toolCallId: item.id, toolName: item.name, args },
+        };
+      let result: unknown = {
+        content: [{ type: "text", text: item.preview ?? "" }],
+      };
+      if (typeof item.preview === "string") {
+        try {
+          result = JSON.parse(item.preview);
+        } catch {
+          // Keep the text-shaped fallback for plain tool output.
+        }
+      }
+      return {
+        ...metadata,
+        source: "pi",
+        event: {
+          type: "tool_execution_end",
+          toolCallId: item.id,
+          toolName: item.name,
+          args,
+          result,
+          isError: item.state === "error",
+        },
+      };
+    }
+    if (
+      ["snapshot", "run_status", "notice", "context_usage", "session", "extension_dialog"].includes(
+        type,
+      )
+    )
+      return { ...metadata, source: "pidex", event: { type, ...payload } };
+    if (type === "message") return convertMessage();
+    if (type === "text_delta") {
+      const channel = payload.channel === "thinking" ? "thinking_delta" : "text_delta";
+      return {
+        ...metadata,
+        source: "pi",
+        event: {
+          type: "message_update",
+          message: { id: payload.itemId, role: "assistant", timestamp: 0 },
+          assistantMessageEvent: { type: channel, delta: payload.delta },
+        },
+      };
+    }
+    if (type === "tool") return convertTool();
+    if (type === "queue")
+      return {
+        ...metadata,
+        source: "pi",
+        event: { type: "queue_update", steering: payload.steering, followUp: payload.followUp },
+      };
+    return { ...metadata, source: "pi", event: { type, ...payload } };
+  })();
+  await page.evaluate((serializedEvent) => {
     const scope = globalThis as typeof globalThis & {
       pidexTestEventStreams?: FakeEventStream[];
     };
@@ -198,10 +305,10 @@ async function emitServerEvent(page: Page, event: unknown) {
     if (!stream?.controller) throw new Error("Expected an active HTTP event stream");
     stream.controller.enqueue(
       new TextEncoder().encode(
-        `event: message\ndata: ${JSON.stringify({ json: serverEvent })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ json: serializedEvent })}\n\n`,
       ),
     );
-  }, event);
+  }, wireEvent);
 }
 
 type FakeEventStream = {

@@ -165,54 +165,40 @@ const chatSnapshotSchema = v.object({
   extensionDialog: v.optional(extensionDialogSchema),
 });
 const eventBase = v.object({ eventId: positiveInteger(), chatId: idSchema });
-export const serverEventSchema = v.variant("type", [
+const pidexEventSchema = v.variant("type", [
+  v.object({ type: v.literal("snapshot"), snapshot: chatSnapshotSchema }),
   v.object({
-    ...eventBase.entries,
-    type: v.literal("snapshot"),
-    snapshot: chatSnapshotSchema,
-  }),
-  v.object({
-    ...eventBase.entries,
-    type: v.literal("message"),
-    item: v.union([textItemSchema, skillItemSchema]),
-  }),
-  v.object({
-    ...eventBase.entries,
-    type: v.literal("text_delta"),
-    itemId: v.string(),
-    delta: boundedString(32_768),
-    channel: v.picklist(["text", "thinking"]),
-  }),
-  v.object({ ...eventBase.entries, type: v.literal("tool"), item: toolItemSchema }),
-  v.object({
-    ...eventBase.entries,
     type: v.literal("run_status"),
     status: runStatusSchema,
     revision: nonnegativeInteger(),
     run: v.optional(runOutcomeSchema),
   }),
+  v.object({ type: v.literal("notice"), item: noticeItemSchema }),
   v.object({
-    ...eventBase.entries,
-    type: v.literal("queue"),
-    steering: v.array(v.string()),
-    followUp: v.array(v.string()),
-  }),
-  v.object({ ...eventBase.entries, type: v.literal("notice"), item: noticeItemSchema }),
-  v.object({
-    ...eventBase.entries,
     type: v.literal("session"),
     name: v.optional(v.string()),
     stats: statsSchema,
   }),
   v.object({
-    ...eventBase.entries,
     type: v.literal("context_usage"),
     usage: contextUsageSchema,
   }),
   v.object({
-    ...eventBase.entries,
     type: v.literal("extension_dialog"),
     dialog: v.optional(extensionDialogSchema),
+  }),
+]);
+const piEventSchema = v.looseObject({ type: v.string() });
+export const serverEventSchema = v.union([
+  v.object({
+    ...eventBase.entries,
+    source: v.literal("pi"),
+    event: piEventSchema,
+  }),
+  v.object({
+    ...eventBase.entries,
+    source: v.literal("pidex"),
+    event: pidexEventSchema,
   }),
 ]);
 const serverEventsSchema: Schema<
@@ -365,6 +351,8 @@ export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
 export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
 export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
 export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
+export type PiEvent = v.InferOutput<typeof piEventSchema>;
+export type PidexEvent = v.InferOutput<typeof pidexEventSchema>;
 
 function boundedString(maximum: number) {
   return v.pipe(v.string(), v.maxLength(maximum));

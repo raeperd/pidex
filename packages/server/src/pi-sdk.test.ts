@@ -13,6 +13,25 @@ import {
 } from "./pi-sdk.js";
 
 describe("Effect Pi adapter", () => {
+  it.effect("preserves raw Pi events for downstream consumers", () =>
+    Effect.gen(function* () {
+      const fixture = makeSessionFixture();
+      const session = yield* acquireAdapterSession(Effect.succeed(fixture));
+      const collected = yield* session.events.pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* waitForSubscription(fixture);
+      fixture.emit({ type: "pi", event: { type: "agent_start" } });
+
+      assert.deepEqual(yield* Fiber.join(collected), [
+        { type: "pi", event: { type: "agent_start" } },
+      ]);
+    }),
+  );
+
   it.effect("streams events in order and unsubscribes when the stream ends", () =>
     Effect.gen(function* () {
       const fixture = makeSessionFixture();
