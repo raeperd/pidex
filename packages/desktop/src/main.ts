@@ -4,7 +4,7 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import path from "node:path";
-import { Deferred, Duration, Effect, Ref, Schedule, Stream, type Scope } from "effect";
+import { Deferred, Duration, Effect, Ref, Schedule, Stream } from "effect";
 import { ChildProcess } from "effect/unstable/process";
 
 NodeRuntime.runMain(
@@ -25,7 +25,15 @@ NodeRuntime.runMain(
 
       if (!process.env.PIDEX_WEB_URL) {
         const logs = yield* Ref.make<ReadonlyArray<string>>([]);
-        yield* superviseServer(spawnServer(stateDirectory, logs)).pipe(
+        yield* Effect.scoped(spawnServer(stateDirectory, logs)).pipe(
+          Effect.catch((error) => Effect.logWarning(`${error.message}: ${String(error.cause)}`)),
+          Effect.repeat(
+            Schedule.exponential("300 millis", 2).pipe(
+              Schedule.modifyDelay(({ duration }) =>
+                Effect.succeed(Duration.min(duration, Duration.seconds(5))),
+              ),
+            ),
+          ),
           Effect.forkScoped({ startImmediately: true }),
         );
         yield* checkServerHealth.pipe(
@@ -65,20 +73,6 @@ interface DesktopServerError {
   readonly message: string;
   readonly cause: unknown;
 }
-
-const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
-  runServer: Effect.Effect<void, DesktopServerError, Scope.Scope | R>,
-) {
-  const runScoped = Effect.scoped(runServer).pipe(
-    Effect.catch((error) => Effect.logWarning(`${error.message}: ${String(error.cause)}`)),
-  );
-  const restartSchedule = Schedule.exponential("300 millis", 2).pipe(
-    Schedule.modifyDelay(({ duration }) =>
-      Effect.succeed(Duration.min(duration, Duration.seconds(5))),
-    ),
-  );
-  return yield* runScoped.pipe(Effect.repeat(restartSchedule));
-});
 
 function desktopServerError(
   operation: string,
