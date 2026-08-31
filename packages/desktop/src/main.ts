@@ -14,7 +14,12 @@ const main = Effect.scoped(
     yield* Effect.tryPromise({
       try: () => app.whenReady(),
       catch: (cause) =>
-        desktopServerError("electron.ready", "Electron did not become ready", cause),
+        ({
+          _tag: "DesktopServerError",
+          operation: "electron.ready",
+          message: "Electron did not become ready",
+          cause,
+        }) satisfies DesktopServerError,
     });
 
     const stateDirectory =
@@ -78,26 +83,17 @@ const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function* (
     Effect.catch((error) =>
       recentLogs.pipe(
         Effect.flatMap((logs) =>
-          Effect.fail(
-            desktopServerError(
-              "server.ready",
-              `Pidex server did not become ready. Recent logs:\n${logs.slice(-20).join("\n")}`,
-              error,
-            ),
-          ),
+          Effect.fail({
+            _tag: "DesktopServerError",
+            operation: "server.ready",
+            message: `Pidex server did not become ready. Recent logs:\n${logs.slice(-20).join("\n")}`,
+            cause: error,
+          } satisfies DesktopServerError),
         ),
       ),
     ),
   );
 });
-
-function desktopServerError(
-  operation: string,
-  message: string,
-  cause: unknown,
-): DesktopServerError {
-  return { _tag: "DesktopServerError", operation, message, cause };
-}
 
 function registerIpcHandler() {
   return Effect.acquireRelease(
@@ -186,12 +182,22 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
       return created;
     },
     catch: (cause) =>
-      desktopServerError("electron.window.create", "Electron could not create a window", cause),
+      ({
+        _tag: "DesktopServerError",
+        operation: "electron.window.create",
+        message: "Electron could not create a window",
+        cause,
+      }) satisfies DesktopServerError,
   });
   yield* Effect.tryPromise({
     try: () => window.loadURL(targetUrl),
     catch: (cause) =>
-      desktopServerError("electron.window.load", "Electron could not load the application", cause),
+      ({
+        _tag: "DesktopServerError",
+        operation: "electron.window.load",
+        message: "Electron could not load the application",
+        cause,
+      }) satisfies DesktopServerError,
   });
 });
 
@@ -222,8 +228,14 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     },
   );
   const handle = yield* command.pipe(
-    Effect.mapError((cause) =>
-      desktopServerError("server.spawn", "Pidex could not start its server process", cause),
+    Effect.mapError(
+      (cause) =>
+        ({
+          _tag: "DesktopServerError",
+          operation: "server.spawn",
+          message: "Pidex could not start its server process",
+          cause,
+        }) satisfies DesktopServerError,
     ),
   );
   yield* handle.all.pipe(
@@ -235,8 +247,14 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     Effect.forkScoped,
   );
   yield* handle.exitCode.pipe(
-    Effect.mapError((cause) =>
-      desktopServerError("server.process", "The Pidex server process failed", cause),
+    Effect.mapError(
+      (cause) =>
+        ({
+          _tag: "DesktopServerError",
+          operation: "server.process",
+          message: "The Pidex server process failed",
+          cause,
+        }) satisfies DesktopServerError,
     ),
   );
 });
@@ -247,19 +265,24 @@ function remember(logs: Ref.Ref<ReadonlyArray<string>>, line: string) {
 
 const checkServerHealth = Effect.tryPromise({
   try: () => apiClient.system.health({}),
-  catch: (cause) => desktopServerError("server.health", "Pidex could not reach its server", cause),
+  catch: (cause) =>
+    ({
+      _tag: "DesktopServerError",
+      operation: "server.health",
+      message: "Pidex could not reach its server",
+      cause,
+    }) satisfies DesktopServerError,
 }).pipe(
   Effect.flatMap((health) => {
     const result = safeParse(healthSchema, health);
     return result.success
       ? Effect.void
-      : Effect.fail(
-          desktopServerError(
-            "server.health",
-            "Pidex received an invalid health response",
-            result.issues,
-          ),
-        );
+      : Effect.fail({
+          _tag: "DesktopServerError",
+          operation: "server.health",
+          message: "Pidex received an invalid health response",
+          cause: result.issues,
+        } satisfies DesktopServerError);
   }),
 );
 
@@ -301,7 +324,12 @@ if (import.meta.vitest) {
         const attempts = yield* Ref.make(0);
         const checkHealth = Ref.update(attempts, (count) => count + 1).pipe(
           Effect.andThen(
-            Effect.fail(desktopServerError("server.health", "Health request failed", "offline")),
+            Effect.fail({
+              _tag: "DesktopServerError",
+              operation: "server.health",
+              message: "Health request failed",
+              cause: "offline",
+            } satisfies DesktopServerError),
           ),
         );
 
