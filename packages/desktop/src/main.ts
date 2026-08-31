@@ -5,7 +5,7 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Deferred, Duration, Effect, Ref, Schedule, Stream, type Scope } from "effect";
+import { Deferred, Duration, Effect, Fiber, Ref, Schedule, Stream, type Scope } from "effect";
 import { ChildProcess } from "effect/unstable/process";
 
 const main = Effect.scoped(
@@ -52,7 +52,7 @@ interface DesktopServerError {
   readonly cause: unknown;
 }
 
-export const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
+const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
   runServer: Effect.Effect<void, DesktopServerError, Scope.Scope | R>,
 ) {
   const runScoped = Effect.scoped(runServer).pipe(
@@ -66,7 +66,7 @@ export const superviseServer = Effect.fn("desktop.server.supervise")(function* <
   return yield* runScoped.pipe(Effect.repeat(restartSchedule));
 });
 
-export const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function* (
+const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function* (
   checkHealth: Effect.Effect<void, DesktopServerError>,
   recentLogs: Effect.Effect<ReadonlyArray<string>>,
   options: { readonly attempts?: number; readonly delay?: Duration.Input } = {},
@@ -91,7 +91,7 @@ export const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function
   );
 });
 
-export function desktopServerError(
+function desktopServerError(
   operation: string,
   message: string,
   cause: unknown,
@@ -157,7 +157,9 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
     try: () => {
       const trustedOrigin = new URL(targetUrl).origin;
       const created = new BrowserWindow({
-        icon: appIconPath,
+        icon: app.isPackaged
+          ? path.join(process.resourcesPath, "icon.png")
+          : path.resolve(import.meta.dirname, "../assets/icon.png"),
         width: 1280,
         height: 820,
         minWidth: 320,
@@ -261,11 +263,58 @@ const checkServerHealth = Effect.tryPromise({
   }),
 );
 
-const appIconPath = app.isPackaged
-  ? path.join(process.resourcesPath, "icon.png")
-  : path.resolve(import.meta.dirname, "../assets/icon.png");
 const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
 const localUrl = `http://127.0.0.1:${port}`;
 const apiClient: PidexApiContractClient = createORPCClient(
   new RPCLink({ origin: localUrl, url: "/api/rpc" }),
 );
+
+if (import.meta.vitest) {
+  const { expect, it } = import.meta.vitest;
+
+  it("releases the server process when supervision is interrupted", async () => {
+    const stopped = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const exited = yield* Deferred.make<void>();
+          const stoppedState = yield* Ref.make(false);
+          const runServer = Effect.acquireRelease(Deferred.succeed(started, undefined), () =>
+            Ref.set(stoppedState, true),
+          ).pipe(Effect.andThen(Deferred.await(exited)));
+
+          const fiber = yield* superviseServer(runServer).pipe(Effect.forkScoped);
+          yield* Deferred.await(started);
+          yield* Fiber.interrupt(fiber);
+
+          return yield* Ref.get(stoppedState);
+        }),
+      ),
+    );
+
+    expect(stopped).toBe(true);
+  });
+
+  it("reports recent logs after readiness retries are exhausted", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const attempts = yield* Ref.make(0);
+        const checkHealth = Ref.update(attempts, (count) => count + 1).pipe(
+          Effect.andThen(
+            Effect.fail(desktopServerError("server.health", "Health request failed", "offline")),
+          ),
+        );
+
+        const error = yield* waitForServer(checkHealth, Effect.succeed(["server failed"]), {
+          attempts: 3,
+          delay: 0,
+        }).pipe(Effect.flip);
+
+        return { attempts: yield* Ref.get(attempts), error };
+      }),
+    );
+
+    expect(result.attempts).toBe(3);
+    expect(result.error.message).toContain("server failed");
+  });
+}

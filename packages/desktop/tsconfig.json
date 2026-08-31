@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node", "electron"],
+    "types": ["node", "electron", "vitest/importMeta"],
     "lib": ["ES2023", "DOM"]
   },
   "include": ["src"],
