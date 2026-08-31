@@ -19,14 +19,14 @@ interface ActionInput {
   sessionKey: string;
 }
 
-export const requestDigest = (value: unknown) =>
-  createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
 class MetadataError extends Schema.TaggedErrorClass<MetadataError>()("MetadataError", {
   operation: Schema.String,
   message: Schema.String,
   cause: Schema.Defect(),
 }) {}
+
+export const requestDigest = (value: unknown) =>
+  createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 export type MetadataService = ReturnType<typeof makeMetadataService>;
 
@@ -43,7 +43,7 @@ export function makeMetadataLayer(stateDir?: string) {
 }
 
 /** Low-level synchronous SQLite boundary. Application code consumes it through `Metadata`. */
-export function makeMetadataStore(stateDir?: string) {
+function makeMetadataStore(stateDir?: string) {
   const dir = stateDir ?? process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const sqlite = new DatabaseSync(path.join(dir, "pidex.sqlite"));
@@ -544,7 +544,7 @@ export function makeMetadataStore(stateDir?: string) {
   };
 }
 
-export type MetadataStore = ReturnType<typeof makeMetadataStore>;
+type MetadataStore = ReturnType<typeof makeMetadataStore>;
 
 function assertCurrentRevision(currentRevision: number, expectedRevision: number) {
   if (currentRevision !== expectedRevision)
