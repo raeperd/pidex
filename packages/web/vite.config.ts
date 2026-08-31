@@ -4,15 +4,11 @@ import { defineConfig, type ConfigEnv, type Plugin, type UserConfig } from "vite
 import { createPidexApplication } from "../server/src/main.ts";
 import { parsePort } from "../server/src/security.ts";
 
-interface DevelopmentEnvironment {
-  readonly PORT?: string | undefined;
-}
-
 export default defineConfig((configEnv) => createViteConfig(configEnv));
 
 export function createViteConfig(
   { command, isPreview, mode }: ConfigEnv,
-  environment: DevelopmentEnvironment = process.env,
+  environment: { readonly PORT?: string | undefined } = process.env,
 ): UserConfig {
   const development = command === "serve" && !isPreview && mode !== "test";
   const config: UserConfig = {
