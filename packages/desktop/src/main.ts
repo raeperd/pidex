@@ -177,7 +177,7 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   const serverDirectory = app.isPackaged
     ? path.join(process.resourcesPath, "server")
     : path.join(repositoryRoot, "packages/server");
-  const command = ChildProcess.make(
+  const handle = yield* ChildProcess.make(
     process.execPath,
     [path.join(serverDirectory, "dist/main.js")],
     {
@@ -194,8 +194,7 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
       killSignal: "SIGTERM",
       forceKillAfter: "5 seconds",
     },
-  );
-  const handle = yield* command.pipe(
+  ).pipe(
     Effect.mapError((cause) =>
       desktopServerError("Pidex could not start its server process", cause),
     ),
