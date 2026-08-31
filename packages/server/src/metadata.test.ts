@@ -11,7 +11,6 @@ import { afterAll, afterEach, assert, describe, expect, it, layer, vi } from "@e
 import { ActionProtocolError } from "./errors.js";
 import {
   Metadata,
-  MetadataError,
   makeMetadataStore,
   type MetadataStore,
   makeMetadataLayer,
@@ -41,7 +40,7 @@ describe("metadata Effect service", () => {
         const metadata = yield* Metadata;
         const error = yield* metadata.reorderWorkspaces(["missing-workspace"]).pipe(Effect.flip);
 
-        assert.instanceOf(error, MetadataError);
+        assert.propertyVal(error, "_tag", "MetadataError");
         assert.strictEqual(error.operation, "reorderWorkspaces");
       }),
     );
@@ -80,7 +79,7 @@ describe("metadata Effect service", () => {
         const metadata = yield* Metadata;
         const error = yield* metadata.sessionState("corrupt-session").pipe(Effect.flip);
 
-        assert.instanceOf(error, MetadataError);
+        assert.propertyVal(error, "_tag", "MetadataError");
         assert.strictEqual(error.operation, "sessionState");
       }),
     );

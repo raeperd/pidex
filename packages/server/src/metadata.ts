@@ -22,7 +22,7 @@ interface ActionInput {
 export const requestDigest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-export class MetadataError extends Schema.TaggedErrorClass<MetadataError>()("MetadataError", {
+class MetadataError extends Schema.TaggedErrorClass<MetadataError>()("MetadataError", {
   operation: Schema.String,
   message: Schema.String,
   cause: Schema.Defect(),
