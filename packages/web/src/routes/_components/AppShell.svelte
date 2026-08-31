@@ -118,11 +118,6 @@
   const dialogInputClass =
     "w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-ui text-foreground";
   type ChatConfiguration = Parameters<PidexApiClient["configure"]>[1];
-  interface StarterPrompt {
-    readonly configuration: ChatConfiguration;
-    readonly draft: string;
-    readonly text: string;
-  }
 
   let { children }: { children: Snippet } = $props();
 
@@ -845,7 +840,10 @@
     if (!text) return;
     await newTask(workspace, { configuration, draft: submittedDraft, text });
   }
-  async function newTask(target = workspace, starterPrompt?: StarterPrompt) {
+  async function newTask(
+    target = workspace,
+    starterPrompt?: { readonly configuration: ChatConfiguration; readonly draft: string; readonly text: string },
+  ) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
     let created: ChatSnapshot | undefined;
