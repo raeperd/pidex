@@ -4,47 +4,45 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { Deferred, Duration, Effect, Ref, Schedule, Stream, type Scope } from "effect";
 import { ChildProcess } from "effect/unstable/process";
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  NodeRuntime.runMain(
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* Effect.sync(() => app.setName("pidex"));
-        yield* Effect.tryPromise({
-          try: () => app.whenReady(),
-          catch: (cause) =>
-            desktopServerError("electron.ready", "Electron did not become ready", cause),
-        });
+NodeRuntime.runMain(
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.sync(() => app.setName("pidex"));
+      yield* Effect.tryPromise({
+        try: () => app.whenReady(),
+        catch: (cause) =>
+          desktopServerError("electron.ready", "Electron did not become ready", cause),
+      });
 
-        const stateDirectory =
-          process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
-        const quit = yield* Deferred.make<void>();
-        yield* registerIpcHandler();
-        yield* registerAppLifecycle(quit);
+      const stateDirectory =
+        process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
+      const quit = yield* Deferred.make<void>();
+      yield* registerIpcHandler();
+      yield* registerAppLifecycle(quit);
 
-        if (!process.env.PIDEX_WEB_URL) {
-          const logs = yield* Ref.make<ReadonlyArray<string>>([]);
-          yield* superviseServer(spawnServer(stateDirectory, logs)).pipe(
-            Effect.forkScoped({ startImmediately: true }),
-          );
-          yield* waitForServer(checkServerHealth, Ref.get(logs));
-        }
+      if (!process.env.PIDEX_WEB_URL) {
+        const logs = yield* Ref.make<ReadonlyArray<string>>([]);
+        yield* superviseServer(spawnServer(stateDirectory, logs)).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        );
+        yield* waitForServer(checkServerHealth, Ref.get(logs));
+      }
 
-        yield* createWindow();
-        yield* Deferred.await(quit);
-      }),
-    ).pipe(
-      Effect.tapError((error) =>
-        Effect.sync(() => console.error(`Pidex cannot start: ${error.message}`)),
-      ),
-      Effect.ensuring(Effect.sync(() => app.quit())),
-      Effect.provide(NodeServices.layer),
+      yield* createWindow();
+      yield* Deferred.await(quit);
+    }),
+  ).pipe(
+    Effect.tapError((error) =>
+      Effect.sync(() => console.error(`Pidex cannot start: ${error.message}`)),
     ),
-    { disableErrorReporting: true },
-  );
+    Effect.ensuring(Effect.sync(() => app.quit())),
+    Effect.provide(NodeServices.layer),
+  ),
+  { disableErrorReporting: true },
+);
 
 interface DesktopServerError {
   readonly _tag: "DesktopServerError";
