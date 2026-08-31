@@ -102,11 +102,6 @@ type PiSession = EffectAdapterSession & {
 };
 type AcquiredPiSession = EffectAdapterSession & { readonly lifecycle: SessionLifecycle };
 
-interface PiSdkOptions {
-  readonly agentDir?: string;
-  readonly sessionDir?: string;
-}
-
 const isContentPart = (part: unknown): part is { type: string; text?: string; thinking?: string } =>
   typeof part === "object" && part !== null && "type" in part;
 export const textOf = (content: unknown): string => {
@@ -433,7 +428,9 @@ function makePiSession(session: AgentSession): PiSession {
   };
 }
 
-export function makePiSdk(options: PiSdkOptions = {}) {
+export function makePiSdk(
+  options: { readonly agentDir?: string; readonly sessionDir?: string } = {},
+) {
   const agentDir = options.agentDir ?? getAgentDir();
 
   async function services(cwd: string) {

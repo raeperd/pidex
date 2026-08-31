@@ -3,11 +3,8 @@ import { Marked, type MarkedToken, type Token, type Tokens } from "marked";
 
 type AgentMessageAlignment = "center" | "left" | "right" | null;
 
-interface AgentMessageNodeBase {
+interface AgentMessageContainerNode {
   key: string;
-}
-
-interface AgentMessageContainerNode extends AgentMessageNodeBase {
   children: AgentMessageNode[];
 }
 
@@ -24,7 +21,12 @@ export type AgentMessageNode =
       key: string;
       ordered: boolean;
       start: number;
-      items: AgentMessageListItem[];
+      items: {
+        key: string;
+        children: AgentMessageNode[];
+        checked?: boolean;
+        loose: boolean;
+      }[];
     }
   | {
       type: "table";
@@ -39,13 +41,6 @@ export type AgentMessageNode =
   | { type: "text"; key: string; text: string }
   | { type: "break"; key: string }
   | { type: "rule"; key: string };
-
-interface AgentMessageListItem {
-  key: string;
-  children: AgentMessageNode[];
-  checked?: boolean;
-  loose: boolean;
-}
 
 interface AgentMessageTableCell {
   key: string;

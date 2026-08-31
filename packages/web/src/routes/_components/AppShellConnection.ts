@@ -3,23 +3,19 @@ import type { ServerEvent } from "@pidex/api";
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
-interface ChatConnectionHandlers {
-  onEvent: (event: ServerEvent) => void;
-  onInvalidChat: () => void;
-  onStateChange: (state: ConnectionState) => void;
-}
-
-interface ChatEventTransport {
-  events: (
-    input: { chatId: string; lastEventId?: number },
-    options: { signal: AbortSignal },
-  ) => Promise<AsyncIterator<ServerEvent>>;
-  close: () => void;
-}
-
 export function makeChatConnection(
-  handlers: ChatConnectionHandlers,
-  transport: ChatEventTransport,
+  handlers: {
+    onEvent: (event: ServerEvent) => void;
+    onInvalidChat: () => void;
+    onStateChange: (state: ConnectionState) => void;
+  },
+  transport: {
+    events: (
+      input: { chatId: string; lastEventId?: number },
+      options: { signal: AbortSignal },
+    ) => Promise<AsyncIterator<ServerEvent>>;
+    close: () => void;
+  },
 ) {
   let activeChatId: string | undefined;
   let lastEventId = 0;

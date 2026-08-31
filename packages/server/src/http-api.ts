@@ -16,24 +16,22 @@ import {
 } from "./project-catalog.js";
 import { canonicalWorkspace, isDescendant, safeError } from "./security.js";
 
-interface HttpApiDependencies {
-  csrf: string;
-  roots: string[];
-  metadata: MetadataService;
-  manager: ChatManager;
-  pi: PiSdkServiceApi;
-}
-
 export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function* ({
   csrf,
   roots,
   metadata,
   manager,
   pi,
-}: HttpApiDependencies) {
+}: {
+  csrf: string;
+  roots: string[];
+  metadata: MetadataService;
+  manager: ChatManager;
+  pi: PiSdkServiceApi;
+}) {
   const managedWorktreeRoot = yield* managedWorktreesRoot();
   const workspaceRoots = [...roots, managedWorktreeRoot];
-  const base = implement(pidexApiContract).$context<RpcApiContext>();
+  const base = implement(pidexApiContract).$context<{ req?: IncomingMessage }>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
     if (context.req?.headers["x-pidex-csrf"] !== csrf)
       throw new ORPCError("csrf", { message: "Invalid CSRF token" });
@@ -302,10 +300,6 @@ const protocolErrors = os.middleware(async ({ next }) => {
     });
   }
 });
-
-interface RpcApiContext {
-  req?: IncomingMessage;
-}
 
 function actionInput(
   chat: { sessionKey: string },

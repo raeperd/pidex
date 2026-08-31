@@ -30,11 +30,6 @@ import { applicationError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
 import { safeError } from "./security.js";
 
-interface WorkspaceRecord {
-  id: string;
-  path: string;
-  info: AdapterWorkspaceInfo;
-}
 const nativeSessionKey = (session: { nativeId: string; nativePath?: string | undefined }) =>
   session.nativePath ?? session.nativeId;
 
@@ -63,7 +58,7 @@ type EventPayload = PidexEvent;
 const LIVE_EVENT_RETRY_MS = 2_000;
 
 export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) {
-  const workspaces = new Map<string, WorkspaceRecord>();
+  const workspaces = new Map<string, { id: string; path: string; info: AdapterWorkspaceInfo }>();
   const chats = new Map<string, ChatRecord>();
   const owners = new Map<string, string>();
   const disposableWorkspaces = new Set<string>();
