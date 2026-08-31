@@ -81,7 +81,7 @@ export interface AppShellContext {
   };
 }
 
-export interface TaskViewControllerRegistry {
+interface TaskViewControllerRegistry {
   attachComposer(controller: TaskComposerController | undefined): void;
   attachTranscript(controller: TaskTranscriptController | undefined): void;
   dispose(): void;

@@ -22,19 +22,16 @@
     return event.key === "Enter" && !event.shiftKey && matchMedia("(min-width: 821px)").matches;
   }
 
-  export type ComposerCommand = Workspace["commands"][number];
+  type ComposerCommand = Workspace["commands"][number];
 
-  export function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
+  function composerCommands(commands: ComposerCommand[]): ComposerCommand[] {
     return [
       { name: "compact", description: "Manually compact the session context" },
       ...commands.filter((command) => command.name !== "compact"),
     ];
   }
 
-  export function slashCommandSuggestions(
-    draft: string,
-    commands: ComposerCommand[],
-  ): ComposerCommand[] {
+  function slashCommandSuggestions(draft: string, commands: ComposerCommand[]): ComposerCommand[] {
     const slashMatch = /^\/([^\s]*)$/.exec(draft);
     if (!slashMatch) return [];
     const query = slashMatch[1].toLowerCase();
@@ -99,7 +96,7 @@
     return query === normalizedText ? score - 100 : score;
   }
 
-  export function nextSlashCommand(
+  function nextSlashCommand(
     commands: ComposerCommand[],
     current: ComposerCommand | undefined,
     direction: -1 | 1,
@@ -151,7 +148,7 @@
    * once nothing above blocks (an empty draft intentionally gets no special-cased message: a
    * disabled-but-labeled-"Send" button for an empty draft is expected UX).
    */
-  export function composerAffordances(state: {
+  function composerAffordances(state: {
     active: boolean;
     compactPending: boolean;
     configurationPending: boolean;
@@ -201,7 +198,7 @@
     return undefined;
   }
 
-  export function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
+  function runStatusLabel(status: ChatSnapshot["runStatus"]): string {
     switch (status) {
       case "running":
         return "Working";
@@ -214,14 +211,14 @@
     }
   }
 
-  export function queueSummary(steeringCount: number, followUpCount: number): string {
+  function queueSummary(steeringCount: number, followUpCount: number): string {
     const parts: string[] = [];
     if (steeringCount > 0) parts.push(`${steeringCount} steering`);
     if (followUpCount > 0) parts.push(`${followUpCount} follow-up`);
     return parts.length > 0 ? `${parts.join(" · ")} queued` : "";
   }
 
-  export function formatRunElapsed(elapsedMs: number): string {
+  function formatRunElapsed(elapsedMs: number): string {
     const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);

@@ -1,9 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { createViteConfig } from "./vite.config.js";
+import viteConfig from "./vite.config.js";
+
+const createViteConfig = async (
+  configEnv: Parameters<Extract<typeof viteConfig, (...args: never[]) => unknown>>[0],
+  environment: Record<string, string> = {},
+) => {
+  const previousPort = process.env.PORT;
+  if ("PORT" in environment) process.env.PORT = environment.PORT;
+  try {
+    return await viteConfig(configEnv);
+  } finally {
+    if (previousPort === undefined) delete process.env.PORT;
+    else process.env.PORT = previousPort;
+  }
+};
 
 describe("Pidex Vite config", () => {
-  test("uses one Vite-owned development port with automatic fallback", () => {
-    const config = createViteConfig(
+  test("uses one Vite-owned development port with automatic fallback", async () => {
+    const config = await createViteConfig(
       { command: "serve", mode: "development", isPreview: false, isSsrBuild: false },
       { PORT: "6123" },
     );
@@ -17,13 +31,12 @@ describe("Pidex Vite config", () => {
     expect(config.plugins?.[0]).toMatchObject({ name: "pidex-application" });
   });
 
-  test("does not initialize development behavior for tests or builds", () => {
+  test("does not initialize development behavior for tests or builds", async () => {
     for (const configEnv of [
       { command: "serve", mode: "test", isPreview: false, isSsrBuild: false },
       { command: "build", mode: "production", isPreview: false, isSsrBuild: false },
     ] as const) {
-      expect(() => createViteConfig(configEnv, { PORT: "invalid" })).not.toThrow();
-      const config = createViteConfig(configEnv, { PORT: "invalid" });
+      const config = await createViteConfig(configEnv, { PORT: "invalid" });
       expect(config.server).toBeUndefined();
       expect(config.plugins?.flat()).not.toEqual(
         expect.arrayContaining([expect.objectContaining({ name: "pidex-application" })]),
@@ -33,13 +46,13 @@ describe("Pidex Vite config", () => {
 
   test.each(["0", "1023", "65536", "1.5", "not-a-port"])(
     "rejects invalid development port %s",
-    (port) => {
-      expect(() =>
+    async (port) => {
+      await expect(
         createViteConfig(
           { command: "serve", mode: "development", isPreview: false, isSsrBuild: false },
           { PORT: port },
         ),
-      ).toThrow("PORT must be an integer from 1024 through 65535");
+      ).rejects.toThrow("PORT must be an integer from 1024 through 65535");
     },
   );
 });

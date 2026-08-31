@@ -22,7 +22,7 @@ const runOutcomeSchema = v.object({
   status: actionStatusSchema,
   requiresAcknowledgement: v.boolean(),
 });
-export const actionOutcomeSchema = v.object({
+const actionOutcomeSchema = v.object({
   accepted: v.literal(true),
   actionId: idSchema,
   runId: idSchema,
@@ -36,8 +36,8 @@ const modelSchema = v.object({
   name: boundedString(200),
   reasoning: v.boolean(),
 });
-export const sessionStatusSchema = v.picklist(["running", "error", "idle"]);
-export const sessionSummarySchema = v.object({
+const sessionStatusSchema = v.picklist(["running", "error", "idle"]);
+const sessionSummarySchema = v.object({
   id: idSchema,
   name: v.optional(boundedString(300)),
   firstMessage: boundedString(500),
@@ -138,7 +138,7 @@ const statsSchema = v.object({
   cost: finiteNumber(),
   subscription: v.boolean(),
 });
-export const contextUsageSchema = v.object({
+const contextUsageSchema = v.object({
   tokens: v.nullable(nonnegativeInteger()),
   contextWindow: positiveInteger(),
   percent: v.nullable(v.pipe(finiteNumber(), v.minValue(0))),
@@ -189,7 +189,7 @@ const pidexEventSchema = v.variant("type", [
   }),
 ]);
 const piEventSchema = v.looseObject({ type: v.string() });
-export const serverEventSchema = v.union([
+const serverEventSchema = v.union([
   v.object({
     ...eventBase.entries,
     source: v.literal("pi"),
@@ -223,7 +223,7 @@ const actionRequestSchema = v.object({
   actionId: idSchema,
   expectedRevision: nonnegativeInteger(),
 });
-export const messageRequestSchema = v.object({
+const messageRequestSchema = v.object({
   ...actionRequestSchema.entries,
   text: v.pipe(
     v.string(),
@@ -235,7 +235,7 @@ export const messageRequestSchema = v.object({
   runId: v.optional(idSchema),
 });
 const abortRequestSchema = v.object({ ...actionRequestSchema.entries, runId: idSchema });
-export const configRequestSchema = v.pipe(
+const configRequestSchema = v.pipe(
   v.object({
     ...actionRequestSchema.entries,
     model: v.optional(boundedString(300)),
@@ -246,7 +246,7 @@ export const configRequestSchema = v.pipe(
     "At least one configuration field is required",
   ),
 );
-export const renameRequestSchema = v.object({
+const renameRequestSchema = v.object({
   ...actionRequestSchema.entries,
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
 });
@@ -333,7 +333,6 @@ export const pidexApiContract = {
 export type PidexApiContractClient = RouterContractClient<typeof pidexApiContract>;
 
 export type ModelInfo = v.InferOutput<typeof modelSchema>;
-export type SessionStatus = v.InferOutput<typeof sessionStatusSchema>;
 export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
 export type Workspace = v.InferOutput<typeof workspaceSchema>;
 export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;
