@@ -1,18 +1,22 @@
 # Pidex Proof-of-Concept Implementation Prompt
 
+> Status: implementation baseline for the local proof of concept. The core local flow is in place;
+> real-Pi version matching and packaged Electron acceptance still need verification. This document
+> does not define the larger v1 target; see [prd.md](prd.md).
+
 Build a working proof of concept for Pidex from the existing repository. Work autonomously from discovery through verification: inspect the environment, preserve the current workspace, install only necessary dependencies, implement the complete core flow, run tests, launch the production application, and fix failures. Do not stop at a plan, scaffold, disconnected mockup, or UI-only implementation.
 
-The proof of concept should implement the local Pi dashboard described by `docs/reference-prompt.md` while following the repository and runtime boundaries in `docs/architecture.md`. Do not derive product requirements from `docs/prd.md` or `docs/technical-reference.md` for this task.
+The proof of concept should implement the local Pi dashboard described by `docs/archive/reference-prompt.md` while following the repository and runtime boundaries in `docs/architecture.md`. Do not derive product requirements from `docs/prd.md` or `docs/technical-reference.md` for this task.
 
 ## Sources of Truth
 
 Read these files completely before changing code:
 
-1. `docs/reference-prompt.md` defines the proof-of-concept behavior, Pi integration, UI, safety rules, and verification expectations.
+1. `docs/archive/reference-prompt.md` defines the proof-of-concept behavior, Pi integration, UI, safety rules, and verification expectations.
 2. `docs/architecture.md` defines the repository layout, dependency direction, runtime topology, storage responsibilities, and selected technologies.
 3. The existing repository defines the starting point and must be evolved in place.
 
-When the documents use different implementation technologies, preserve the behavior from `docs/reference-prompt.md` but use the architecture selected by `docs/architecture.md`. In particular:
+When the documents use different implementation technologies, preserve the behavior from `docs/archive/reference-prompt.md` but use the architecture selected by `docs/architecture.md`. In particular:
 
 - use the existing pnpm workspace rather than creating a new npm project;
 - use Svelte 5, Vite, and Tailwind CSS 4 rather than React;

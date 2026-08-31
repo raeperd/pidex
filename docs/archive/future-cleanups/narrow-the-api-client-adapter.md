@@ -106,5 +106,5 @@ The wire traffic is identical before and after:
 - **Paging limits**: tool output still requests 16384 bytes per chunk and transcript pages still
   request 50 items.
 
-Related: `docs/improvements/tool-output-paging-split.md` relocates the `16_384` constant to the
+Related: `docs/archive/future-cleanups/tool-output-paging-split.md` relocates the `16_384` constant to the
 component that owns paging. Land that one after this if you do both.

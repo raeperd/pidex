@@ -1,5 +1,9 @@
 # Pidex Product Requirements Document
 
+> Status: current v1 product target. The repository currently implements the local proof of
+> concept; the remote-access, pairing, and release requirements below remain planned until marked
+> otherwise.
+
 ## Problem Statement
 
 Pi users start Pi sessions in Pidex on their desktop. When away, they have no simple way to check a long-running task, stop it, or send the next prompt from a phone or tablet. They need network access to the same Pidex-managed session while Pi, their code, credentials, and session data stay on the desktop.

@@ -1,5 +1,9 @@
 # Desktop and Mobile-Web Technical Reference
 
+> Status: current technical decisions, with historical comparison notes retained below. The
+> implementation uses SvelteKit with the static adapter for route ownership, even though the first
+> scaffold recommendation below predates that decision.
+
 This note fixes the implementation baseline for the Electron desktop app and the host-served mobile web client. It intentionally does not cover a native mobile app, cloud service, relay, generic agent-provider layer, terminal, file explorer, or Git UI.
 
 ## Reference snapshots
@@ -95,8 +99,11 @@ Electron's `BrowserWindow` must use `contextIsolation: true`, `sandbox: true`, a
 
 ### Shared web client
 
-- Svelte 5 with TypeScript, runes, standard Vite, and the official Svelte Vite plugin. Do not use React, SvelteKit, Expo, React Native Web, Metro, or Vite+ in the first scaffold.
-- The initial application is one state-driven control surface, so it does not need SSR, server routes, or a routing dependency. If stable user-facing deep links become a requirement, evaluate a static SvelteKit build separately rather than introducing another server runtime.
+- Svelte 5 with TypeScript, runes, Vite, the official Svelte Vite plugin, and SvelteKit's static
+  adapter for the route-owned build. The browser client remains a static build with no server-side
+  application runtime.
+- The route structure is split between the root layout, the root page, and the task page. Stable task
+  URLs and route ownership are now part of the current implementation.
 - Use Svelte's built-in runes and stores for client-local UI state such as the selected session and connection presentation. Do not add a general state-management library initially. Authoritative projects, sessions, transcript, run state, and settings are replaced from host snapshots rather than treated as local truth.
 - Tailwind CSS 4 through `@tailwindcss/vite`, Bits UI primitives, `clsx`, and `tailwind-merge` provide the responsive interface.
 - `svelte-exmarkdown` plus `remark-gfm` renders assistant text. Raw HTML stays disabled, remote images are disabled by default, and links use an explicit safe-scheme policy.
@@ -166,7 +173,10 @@ The first scaffold should include only dependencies needed for the first vertica
 
 Build and test dependencies live at the narrowest workspace that uses them. `packages/web` owns Vite, `@sveltejs/vite-plugin-svelte`, Tailwind, `@tailwindcss/vite`, Vitest, and Svelte Testing Library. `packages/e2e` owns the cross-application Playwright suite, while `packages/tooling` holds repository scripts. Production packages must not depend on test runners or Electron development tooling.
 
-Defer `electron-updater`, richer syntax highlighting, virtualization, and component libraries beyond the named primitives until their corresponding delivery phase needs them. Do not add React, SvelteKit, Expo, React Native, Express, provider SDKs, hosted-auth SDKs, SSH libraries, relay clients, terminal libraries, Git libraries, or a second transcript database.
+Defer `electron-updater`, richer syntax highlighting, virtualization, and component libraries beyond
+the named primitives until their corresponding delivery phase needs them. Do not add React, Expo,
+React Native, Express, provider SDKs, hosted-auth SDKs, SSH libraries, relay clients, terminal
+libraries, or a second transcript database.
 
 ## Pre-implementation checks
 

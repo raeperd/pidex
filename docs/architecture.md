@@ -1,5 +1,9 @@
 # Pidex Architecture
 
+> Status: current implementation architecture. This describes the package and runtime boundaries
+> used by the local proof of concept. Managed Tailscale access and paired-device authorization are
+> planned v1 extensions, not current server capabilities.
+
 ## Repository
 
 ```text
