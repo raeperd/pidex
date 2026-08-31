@@ -1,5 +1,9 @@
 # Pidex Product Requirements Document
 
+> Status: current v1 product target. The repository currently implements the local proof of
+> concept; the remote-access, pairing, and release requirements below remain planned until marked
+> otherwise.
+
 ## Problem Statement
 
 Pi users start Pi sessions in Pidex on their desktop. When away, they have no simple way to check a long-running task, stop it, or send the next prompt from a phone or tablet. They need network access to the same Pidex-managed session while Pi, their code, credentials, and session data stay on the desktop.
@@ -57,7 +61,7 @@ Pidex has one target user: a Pi developer who moves between desktop and mobile. 
 - A **project** is a desktop-registered directory, not necessarily a Git repository root. A Git worktree may be registered as its own project.
 - A **session** is one Pi session created and managed by Pidex and bound to one project. V1 does not attach to sessions started by the standalone Pi application.
 - A **run** is one accepted prompt and all Pi work it causes. It has a stable host-issued run ID. Pi may emit several lower-level turns during one Pidex run.
-- The first release targets macOS with TypeScript, Electron, and a responsive Svelte/Vite DOM client. Windows and Linux packaging are deferred. The detailed stack, workspace boundaries, dependency policy, and T3 Code/Paseo comparison are fixed in [Desktop and Mobile-Web Technical Reference](technical-reference.md).
+- The first release targets macOS with TypeScript, Electron, and a responsive Svelte/Vite DOM client. Windows and Linux packaging are deferred. The stack and workspace boundaries are defined by [Pidex Architecture](architecture.md).
 
 ### Technical baseline
 
