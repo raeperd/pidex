@@ -125,5 +125,5 @@ root, so `pnpm --filter <pkg> test` reports "No test files found".
 - **The projectless home screen is unaffected** — it imports module-block exports from
   `TaskComposer.svelte` (`routes/+page.svelte:16`) but never renders the component.
 
-Related: `docs/improvements/single-source-composer-enablement.md` reworks `composerAffordances` in the
+Related: `docs/archive/future-cleanups/single-source-composer-enablement.md` reworks `composerAffordances` in the
 same file. It takes a plain input record, so the two compose in either order.

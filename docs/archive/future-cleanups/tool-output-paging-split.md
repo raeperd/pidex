@@ -160,5 +160,5 @@ Visible behaviour is unchanged apart from the cache lifetime noted in Step 4:
 - **Expansion behaviour is untouched**: `toolCallExpanded` still auto-expands errors and honours a
   user override (`ToolCall.test.ts:90-107`).
 
-Related: `docs/improvements/narrow-the-api-client-adapter.md` also touches
+Related: `docs/archive/future-cleanups/narrow-the-api-client-adapter.md` also touches
 `AppShellApiClient.ts:116-122`. If both land, this one owns the move of the `16_384` constant.
