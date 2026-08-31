@@ -1,17 +1,11 @@
 import { describe, expect, it } from "vitest";
-import {
-  actionOutcomeSchema,
-  configRequestSchema,
-  contextUsageSchema,
-  healthSchema,
-  messageRequestSchema,
-  pidexApiContract,
-  PROTOCOL_VERSION,
-  renameRequestSchema,
-  safeParse,
-  serverEventSchema,
-  sessionSummarySchema,
-} from "../src/index.js";
+import { pidexApiContract, PROTOCOL_VERSION, safeParse } from "../src/index.js";
+
+function lastSchema<T>(schemas: readonly T[] | undefined): T {
+  const schema = schemas?.at(-1);
+  if (!schema) throw new Error("Expected a contract schema");
+  return schema;
+}
 
 const actionRequest = {
   chatId: "chat_123",
@@ -22,7 +16,7 @@ const actionRequest = {
 
 describe("Pidex API schemas", () => {
   it("removes unknown object entries", () => {
-    const result = safeParse(healthSchema, {
+    const result = safeParse(lastSchema(pidexApiContract.system.health["~orpc"].outputSchemas), {
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
       ignored: true,
@@ -67,19 +61,24 @@ describe("Pidex API schemas", () => {
   });
 
   it("preserves custom validation and trimming behavior", () => {
+    const messageSchema = lastSchema(pidexApiContract.chats.sendMessage["~orpc"].inputSchemas);
+    const configSchema = lastSchema(pidexApiContract.chats.configure["~orpc"].inputSchemas);
+    const renameSchema = lastSchema(pidexApiContract.chats.rename["~orpc"].inputSchemas);
     expect(
-      safeParse(messageRequestSchema, { ...actionRequest, text: "   ", delivery: "normal" }),
+      safeParse(messageSchema, { ...actionRequest, text: "   ", delivery: "normal" }),
     ).toMatchObject({ success: false });
-    expect(safeParse(configRequestSchema, actionRequest)).toMatchObject({ success: false });
+    expect(safeParse(configSchema, actionRequest)).toMatchObject({ success: false });
 
-    const renamed = safeParse(renameRequestSchema, { ...actionRequest, name: "  Pidex  " });
+    const renamed = safeParse(renameSchema, { ...actionRequest, name: "  Pidex  " });
     expect(renamed.success).toBe(true);
     if (renamed.success) expect(renamed.output.name).toBe("Pidex");
   });
 
   it("preserves finite number and safe integer validation", () => {
+    const actionSchema = lastSchema(pidexApiContract.chats.sendMessage["~orpc"].outputSchemas);
+    const snapshotSchema = lastSchema(pidexApiContract.chats.get["~orpc"].outputSchemas);
     expect(
-      safeParse(actionOutcomeSchema, {
+      safeParse(actionSchema, {
         accepted: true,
         actionId: "action_123",
         runId: "run_1234",
@@ -89,19 +88,32 @@ describe("Pidex API schemas", () => {
       }),
     ).toMatchObject({ success: false });
     expect(
-      safeParse(contextUsageSchema, {
-        tokens: null,
-        contextWindow: 1,
-        percent: Number.POSITIVE_INFINITY,
-        totalProcessedTokens: 0,
-        compactsAutomatically: true,
+      safeParse(snapshotSchema, {
+        chatId: "chat_123",
+        workspaceId: "workspace_123",
+        taskId: "task_123",
+        runStatus: "idle",
+        thinkingLevel: "high",
+        items: [],
+        transcriptStart: 0,
+        transcriptTotal: 0,
+        steeringQueue: [],
+        followUpQueue: [],
+        stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
+        contextUsage: {
+          tokens: null,
+          contextWindow: 1,
+          percent: Number.POSITIVE_INFINITY,
+          totalProcessedTokens: 0,
+          compactsAutomatically: true,
+        },
       }),
     ).toMatchObject({ success: false });
   });
 
-  it("preserves raw Pi event payloads in the live contract", () => {
-    expect(
-      safeParse(serverEventSchema, {
+  it("preserves raw Pi event payloads in the live contract", async () => {
+    const events = (async function* () {
+      yield {
         source: "pi",
         eventId: 1,
         chatId: "chat_123",
@@ -110,10 +122,14 @@ describe("Pidex API schemas", () => {
           message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
           assistantMessageEvent: { type: "text_delta", delta: "hello" },
         },
-      }),
-    ).toMatchObject({
-      success: true,
-      output: {
+      };
+    })();
+    const schema = lastSchema(pidexApiContract.live.events["~orpc"].outputSchemas);
+    const result = await schema["~standard"].validate(events);
+    expect(result).toHaveProperty("value");
+    if (!("value" in result)) return;
+    await expect(result.value.next()).resolves.toMatchObject({
+      value: {
         source: "pi",
         event: {
           type: "message_update",
@@ -121,10 +137,12 @@ describe("Pidex API schemas", () => {
           assistantMessageEvent: { type: "text_delta", delta: "hello" },
         },
       },
+      done: false,
     });
   });
 
   it("parses a session summary status as an optional coarse tri-state", () => {
+    const schema = lastSchema(pidexApiContract.workspaces.sessions["~orpc"].outputSchemas);
     const summary = {
       id: "session_123",
       firstMessage: "Fix the flaky test",
@@ -132,15 +150,17 @@ describe("Pidex API schemas", () => {
       modifiedAt: "2026-08-05T00:00:00.000Z",
       messageCount: 1,
     };
-    for (const status of ["running", "error", "idle"] as const)
-      expect(safeParse(sessionSummarySchema, { ...summary, status })).toMatchObject({
+    for (const status of ["running", "error", "idle"] as const) {
+      const result = safeParse(schema, { sessions: [{ ...summary, status }] });
+      expect(result).toMatchObject({
         success: true,
-        output: { status },
+        output: { sessions: [{ status }] },
       });
-    expect(safeParse(sessionSummarySchema, { ...summary, status: "stopping" })).toMatchObject({
+    }
+    expect(safeParse(schema, { sessions: [{ ...summary, status: "stopping" }] })).toMatchObject({
       success: false,
     });
-    const missingStatus = safeParse(sessionSummarySchema, summary);
+    const missingStatus = safeParse(schema, { sessions: [summary] });
     expect(missingStatus.success).toBe(true);
     if (missingStatus.success) expect(missingStatus.output.status).toBeUndefined();
   });

@@ -102,7 +102,7 @@ type PiSession = EffectAdapterSession & {
 };
 type AcquiredPiSession = EffectAdapterSession & { readonly lifecycle: SessionLifecycle };
 
-export interface PiSdkOptions {
+interface PiSdkOptions {
   readonly agentDir?: string;
   readonly sessionDir?: string;
 }
@@ -621,7 +621,7 @@ function releasePiSession(session: AcquiredPiSession): Effect.Effect<void> {
   );
 }
 
-export function acquireAdapterSession<E, R>(
+function acquireAdapterSession<E, R>(
   acquire: Effect.Effect<AcquiredPiSession, E, R>,
 ): Effect.Effect<EffectAdapterSession, E, R | Scope.Scope> {
   return Effect.acquireRelease(acquire, releasePiSession);
@@ -647,7 +647,7 @@ export function boundedResource(
   return { text: serialized.text, sourceTruncated: serialized.truncated };
 }
 
-export type PiSdk = ReturnType<typeof makePiSdk>;
+type PiSdk = ReturnType<typeof makePiSdk>;
 
 export function makePiSdkService(sdk: PiSdk) {
   return {

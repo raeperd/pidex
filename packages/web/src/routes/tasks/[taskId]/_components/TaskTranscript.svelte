@@ -2,11 +2,11 @@
   import type { SkillItem, TranscriptItem, ToolItem } from "@pidex/api";
   import { toolCallKind } from "./ToolCall.svelte";
 
-  export type TranscriptRow =
+  type TranscriptRow =
     | { kind: "item"; item: Exclude<TranscriptItem, ToolItem> }
     | { kind: "tools"; id: string; items: ToolItem[] };
 
-  export function groupTranscriptItems(items: TranscriptItem[]): TranscriptRow[] {
+  function groupTranscriptItems(items: TranscriptItem[]): TranscriptRow[] {
     const rows: TranscriptRow[] = [];
     for (const item of items) {
       if (item.type !== "tool") {
@@ -21,7 +21,7 @@
     return rows;
   }
 
-  export function toolActivitySummary(items: ToolItem[]): string {
+  function toolActivitySummary(items: ToolItem[]): string {
     const counts = { read: 0, shell: 0, search: 0, edit: 0, other: 0 };
     for (const item of items) {
       const kind = toolCallKind(item.name);
@@ -56,7 +56,7 @@
     return position.scrollHeight - position.scrollTop - position.clientHeight < 96;
   }
 
-  export function resolveFollowing(
+  function resolveFollowing(
     following: boolean,
     event: { kind: "wheel" | "touchmove" | "scroll"; deltaY?: number },
     position: ScrollPosition,

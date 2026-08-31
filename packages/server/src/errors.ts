@@ -75,11 +75,7 @@ class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>
   },
 ) {}
 
-export type ApplicationError =
-  | ActionProtocolError
-  | ConfigurationError
-  | HttpError
-  | ServerOperationError;
+type ApplicationError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
 
 export function attemptOperation<A>(
   operation: string,
