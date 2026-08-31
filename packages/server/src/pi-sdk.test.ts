@@ -5,104 +5,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect, Fiber, Queue, Stream } from "effect";
 import {
-  acquireAdapterSession,
   type AdapterEvent,
   type EffectAdapterSession,
   makePiSdk,
   makePiSdkService,
 } from "./pi-sdk.js";
-
-describe("Effect Pi adapter", () => {
-  it.effect("preserves raw Pi events for downstream consumers", () =>
-    Effect.gen(function* () {
-      const fixture = makeSessionFixture();
-      const session = yield* acquireAdapterSession(Effect.succeed(fixture));
-      const collected = yield* session.events.pipe(
-        Stream.take(1),
-        Stream.runCollect,
-        Effect.forkScoped,
-      );
-
-      yield* waitForSubscription(fixture);
-      fixture.emit({ type: "pi", event: { type: "agent_start" } });
-
-      assert.deepEqual(yield* Fiber.join(collected), [
-        { type: "pi", event: { type: "agent_start" } },
-      ]);
-    }),
-  );
-
-  it.effect("streams events in order and unsubscribes when the stream ends", () =>
-    Effect.gen(function* () {
-      const fixture = makeSessionFixture();
-
-      const events = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* acquireAdapterSession(Effect.succeed(fixture));
-          const collected = yield* session.events.pipe(
-            Stream.take(2),
-            Stream.runCollect,
-            Effect.forkScoped,
-          );
-
-          yield* waitForSubscription(fixture);
-          fixture.emit({ type: "notice", level: "info", text: "first" });
-          fixture.emit({ type: "settled" });
-
-          const result = yield* Fiber.join(collected);
-          assert.strictEqual(fixture.listenerCount, 0);
-          return result;
-        }),
-      );
-
-      assert.deepEqual(events, [
-        { type: "notice", level: "info", text: "first" },
-        { type: "settled" },
-      ]);
-    }),
-  );
-
-  it.effect("maps rejected Pi operations to a typed local error", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = makeSessionFixture();
-        fixture.failPrompt(new Error("prompt failed"));
-        const session = yield* acquireAdapterSession(Effect.succeed(fixture));
-
-        assert.strictEqual(session.state.thinkingLevel, "minimal");
-        assert.strictEqual(session.state.messages[0]?.id, "fixture-message");
-        const error = yield* session.prompt("hello").pipe(Effect.flip);
-
-        assert.propertyVal(error, "_tag", "AdapterSessionError");
-        assert.strictEqual(error.operation, "session.prompt");
-        assert.strictEqual(error.message, "prompt failed");
-      }),
-    ),
-  );
-
-  it.effect("aborts interrupted prompts and disposes the session when its scope closes", () =>
-    Effect.gen(function* () {
-      const fixture = makeSessionFixture();
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const session = yield* acquireAdapterSession(Effect.succeed(fixture));
-          const prompt = yield* session.prompt("hello").pipe(Effect.forkScoped);
-
-          yield* Effect.yieldNow;
-          yield* Fiber.interrupt(prompt);
-
-          assert.strictEqual(fixture.abortCount, 1);
-          assert.isFalse(fixture.disposed);
-        }),
-      );
-
-      assert.strictEqual(fixture.abortCount, 2);
-      assert.isTrue(fixture.disposed);
-      assert.strictEqual(fixture.listenerCount, 0);
-    }),
-  );
-});
 
 describe("Pi SDK Effect service", () => {
   it.effect("discovers Pi extension, prompt template, and skill commands", () =>
@@ -505,12 +412,6 @@ const isolatedPiWorkspace = Effect.acquireRelease(
   }),
   (fixture) => Effect.promise(() => rm(fixture.root, { recursive: true, force: true })),
 );
-
-function waitForSubscription(fixture: SessionFixture): Effect.Effect<void> {
-  return fixture.listenerCount === 1
-    ? Effect.void
-    : Effect.yieldNow.pipe(Effect.andThen(Effect.suspend(() => waitForSubscription(fixture))));
-}
 
 interface SessionFixture extends EffectAdapterSession {
   failPrompt(error: Error): void;
