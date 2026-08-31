@@ -52,7 +52,7 @@
     yml: "yaml",
   };
 
-  export function highlightCode(
+  function highlightCode(
     code: string,
     language: string,
     theme: HighlightTheme,
