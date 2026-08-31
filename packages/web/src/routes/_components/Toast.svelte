@@ -10,7 +10,7 @@
    * Remaining-ms bookkeeping so a pause/resume cycle never restarts the countdown from the full
    * duration. `resume` is just `start` again: both schedule whatever time is left.
    */
-  export function createToastTimer(onExpire: () => void, durationMs: number): ToastTimer {
+  function createToastTimer(onExpire: () => void, durationMs: number): ToastTimer {
     let remainingMs = durationMs;
     let startedAt: number | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
