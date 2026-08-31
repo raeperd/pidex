@@ -8,11 +8,6 @@
     range?: string;
   }
 
-  interface ToolCallPreview {
-    lines: string[];
-    skipped: number;
-  }
-
   const KIND_ICONS = {
     shell: "terminal",
     read: "file",
@@ -55,7 +50,7 @@
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
-  export function toolCallPreview(output: string, maxLines = 5): ToolCallPreview {
+  export function toolCallPreview(output: string, maxLines = 5) {
     const lines = output.replace(/\s+$/, "").split("\n");
     if (lines.length <= maxLines) return { lines, skipped: 0 };
     return { lines: lines.slice(-maxLines), skipped: lines.length - maxLines };
