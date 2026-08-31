@@ -16,11 +16,11 @@
     generic: "tool",
   } as const;
 
-  export function toolCallExpanded(override: boolean | undefined, status: string): boolean {
+  function toolCallExpanded(override: boolean | undefined, status: string): boolean {
     return override ?? status === "error";
   }
 
-  export function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
+  function toolCallHeader(name: string, argumentSummary: string): ToolCallHeader {
     const kind = toolCallKind(name);
     const label = toolCallLabel(name, kind);
     const args = parseArguments(argumentSummary);
@@ -50,13 +50,13 @@
   }
 
   /** Keeps the trailing window of output, like Pi's collapsed tool result. */
-  export function toolCallPreview(output: string, maxLines = 5) {
+  function toolCallPreview(output: string, maxLines = 5) {
     const lines = output.replace(/\s+$/, "").split("\n");
     if (lines.length <= maxLines) return { lines, skipped: 0 };
     return { lines: lines.slice(-maxLines), skipped: lines.length - maxLines };
   }
 
-  export function toolCallOutputText(output: string): string {
+  function toolCallOutputText(output: string): string {
     try {
       const parsed: unknown = JSON.parse(output);
       if (!parsed || typeof parsed !== "object" || !("content" in parsed)) return output;
@@ -81,7 +81,7 @@
     }
   }
 
-  export function formatToolDuration(milliseconds: number): string {
+  function formatToolDuration(milliseconds: number): string {
     return `${(milliseconds / 1000).toFixed(1)}s`;
   }
 

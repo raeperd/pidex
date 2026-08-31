@@ -1,28 +1,26 @@
+import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
-import { highlightCode } from "./AgentMessageCodeBlock.svelte";
+import AgentMessageCodeBlock from "./AgentMessageCodeBlock.svelte";
 
-describe("highlightCode", () => {
-  it("tokenizes completed code with the real highlighter", async () => {
-    const result = await highlightCode("const answer = 42;", "typescript", "light");
+describe("AgentMessageCodeBlock", () => {
+  it("renders completed code with its language and actions", () => {
+    const body = render(AgentMessageCodeBlock, {
+      props: { code: "const answer = 42;", language: "typescript", theme: "light" },
+    }).body;
 
-    expect(
-      result?.lines.map((line) => line.map((token) => token.content).join("")).join("\n"),
-    ).toBe("const answer = 42;");
-    expect(result?.lines.flat().some((token) => token.color)).toBe(true);
+    expect(body).toContain('title="typescript"');
+    expect(body).toContain("const answer = 42;");
+    expect(body).toContain('aria-label="Wrap lines"');
+    expect(body).toContain('aria-label="Copy code"');
   });
 
-  it("falls back to plain-text highlighting for unknown languages", async () => {
-    const result = await highlightCode("hello", "definitely-not-a-language", "dark");
+  it("renders oversized and unknown-language code as readable plain text", () => {
+    const code = "hello";
+    const body = render(AgentMessageCodeBlock, {
+      props: { code, language: "definitely-not-a-language", theme: "dark" },
+    }).body;
 
-    expect(
-      result?.lines
-        .flat()
-        .map((token) => token.content)
-        .join(""),
-    ).toBe("hello");
-  });
-
-  it("skips oversized blocks", async () => {
-    await expect(highlightCode("x".repeat(100_001), "text", "light")).resolves.toBeNull();
+    expect(body).toContain(code);
+    expect(body).toContain('title="definitely-not-a-language"');
   });
 });

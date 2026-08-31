@@ -6,7 +6,7 @@ import { parsePort } from "../server/src/security.ts";
 
 export default defineConfig((configEnv) => createViteConfig(configEnv));
 
-export function createViteConfig(
+function createViteConfig(
   { command, isPreview, mode }: ConfigEnv,
   environment: { readonly PORT?: string | undefined } = process.env,
 ): UserConfig {

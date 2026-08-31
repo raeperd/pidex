@@ -1,6 +1,6 @@
 import { Duration, Effect, Schedule, type Scope } from "effect";
 
-export interface DesktopServerError {
+interface DesktopServerError {
   readonly _tag: "DesktopServerError";
   readonly operation: string;
   readonly message: string;

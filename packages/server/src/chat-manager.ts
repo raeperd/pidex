@@ -683,7 +683,7 @@ export type ChatManager = ReturnType<typeof makeChatManager>;
  * knows (completed, cancelled, or an in-flight run left behind by a race) reads as idle rather
  * than inventing a status the server cannot actually stand behind.
  */
-export function resolveSessionStatus(
+function resolveSessionStatus(
   liveRunStatus: ChatSnapshot["runStatus"] | undefined,
   persistedRun: RunOutcome | undefined,
 ): "running" | "error" | "idle" {
