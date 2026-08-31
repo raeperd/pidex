@@ -640,13 +640,6 @@ flowchart TB
             have no identity.
           </li>
           <li>
-            <strong>desktop-supervision-seam-cuts-mid-concept</strong> —
-            <code>server-lifecycle.ts</code> owns only the retry schedules while spawn, health
-            probe, and log buffer stay in <code>main.ts</code>. Behavioural note: a permanently
-            failing binary restarts forever with log warnings only, with no path back to the startup
-            error dialog.
-          </li>
-          <li>
             <strong>appshell-module-block-untested</strong> — <code>connectionBanner</code>,
             <code>resolveTaskStatus</code>, <code>rollupProjectStatus</code> are pure priority-table
             logic with zero coverage because they are private. Cheapest first step toward candidate

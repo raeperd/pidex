@@ -1,6 +1,16 @@
 import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Ref } from "effect";
-import { desktopServerError, superviseServer, waitForServer } from "./server-lifecycle.js";
+import { vi } from "vitest";
+
+vi.mock("electron", () => ({
+  app: { isPackaged: false },
+  BrowserWindow: {},
+  dialog: {},
+  ipcMain: {},
+  nativeTheme: {},
+}));
+
+import { desktopServerError, superviseServer, waitForServer } from "./main.js";
 
 it.effect("releases the server process when supervision is interrupted", () =>
   Effect.gen(function* () {
