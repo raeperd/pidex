@@ -842,7 +842,11 @@
   }
   async function newTask(
     target = workspace,
-    starterPrompt?: { readonly configuration: ChatConfiguration; readonly draft: string; readonly text: string },
+    starterPrompt?: {
+      readonly configuration: ChatConfiguration;
+      readonly draft: string;
+      readonly text: string;
+    },
   ) {
     if (!target || chatLoading) return;
     const sequence = ++routeSequence;
