@@ -10,21 +10,48 @@ import { ChildProcess } from "effect/unstable/process";
 NodeRuntime.runMain(
   Effect.scoped(
     Effect.gen(function* () {
+      const portValue = process.env.PORT;
+      const port = portValue === undefined ? 4783 : Number(portValue);
+      if (portValue !== undefined && (!/^\d+$/.test(portValue) || port < 1024 || port > 65535))
+        return yield* Effect.fail(
+          desktopServerError("PORT must be an integer from 1024 through 65535", portValue),
+        );
+
+      const webUrlValue = process.env.PIDEX_WEB_URL;
+      const webUrl = yield* Effect.try({
+        try: () => {
+          if (webUrlValue === undefined) return undefined;
+          const url = new URL(webUrlValue);
+          if (url.protocol !== "http:" && url.protocol !== "https:")
+            throw new Error(`Unsupported protocol: ${url.protocol}`);
+          return url.href;
+        },
+        catch: (cause) => desktopServerError("PIDEX_WEB_URL must be an HTTP or HTTPS URL", cause),
+      });
+
+      const stateDirectoryOverride = process.env.PIDEX_STATE_DIR;
+      if (stateDirectoryOverride === "")
+        return yield* Effect.fail(
+          desktopServerError("PIDEX_STATE_DIR must not be empty", stateDirectoryOverride),
+        );
+
+      const localUrl = `http://127.0.0.1:${port}`;
+      const targetUrl = webUrl ?? localUrl;
+
       yield* Effect.sync(() => app.setName("pidex"));
       yield* Effect.tryPromise({
         try: () => app.whenReady(),
         catch: (cause) => desktopServerError("Electron did not become ready", cause),
       });
 
-      const stateDirectory =
-        process.env.PIDEX_STATE_DIR ?? path.join(app.getPath("userData"), "state");
+      const stateDirectory = stateDirectoryOverride ?? path.join(app.getPath("userData"), "state");
       const quit = yield* Deferred.make<void>();
       yield* registerIpcHandler();
-      yield* registerAppLifecycle(quit);
+      yield* registerAppLifecycle(quit, targetUrl);
 
-      if (!process.env.PIDEX_WEB_URL) {
+      if (webUrl === undefined) {
         const logs = yield* Ref.make<ReadonlyArray<string>>([]);
-        yield* Effect.scoped(spawnServer(stateDirectory, logs)).pipe(
+        yield* Effect.scoped(spawnServer(stateDirectory, port, logs)).pipe(
           Effect.catch((error) => Effect.logWarning(`${error.message}: ${String(error.cause)}`)),
           Effect.repeat(
             Schedule.exponential("300 millis", 2).pipe(
@@ -34,6 +61,22 @@ NodeRuntime.runMain(
             ),
           ),
           Effect.forkScoped({ startImmediately: true }),
+        );
+        const apiClient: PidexApiContractClient = createORPCClient(
+          new RPCLink({ origin: localUrl, url: "/api/rpc" }),
+        );
+        const checkServerHealth = Effect.tryPromise({
+          try: () => apiClient.system.health({}),
+          catch: (cause) => desktopServerError("Pidex could not reach its server", cause),
+        }).pipe(
+          Effect.flatMap((health) => {
+            const result = safeParse(healthSchema, health);
+            return result.success
+              ? Effect.void
+              : Effect.fail(
+                  desktopServerError("Pidex received an invalid health response", result.issues),
+                );
+          }),
         );
         yield* checkServerHealth.pipe(
           Effect.retry({ schedule: Schedule.spaced("125 millis"), times: 79 }),
@@ -52,7 +95,7 @@ NodeRuntime.runMain(
         );
       }
 
-      yield* createWindow();
+      yield* createWindow(targetUrl);
       yield* Deferred.await(quit);
     }),
   ).pipe(
@@ -92,13 +135,13 @@ function registerIpcHandler() {
   );
 }
 
-function registerAppLifecycle(quit: Deferred.Deferred<void>) {
+function registerAppLifecycle(quit: Deferred.Deferred<void>, targetUrl: string) {
   return Effect.acquireRelease(
     Effect.sync(() => {
       const onActivate = () => {
         if (BrowserWindow.getAllWindows().length === 0)
           Effect.runFork(
-            createWindow().pipe(
+            createWindow(targetUrl).pipe(
               Effect.catch((error) =>
                 Effect.sync(() => console.error(`Pidex cannot create a window: ${error.message}`)),
               ),
@@ -127,8 +170,7 @@ function quitWhenWindowsClose() {
   if (process.platform !== "darwin") app.quit();
 }
 
-const createWindow = Effect.fn("desktop.window.create")(function* () {
-  const targetUrl = process.env.PIDEX_WEB_URL ?? localUrl;
+const createWindow = Effect.fn("desktop.window.create")(function* (targetUrl: string) {
   const window = yield* Effect.try({
     try: () => {
       const trustedOrigin = new URL(targetUrl).origin;
@@ -171,6 +213,7 @@ const createWindow = Effect.fn("desktop.window.create")(function* () {
 
 const spawnServer = Effect.fn("desktop.server.spawn")(function* (
   stateDirectory: string,
+  port: number,
   logs: Ref.Ref<ReadonlyArray<string>>,
 ) {
   const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
@@ -213,21 +256,3 @@ const spawnServer = Effect.fn("desktop.server.spawn")(function* (
     Effect.mapError((cause) => desktopServerError("The Pidex server process failed", cause)),
   );
 });
-
-const checkServerHealth = Effect.tryPromise({
-  try: () => apiClient.system.health({}),
-  catch: (cause) => desktopServerError("Pidex could not reach its server", cause),
-}).pipe(
-  Effect.flatMap((health) => {
-    const result = safeParse(healthSchema, health);
-    return result.success
-      ? Effect.void
-      : Effect.fail(desktopServerError("Pidex received an invalid health response", result.issues));
-  }),
-);
-
-const port = process.env.PORT && /^\d+$/.test(process.env.PORT) ? Number(process.env.PORT) : 4783;
-const localUrl = `http://127.0.0.1:${port}`;
-const apiClient: PidexApiContractClient = createORPCClient(
-  new RPCLink({ origin: localUrl, url: "/api/rpc" }),
-);
