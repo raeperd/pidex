@@ -21,7 +21,12 @@ export type AgentMessageNode =
       key: string;
       ordered: boolean;
       start: number;
-      items: AgentMessageListItem[];
+      items: {
+        key: string;
+        children: AgentMessageNode[];
+        checked?: boolean;
+        loose: boolean;
+      }[];
     }
   | {
       type: "table";
@@ -36,13 +41,6 @@ export type AgentMessageNode =
   | { type: "text"; key: string; text: string }
   | { type: "break"; key: string }
   | { type: "rule"; key: string };
-
-interface AgentMessageListItem {
-  key: string;
-  children: AgentMessageNode[];
-  checked?: boolean;
-  loose: boolean;
-}
 
 interface AgentMessageTableCell {
   key: string;
