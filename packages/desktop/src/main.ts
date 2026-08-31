@@ -45,7 +45,7 @@ const main = Effect.scoped(
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   NodeRuntime.runMain(main, { disableErrorReporting: true });
 
-export interface DesktopServerError {
+interface DesktopServerError {
   readonly _tag: "DesktopServerError";
   readonly operation: string;
   readonly message: string;
