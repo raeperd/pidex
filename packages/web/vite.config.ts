@@ -10,7 +10,7 @@ interface DevelopmentEnvironment {
 
 export default defineConfig((configEnv) => createViteConfig(configEnv));
 
-export function createViteConfig(
+function createViteConfig(
   { command, isPreview, mode }: ConfigEnv,
   environment: DevelopmentEnvironment = process.env,
 ): UserConfig {
