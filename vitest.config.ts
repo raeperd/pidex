@@ -5,7 +5,6 @@ export default defineConfig({
   plugins: [svelte({ configFile: false, preprocess: vitePreprocess() })],
   test: {
     include: ["packages/**/*.test.ts"],
-    includeSource: ["packages/desktop/src/main.ts"],
     exclude: ["**/node_modules/**", "**/dist/**", "packages/e2e/**"],
     testTimeout: 10_000,
     // Icon packages ship uncompiled components that Vite would otherwise externalise.
