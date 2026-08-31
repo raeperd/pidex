@@ -81,7 +81,13 @@ export interface AppShellContext {
   };
 }
 
-export interface TaskViewControllerRegistry {
+const [getAppShellContext, provideAppShellContext] = createContext<AppShellContext>();
+
+export { getAppShellContext, provideAppShellContext };
+
+export function createTaskViewControllerRegistry(
+  scheduleTask: (callback: () => void) => void = (callback) => requestAnimationFrame(callback),
+): {
   attachComposer(controller: TaskComposerController | undefined): void;
   attachTranscript(controller: TaskTranscriptController | undefined): void;
   dispose(): void;
@@ -89,15 +95,7 @@ export interface TaskViewControllerRegistry {
   resizeComposer(): void;
   scrollIfNearBottom(): void;
   scrollLatest(): void;
-}
-
-const [getAppShellContext, provideAppShellContext] = createContext<AppShellContext>();
-
-export { getAppShellContext, provideAppShellContext };
-
-export function createTaskViewControllerRegistry(
-  scheduleTask: (callback: () => void) => void = (callback) => requestAnimationFrame(callback),
-): TaskViewControllerRegistry {
+} {
   let composer: TaskComposerController | undefined;
   let composerFocusPending = false;
   let transcript: TaskTranscriptController | undefined;
