@@ -28,7 +28,22 @@ NodeRuntime.runMain(
         yield* superviseServer(spawnServer(stateDirectory, logs)).pipe(
           Effect.forkScoped({ startImmediately: true }),
         );
-        yield* waitForServer(checkServerHealth, Ref.get(logs));
+        yield* checkServerHealth.pipe(
+          Effect.retry({ schedule: Schedule.spaced("125 millis"), times: 79 }),
+          Effect.catch((error) =>
+            Ref.get(logs).pipe(
+              Effect.flatMap((recentLogs) =>
+                Effect.fail(
+                  desktopServerError(
+                    "server.ready",
+                    `Pidex server did not become ready. Recent logs:\n${recentLogs.slice(-20).join("\n")}`,
+                    error,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
       }
 
       yield* createWindow();
@@ -63,31 +78,6 @@ const superviseServer = Effect.fn("desktop.server.supervise")(function* <R>(
     ),
   );
   return yield* runScoped.pipe(Effect.repeat(restartSchedule));
-});
-
-const waitForServer = Effect.fn("desktop.server.waitUntilReady")(function* (
-  checkHealth: Effect.Effect<void, DesktopServerError>,
-  recentLogs: Effect.Effect<ReadonlyArray<string>>,
-  options: { readonly attempts?: number; readonly delay?: Duration.Input } = {},
-) {
-  const attempts = options.attempts ?? 80;
-  const delay = options.delay ?? "125 millis";
-  return yield* checkHealth.pipe(
-    Effect.retry({ schedule: Schedule.spaced(delay), times: Math.max(0, attempts - 1) }),
-    Effect.catch((error) =>
-      recentLogs.pipe(
-        Effect.flatMap((logs) =>
-          Effect.fail(
-            desktopServerError(
-              "server.ready",
-              `Pidex server did not become ready. Recent logs:\n${logs.slice(-20).join("\n")}`,
-              error,
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 });
 
 function desktopServerError(
