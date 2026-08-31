@@ -333,7 +333,6 @@ export const pidexApiContract = {
 export type PidexApiContractClient = RouterContractClient<typeof pidexApiContract>;
 
 export type ModelInfo = v.InferOutput<typeof modelSchema>;
-type SessionStatus = v.InferOutput<typeof sessionStatusSchema>;
 export type SessionSummary = v.InferOutput<typeof sessionSummarySchema>;
 export type Workspace = v.InferOutput<typeof workspaceSchema>;
 export type RecentWorkspace = v.InferOutput<typeof recentWorkspaceSchema>;

@@ -3,13 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Effect, Fiber, Queue, Stream } from "effect";
-import {
-  type AdapterEvent,
-  type EffectAdapterSession,
-  makePiSdk,
-  makePiSdkService,
-} from "./pi-sdk.js";
+import { Effect } from "effect";
+import { type AdapterEvent, makePiSdk, makePiSdkService } from "./pi-sdk.js";
 
 describe("Pi SDK Effect service", () => {
   it.effect("discovers Pi extension, prompt template, and skill commands", () =>
@@ -412,103 +407,3 @@ const isolatedPiWorkspace = Effect.acquireRelease(
   }),
   (fixture) => Effect.promise(() => rm(fixture.root, { recursive: true, force: true })),
 );
-
-interface SessionFixture extends EffectAdapterSession {
-  failPrompt(error: Error): void;
-  readonly abortCount: number;
-  readonly disposed: boolean;
-  readonly listenerCount: number;
-  emit(event: AdapterEvent): void;
-  readonly lifecycle: {
-    subscribe(listener: (event: AdapterEvent) => void): () => void;
-    abort(): Promise<void>;
-    dispose(): void;
-  };
-}
-
-function makeSessionFixture(): SessionFixture {
-  let promptFailure: Error | undefined;
-  let pendingPrompt: (() => void) | undefined;
-  let abortCount = 0;
-  let disposed = false;
-
-  const listeners = new Set<(event: AdapterEvent) => void>();
-  const lifecycle = {
-    subscribe: (listener: (event: AdapterEvent) => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    abort: async () => {
-      abortCount += 1;
-      pendingPrompt?.();
-      pendingPrompt = undefined;
-    },
-    dispose: () => {
-      disposed = true;
-      listeners.clear();
-    },
-  };
-  const events = Stream.callback((queue) =>
-    Effect.acquireRelease(
-      Effect.sync(() =>
-        lifecycle.subscribe((event) => {
-          Queue.offerUnsafe(queue, event);
-        }),
-      ),
-      (unsubscribe) => Effect.sync(unsubscribe),
-    ),
-  );
-  return {
-    state: {
-      nativeId: "fixture-session",
-      nativePath: undefined,
-      messages: [
-        {
-          type: "user",
-          id: "fixture-message",
-          text: "fixture prompt",
-          complete: true,
-          timestamp: new Date(1).toISOString(),
-        },
-      ],
-      toolOutputs: new Map(),
-      model: undefined,
-      thinkingLevel: "minimal",
-      sessionName: undefined,
-      contextUsage: undefined,
-      isIdle: true,
-    },
-    events,
-    lifecycle,
-    failPrompt: (error) => {
-      promptFailure = error;
-    },
-    get abortCount() {
-      return abortCount;
-    },
-    get disposed() {
-      return disposed;
-    },
-    get listenerCount() {
-      return listeners.size;
-    },
-    emit: (event) => {
-      for (const listener of listeners) listener(event);
-    },
-    prompt: () => {
-      if (promptFailure)
-        return Effect.fail({
-          _tag: "AdapterSessionError" as const,
-          operation: "session.prompt",
-          message: promptFailure.message,
-          cause: promptFailure,
-        });
-      return Effect.promise(
-        () =>
-          new Promise<void>((resolve) => {
-            pendingPrompt = resolve;
-          }),
-      ).pipe(Effect.onInterrupt(() => Effect.promise(() => lifecycle.abort())));
-    },
-  } as SessionFixture;
-}

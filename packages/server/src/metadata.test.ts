@@ -1,5 +1,4 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";

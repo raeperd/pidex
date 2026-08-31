@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { pidexApiContract, PROTOCOL_VERSION, safeParse } from "../src/index.js";
 
+function lastSchema<T>(schemas: readonly T[] | undefined): T {
+  const schema = schemas?.at(-1);
+  if (!schema) throw new Error("Expected a contract schema");
+  return schema;
+}
+
 const actionRequest = {
   chatId: "chat_123",
   clientId: "client_123",
@@ -10,7 +16,7 @@ const actionRequest = {
 
 describe("Pidex API schemas", () => {
   it("removes unknown object entries", () => {
-    const result = safeParse(pidexApiContract.system.health["~orpc"].outputSchemas?.at(-1)!, {
+    const result = safeParse(lastSchema(pidexApiContract.system.health["~orpc"].outputSchemas), {
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
       ignored: true,
@@ -55,9 +61,9 @@ describe("Pidex API schemas", () => {
   });
 
   it("preserves custom validation and trimming behavior", () => {
-    const messageSchema = pidexApiContract.chats.sendMessage["~orpc"].inputSchemas?.at(-1)!;
-    const configSchema = pidexApiContract.chats.configure["~orpc"].inputSchemas?.at(-1)!;
-    const renameSchema = pidexApiContract.chats.rename["~orpc"].inputSchemas?.at(-1)!;
+    const messageSchema = lastSchema(pidexApiContract.chats.sendMessage["~orpc"].inputSchemas);
+    const configSchema = lastSchema(pidexApiContract.chats.configure["~orpc"].inputSchemas);
+    const renameSchema = lastSchema(pidexApiContract.chats.rename["~orpc"].inputSchemas);
     expect(
       safeParse(messageSchema, { ...actionRequest, text: "   ", delivery: "normal" }),
     ).toMatchObject({ success: false });
@@ -69,8 +75,8 @@ describe("Pidex API schemas", () => {
   });
 
   it("preserves finite number and safe integer validation", () => {
-    const actionSchema = pidexApiContract.chats.sendMessage["~orpc"].outputSchemas?.at(-1)!;
-    const snapshotSchema = pidexApiContract.chats.get["~orpc"].outputSchemas?.at(-1)!;
+    const actionSchema = lastSchema(pidexApiContract.chats.sendMessage["~orpc"].outputSchemas);
+    const snapshotSchema = lastSchema(pidexApiContract.chats.get["~orpc"].outputSchemas);
     expect(
       safeParse(actionSchema, {
         accepted: true,
@@ -106,7 +112,7 @@ describe("Pidex API schemas", () => {
   });
 
   it("preserves raw Pi event payloads in the live contract", async () => {
-    async function* events() {
+    const events = (async function* () {
       yield {
         source: "pi",
         eventId: 1,
@@ -117,9 +123,9 @@ describe("Pidex API schemas", () => {
           assistantMessageEvent: { type: "text_delta", delta: "hello" },
         },
       };
-    }
-    const schema = pidexApiContract.live.events["~orpc"].outputSchemas?.at(-1)!;
-    const result = await schema["~standard"].validate(events());
+    })();
+    const schema = lastSchema(pidexApiContract.live.events["~orpc"].outputSchemas);
+    const result = await schema["~standard"].validate(events);
     expect(result).toHaveProperty("value");
     if (!("value" in result)) return;
     await expect(result.value.next()).resolves.toMatchObject({
@@ -136,7 +142,7 @@ describe("Pidex API schemas", () => {
   });
 
   it("parses a session summary status as an optional coarse tri-state", () => {
-    const schema = pidexApiContract.workspaces.sessions["~orpc"].outputSchemas?.at(-1)!;
+    const schema = lastSchema(pidexApiContract.workspaces.sessions["~orpc"].outputSchemas);
     const summary = {
       id: "session_123",
       firstMessage: "Fix the flaky test",
