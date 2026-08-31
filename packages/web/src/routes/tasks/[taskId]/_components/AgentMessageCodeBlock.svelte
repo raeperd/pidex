@@ -3,16 +3,14 @@
 
   export type HighlightTheme = "light" | "dark";
 
-  interface HighlightToken {
-    content: string;
-    color?: string;
-    bold: boolean;
-    italic: boolean;
-    underline: boolean;
-  }
-
   interface HighlightedCode {
-    lines: HighlightToken[][];
+    lines: {
+      content: string;
+      color?: string;
+      bold: boolean;
+      italic: boolean;
+      underline: boolean;
+    }[][];
   }
 
   const MAX_CACHE_CHARACTERS = 200_000;
