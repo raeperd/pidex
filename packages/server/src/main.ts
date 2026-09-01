@@ -28,7 +28,7 @@ import {
   validateRequest,
 } from "./security.js";
 
-const pidexApplication = Effect.gen(function* () {
+const pidexHttpHandler = Effect.gen(function* () {
   const metadata = yield* Metadata;
   const pi = makePiSdkService(makePiSdk());
   const manager = makeChatManager(pi, metadata);
@@ -137,7 +137,7 @@ export async function createPidexApplication() {
     );
     const application = await Effect.runPromise(
       Effect.gen(function* () {
-        const app = yield* pidexApplication;
+        const app = yield* pidexHttpHandler;
         const handleRequest = yield* NodeHttpServer.makeHandler(app.handleRequest, { scope });
         return { ...app, handleRequest };
       }).pipe(Effect.provide(context), Scope.provide(scope)),
@@ -156,7 +156,7 @@ const main = Effect.scoped(
       catch: (cause) => applicationError("server.port", cause),
     });
     return yield* Effect.gen(function* () {
-      const app = yield* pidexApplication;
+      const app = yield* pidexHttpHandler;
       yield* HttpServer.serveEffect(app.handleRequest);
       const server = yield* HttpServer.HttpServer;
       yield* Effect.logInfo(`Pidex ready at ${HttpServer.formatAddress(server.address)}`);
