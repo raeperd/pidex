@@ -4,39 +4,30 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import path from "node:path";
-import { Deferred, Duration, Effect, Ref, Schedule, Stream } from "effect";
+import { Config, ConfigProvider, Deferred, Duration, Effect, Ref, Schedule, Stream } from "effect";
 import { ChildProcess } from "effect/unstable/process";
 
 NodeRuntime.runMain(
   Effect.scoped(
     Effect.gen(function* () {
-      const portValue = process.env.PORT;
-      const port = portValue === undefined ? 4783 : Number(portValue);
-      if (portValue !== undefined && (!/^\d+$/.test(portValue) || port < 1024 || port > 65535))
+      const { port, webUrl, stateDirectoryOverride } = yield* Config.unwrap({
+        port: Config.port("PORT").pipe(Config.withDefault(4783)),
+        webUrl: Config.url("PIDEX_WEB_URL").pipe(Config.withDefault(undefined)),
+        stateDirectoryOverride: Config.nonEmptyString("PIDEX_STATE_DIR").pipe(
+          Config.withDefault(undefined),
+        ),
+      }).parse(ConfigProvider.fromEnv({ preserveEmptyStrings: true }));
+      if (port < 1024)
         return yield* Effect.fail(
-          desktopServerError("PORT must be an integer from 1024 through 65535", portValue),
+          desktopServerError("PORT must be an integer from 1024 through 65535", port),
         );
-
-      const webUrlValue = process.env.PIDEX_WEB_URL;
-      const webUrl = yield* Effect.try({
-        try: () => {
-          if (webUrlValue === undefined) return undefined;
-          const url = new URL(webUrlValue);
-          if (url.protocol !== "http:" && url.protocol !== "https:")
-            throw new Error(`Unsupported protocol: ${url.protocol}`);
-          return url.href;
-        },
-        catch: (cause) => desktopServerError("PIDEX_WEB_URL must be an HTTP or HTTPS URL", cause),
-      });
-
-      const stateDirectoryOverride = process.env.PIDEX_STATE_DIR;
-      if (stateDirectoryOverride === "")
+      if (webUrl && webUrl.protocol !== "http:" && webUrl.protocol !== "https:")
         return yield* Effect.fail(
-          desktopServerError("PIDEX_STATE_DIR must not be empty", stateDirectoryOverride),
+          desktopServerError("PIDEX_WEB_URL must be an HTTP or HTTPS URL", webUrl.href),
         );
 
       const localUrl = `http://127.0.0.1:${port}`;
-      const targetUrl = webUrl ?? localUrl;
+      const targetUrl = webUrl?.href ?? localUrl;
 
       yield* Effect.sync(() => app.setName("pidex"));
       yield* Effect.tryPromise({
