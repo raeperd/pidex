@@ -77,16 +77,6 @@ class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>
 
 type ApplicationError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
 
-export function attemptOperation<A>(
-  operation: string,
-  evaluate: () => A | PromiseLike<A>,
-): Effect.Effect<A, ApplicationError> {
-  return Effect.tryPromise({
-    try: () => Promise.resolve().then(evaluate),
-    catch: (cause) => applicationError(operation, cause),
-  });
-}
-
 export function applicationError(operation: string, cause: unknown): ApplicationError {
   if (
     cause instanceof ActionProtocolError ||
