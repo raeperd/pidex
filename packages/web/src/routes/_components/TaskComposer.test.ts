@@ -1,3 +1,4 @@
+import type { ChatSnapshot } from "@pidex/api";
 import type { ComponentProps } from "svelte";
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
@@ -70,7 +71,14 @@ describe("slash command suggestions", () => {
     // output interleaves invisible hydration-boundary comments between text nodes, so compare
     // against the comment-stripped text a browser would actually display.
     const body = render(TaskComposer, {
-      props: { ...composerProps("", true), steeringCount: 2, followUpCount: 1 },
+      props: {
+        ...composerProps("", true),
+        snapshot: makeChatSnapshot({
+          runStatus: "running",
+          steeringQueue: ["First steering message", "Second steering message"],
+          followUpQueue: ["Follow-up message"],
+        }),
+      },
     }).body;
     const visibleText = body.replace(/<!--[\s\S]*?-->/g, "");
 
@@ -98,24 +106,21 @@ function composerProps(
   overrides: Partial<ComponentProps<typeof TaskComposer>> = {},
 ): ComponentProps<typeof TaskComposer> {
   return {
-    active,
-    clearQueue: async () => {},
+    actions: {
+      clearQueue: async () => {},
+      compact: async () => true,
+      configure: async () => true,
+      persistDraft: () => {},
+      send: async () => {},
+      setStartMode: () => {},
+      stop: async () => {},
+    },
     commands: [],
-    compact: async () => true,
     compactPending: false,
-    configure: async () => true,
     configurationPending: false,
     connection: "connected",
-    contextUsage: {
-      tokens: 68_000,
-      contextWindow: 272_000,
-      percent: 25,
-      totalProcessedTokens: 3_350,
-      compactsAutomatically: true,
-    },
     creatingTask: false,
     draft,
-    followUpCount: 0,
     models: [
       {
         id: "openai/gpt-5.6-sol",
@@ -124,19 +129,36 @@ function composerProps(
         reasoning: true,
       },
     ],
-    persistDraft: () => {},
     projectName: "pidex",
-    requiresAcknowledgement: false,
-    runStatus: active ? "running" : "idle",
-    selectedModel: "openai/gpt-5.6-sol",
-    selectedThinkingLevel: "high",
-    send: async () => {},
-    setStartMode: () => {},
+    snapshot: makeChatSnapshot({ runStatus: active ? "running" : "idle" }),
     startMode: "local",
     startModeEditable,
-    steeringCount: 0,
-    stop: async () => {},
+    ...overrides,
+  };
+}
+
+function makeChatSnapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
+  return {
+    chatId: "chat-1",
+    workspaceId: "workspace-1",
     taskId: "task-1",
+    revision: 1,
+    runStatus: "idle",
+    model: "openai/gpt-5.6-sol",
+    thinkingLevel: "high",
+    items: [],
+    transcriptStart: 0,
+    transcriptTotal: 0,
+    steeringQueue: [],
+    followUpQueue: [],
+    stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
+    contextUsage: {
+      tokens: 68_000,
+      contextWindow: 272_000,
+      percent: 25,
+      totalProcessedTokens: 3_350,
+      compactsAutomatically: true,
+    },
     ...overrides,
   };
 }

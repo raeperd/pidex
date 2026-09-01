@@ -246,71 +246,58 @@
 </script>
 
 <script lang="ts">
-  import type { ContextUsage } from "@pidex/api";
   import { tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
-  import type { TaskConfigurationPatch, TaskStartMode } from "./AppShellContext.svelte";
+  import type {
+    AppShellContext,
+    TaskConfigurationPatch,
+    TaskStartMode,
+  } from "./AppShellContext.svelte";
   import ComposerModelControls from "./ComposerModelControls.svelte";
   import ContextUsageMeter from "./ContextUsageMeter.svelte";
   import Icon from "./Icon.svelte";
 
   let {
-    active,
-    clearQueue,
+    actions,
     commands,
-    compact,
     compactPending,
-    configure,
     configurationPending,
     connection,
-    contextUsage,
     creatingTask,
     draft = $bindable(),
-    followUpCount,
     models,
-    persistDraft,
     projectName,
-    requiresAcknowledgement,
-    runStatus,
-    selectedModel,
-    selectedThinkingLevel,
-    send,
-    setStartMode,
+    snapshot,
     startMode,
     startModeEditable,
-    steeringCount,
-    stop,
-    taskId,
   }: {
-    active: boolean;
-    clearQueue: () => Promise<void>;
+    actions: Pick<
+      AppShellContext["taskActions"],
+      "clearQueue" | "compact" | "configure" | "persistDraft" | "send" | "setStartMode" | "stop"
+    >;
     commands: Workspace["commands"];
-    compact: (instructions?: string) => Promise<boolean>;
     compactPending: boolean;
-    configure: (patch: TaskConfigurationPatch) => Promise<boolean>;
     configurationPending: boolean;
     connection: ConnectionState;
-    contextUsage?: ContextUsage;
     creatingTask: boolean;
     draft: string;
-    followUpCount: number;
     models: Workspace["models"];
-    persistDraft: () => void;
     projectName: string;
-    requiresAcknowledgement: boolean;
-    runStatus: ChatSnapshot["runStatus"];
-    selectedModel: string;
-    selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
-    send: () => Promise<void>;
-    setStartMode: (mode: TaskStartMode) => void;
+    snapshot: ChatSnapshot;
     startMode: TaskStartMode;
     startModeEditable: boolean;
-    steeringCount: number;
-    stop: () => Promise<void>;
-    /** Identifies the task whose run is being timed, so switching between two already-active tasks restarts the elapsed clock. */
-    taskId: string;
   } = $props();
 
+  let active = $derived(snapshot.runStatus !== "idle" && snapshot.runStatus !== "error");
+  let contextUsage = $derived(snapshot.contextUsage);
+  let followUpCount = $derived(snapshot.followUpQueue.length);
+  let requiresAcknowledgement = $derived(Boolean(snapshot.run?.requiresAcknowledgement));
+  let runStatus = $derived(snapshot.runStatus);
+  let selectedModel = $derived(snapshot.model ?? "");
+  let selectedThinkingLevel = $derived(snapshot.thinkingLevel);
+  let steeringCount = $derived(snapshot.steeringQueue.length);
+  /** Identifies the task whose run is being timed, so switching between two already-active tasks restarts the elapsed clock. */
+  let taskId = $derived(snapshot.taskId);
   let promptInput: HTMLTextAreaElement | undefined;
   let startMenuOpen = $state(false);
   let startModeLabel = $derived(startMode === "worktree" ? "New worktree" : "Work locally");
@@ -385,21 +372,21 @@
   };
 
   function draftInput() {
-    persistDraft();
+    actions.persistDraft();
     resize();
   }
 
   function completeCommand(command: ComposerCommand) {
     draft = `/${command.name} `;
     selectedCommandName = "";
-    persistDraft();
+    actions.persistDraft();
     resize();
     promptInput?.focus();
   }
 
   async function updateConfiguration(patch: TaskConfigurationPatch) {
     if (configurationPending || active || creatingTask || connection !== "connected") return;
-    await configure(patch);
+    await actions.configure(patch);
   }
 
   async function moveCommandSelection(direction: -1 | 1) {
@@ -415,10 +402,10 @@
   async function submitDraft() {
     if (compactPending) return;
     const submittedDraft = draft;
-    const result = await submitComposerDraft(submittedDraft, { compact, send });
+    const result = await submitComposerDraft(submittedDraft, actions);
     if (result !== "compact" || draft !== submittedDraft) return;
     draft = "";
-    persistDraft();
+    actions.persistDraft();
     await tick();
     resize();
   }
@@ -467,7 +454,7 @@
   }
 
   function chooseStartMode(mode: TaskStartMode) {
-    setStartMode(mode);
+    actions.setStartMode(mode);
     startMenuOpen = false;
   }
 </script>
@@ -490,7 +477,7 @@
     >
     {#if steeringCount + followUpCount > 0}<button
         class="border-0 bg-transparent p-0 text-meta text-primary-text"
-        onclick={clearQueue}>Clear queues</button
+        onclick={actions.clearQueue}>Clear queues</button
       >{/if}
   </div>
   <div class={composerSurfaceClass} data-testid="chat-composer">
@@ -623,7 +610,7 @@
         {#if active}
           <button
             class="inline-grid size-8.5 place-items-center rounded-full border-0 bg-danger/15 text-danger hover:bg-danger/20 max-[900px]:size-9.5 disabled:opacity-40"
-            onclick={stop}
+            onclick={actions.stop}
             disabled={connection !== "connected"}
             aria-label={affordances.sendLabel}
             title={affordances.sendLabel}><Icon name="stop" /></button

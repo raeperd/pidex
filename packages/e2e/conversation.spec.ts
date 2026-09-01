@@ -464,8 +464,18 @@ test("preserves edits made while slash compaction is pending", async ({
   // reason (that reason still drives the placeholder) -- see TaskComposer.svelte's
   // `composerAffordances`.
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  const composerFooter = page.getByTestId("chat-composer").locator("..");
+  await expect(composerFooter).toContainText("Compacting context");
   await expect(page.getByRole("button", { name: "Queue" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  await emitServerEvent(page, {
+    type: "queue",
+    eventId: 2,
+    chatId: String(snapshot.current?.chatId),
+    steering: ["First steering message", "Second steering message"],
+    followUp: ["Follow-up message"],
+  });
+  await expect(composerFooter).toContainText("2 steering · 1 follow-up queued");
   if (testInfo.project.name !== "mobile") {
     await prompt.press("Enter");
     await settleFrames(page);
@@ -492,7 +502,7 @@ test("preserves edits made while slash compaction is pending", async ({
   if (testInfo.project.name !== "mobile") {
     await emitServerEvent(page, {
       type: "run_status",
-      eventId: 2,
+      eventId: 3,
       chatId: String(snapshot.current?.chatId),
       status: "idle",
       revision: Number(snapshot.current?.revision),
