@@ -28,7 +28,7 @@ import {
   validateRequest,
 } from "./security.js";
 
-export const pidexApplication = Effect.gen(function* () {
+const pidexApplication = Effect.gen(function* () {
   const metadata = yield* Metadata;
   const pi = makePiSdkService(makePiSdk());
   const manager = makeChatManager(pi, metadata);

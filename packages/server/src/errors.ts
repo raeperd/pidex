@@ -14,7 +14,7 @@ export class HttpError extends Schema.TaggedErrorClass<HttpError>()("HttpError",
 /**
  * HTTP status for every error code that crosses the oRPC boundary. oRPC 2 dropped `status` from
  * `ORPCError`, so the handler resolves the wire status from `errorStatusMap` keyed by code; this
- * table is both that map's source and the status the raw-Node fallback reads off `HttpError`.
+ * table is both that map's source and the status carried by `HttpError` outside oRPC routes.
  *
  * Codes handled before the oRPC handler runs (`bad_host`, `bad_origin`, `cross_site`, `not_found`,
  * `web_build_missing`) stay out: `bad_host` alone means 400 when the Host header is missing or

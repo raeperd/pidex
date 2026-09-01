@@ -113,7 +113,7 @@ export function securityHeaders(scriptHashes: string[] = []) {
 }
 
 export function safeError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected error";
+  const message = errorMessage(error);
   return message
     .replace(
       /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi,
@@ -125,6 +125,18 @@ export function safeError(error: unknown) {
       "$1[redacted]",
     )
     .slice(0, 1000);
+}
+
+function errorMessage(error: unknown) {
+  const seen = new Set<object>();
+  let current = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && current.message) return current.message;
+    if (!("cause" in current)) break;
+    current = current.cause;
+  }
+  return "Unexpected error";
 }
 
 function parseRequestHost(

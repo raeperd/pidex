@@ -71,7 +71,8 @@ Browser storage  unsent drafts and local UI preferences
 
 ## Server composition
 
-`packages/server/src/main.ts` is the server composition root. One managed runtime builds
-the Pi SDK, metadata, and chat services. SQLite and live chat sessions are scoped resources,
-so runtime disposal closes them in dependency order. oRPC handlers and Node callbacks are
-the only Promise and callback boundaries.
+`packages/server/src/main.ts` is the server composition root. One scoped Effect program builds
+the Pi SDK, metadata, chat services, and Node HTTP server. SQLite, live chat sessions, and the
+HTTP listener are scoped resources, so scope closure releases them in dependency order. The oRPC
+fetch handler is bridged into Effect HTTP; Node callbacks and the Vite development adapter are the
+Promise and callback boundaries.
