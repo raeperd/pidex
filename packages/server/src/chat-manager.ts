@@ -483,11 +483,17 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     broadcast(chat, { type: "notice", item });
   }
 
+  /** Advances the chat to the action's revision. Returns false when the action was already applied. */
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keep the protocol above and beside its callers.
+  function beginAction(chat: ChatRecord, outcome: ActionOutcome): boolean {
+    chat.revision = Math.max(chat.revision, outcome.revision);
+    return !outcome.replayed;
+  }
+
   function startPrompt(chat: ChatRecord, text: string, outcome: ActionOutcome) {
     return Effect.gen(function* () {
       disposableWorkspaces.delete(chat.workspaceId);
-      chat.revision = Math.max(chat.revision, outcome.revision);
-      if (outcome.replayed) return;
+      if (!beginAction(chat, outcome)) return;
       if (!chat.session.state.isIdle)
         return yield* Effect.fail(
           serverError("chats.startPrompt", new Error("A run is already active")),
@@ -527,7 +533,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       yield* settleAction(chat, outcome, () =>
         delivery === "steer" ? chat.session.steer(text) : chat.session.followUp(text),
       );
-      if (outcome.replayed) return outcome;
+      if (!beginAction(chat, outcome)) return outcome;
       broadcastRun(chat);
       return { ...outcome, status: "completed" } satisfies ActionOutcome;
     });
@@ -535,8 +541,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 
   function abort(chat: ChatRecord, outcome: ActionOutcome) {
     return Effect.gen(function* () {
-      chat.revision = Math.max(chat.revision, outcome.revision);
-      if (outcome.replayed) return outcome;
+      if (!beginAction(chat, outcome)) return outcome;
       if (!chat.run || chat.run.runId !== outcome.runId)
         return yield* Effect.fail(
           serverError("chats.abort", new Error("Stop no longer targets the active run")),
@@ -561,20 +566,18 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     work: () => Effect.Effect<T, E, R>,
   ) {
     return settleAction(chat, outcome, work).pipe(
-      Effect.tap(() => Effect.sync(() => outcome.replayed || broadcastRun(chat))),
+      Effect.tap(() => Effect.sync(() => beginAction(chat, outcome) && broadcastRun(chat))),
       Effect.tapError(() => Effect.sync(() => broadcastRun(chat))),
     );
   }
 
-  /** Shared action protocol: bump the revision, replay without effects, then run and record. */
   function settleAction<T, E, R>(
     chat: ChatRecord,
     outcome: ActionOutcome,
     work: () => Effect.Effect<T, E, R>,
   ) {
     return Effect.gen(function* () {
-      chat.revision = Math.max(chat.revision, outcome.revision);
-      if (outcome.replayed) return undefined;
+      if (!beginAction(chat, outcome)) return undefined;
       return yield* work().pipe(
         Effect.tap(() => metadata.markActionStatus(outcome.actionId, "completed")),
         Effect.tapError(() => metadata.markActionStatus(outcome.actionId, "failed")),

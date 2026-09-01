@@ -765,6 +765,32 @@ describe.sequential("HTTP API endpoints", () => {
     expect(result.sessionName).toBe("Renamed through HTTP");
   });
 
+  it("performs a replayed rename only once", async () => {
+    const events = await connectChatEvents(api, chatId);
+    try {
+      const chat = await currentChat();
+      const action = { ...actionFor(chat), name: "Replay once" };
+
+      const first = await api.chats.rename(action);
+      const replay = await api.chats.rename(action);
+      await api.chats.rename({ ...actionFor(first), name: "Replay sentinel" });
+
+      let renameSideEffects = 0;
+      while (true) {
+        const result = await events.next();
+        if (result.done) throw new Error("Event stream ended before the replay sentinel");
+        if (result.value.source !== "pidex" || result.value.event.type !== "session") continue;
+        if (result.value.event.name === "Replay once") renameSideEffects++;
+        if (result.value.event.name === "Replay sentinel") break;
+      }
+
+      expect(replay).toMatchObject({ revision: first.revision, sessionName: "Replay once" });
+      expect(renameSideEffects).toBe(1);
+    } finally {
+      await events.return?.();
+    }
+  });
+
   it("chats.compact", async () => {
     const chat = await currentChat();
 
