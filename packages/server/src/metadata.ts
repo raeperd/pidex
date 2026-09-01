@@ -614,6 +614,13 @@ const actionStatuses = [
 ] as const satisfies ReadonlyArray<ActionOutcome["status"]>;
 type ActionStatus = ActionOutcome["status"];
 
+type ActionKind =
+  | "prompt"
+  | "stop"
+  | Parameters<MetadataStore["acceptRunMutation"]>[0]["kind"]
+  | Parameters<MetadataStore["acceptSessionMutation"]>[0]["kind"]
+  | "acknowledge";
+
 const actionKinds = [
   "prompt",
   "stop",
@@ -625,8 +632,7 @@ const actionKinds = [
   "dialog",
   "rename",
   "acknowledge",
-] as const;
-type ActionKind = (typeof actionKinds)[number];
+] as const satisfies ReadonlyArray<ActionKind>;
 
 const workspaces = sqliteTable(
   "workspaces",
