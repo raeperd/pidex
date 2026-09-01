@@ -17,7 +17,7 @@ import {
 } from "@pidex/api";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createPidexApplication } from "./main.js";
+import { createPidexNodeHandler } from "./main.js";
 
 const execFileAsync = promisify(execFile);
 let lastRpcResponseStatus: number | undefined;
@@ -49,7 +49,7 @@ const coveredEndpoints = [
 ] as const;
 
 describe.sequential("HTTP API endpoints", () => {
-  let app: Awaited<ReturnType<typeof createPidexApplication>>;
+  let handler: Awaited<ReturnType<typeof createPidexNodeHandler>>;
   let server: ReturnType<typeof createServer> | undefined;
   let publicApi: PidexApiContractClient;
   let api: PidexApiContractClient;
@@ -102,8 +102,8 @@ describe.sequential("HTTP API endpoints", () => {
     vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
     vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
 
-    app = await createPidexApplication();
-    server = createServer((req, res) => void app.handleRequest(req, res));
+    handler = await createPidexNodeHandler();
+    server = createServer((req, res) => void handler.handleRequest(req, res));
     await new Promise<void>((resolve, reject) => {
       server?.once("error", reject);
       server?.listen(0, "127.0.0.1", resolve);
@@ -123,7 +123,7 @@ describe.sequential("HTTP API endpoints", () => {
   afterAll(async () => {
     try {
       try {
-        await app?.close();
+        await handler?.close();
       } finally {
         if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
       }
@@ -730,7 +730,7 @@ describe.sequential("HTTP API endpoints", () => {
         totalProcessedTokens: 48_000,
         compactsAutomatically: true,
       };
-      const chatRecord = await Effect.runPromise(app.manager.chat(chatId));
+      const chatRecord = await Effect.runPromise(handler.manager.chat(chatId));
       Object.defineProperty(chatRecord.session.state, "contextUsage", {
         configurable: true,
         value: contextUsage,

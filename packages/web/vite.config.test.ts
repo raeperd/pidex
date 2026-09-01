@@ -28,7 +28,7 @@ describe("Pidex Vite config", () => {
       strictPort: false,
     });
     expect(config.server?.proxy).toBeUndefined();
-    expect(config.plugins?.[0]).toMatchObject({ name: "pidex-application" });
+    expect(config.plugins?.[0]).toMatchObject({ name: "pidex-server" });
   });
 
   test("does not initialize development behavior for tests or builds", async () => {
@@ -39,7 +39,7 @@ describe("Pidex Vite config", () => {
       const config = await createViteConfig(configEnv, { PORT: "invalid" });
       expect(config.server).toBeUndefined();
       expect(config.plugins?.flat()).not.toEqual(
-        expect.arrayContaining([expect.objectContaining({ name: "pidex-application" })]),
+        expect.arrayContaining([expect.objectContaining({ name: "pidex-server" })]),
       );
     }
   });

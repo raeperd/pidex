@@ -2,7 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { apiError, applicationError, ConfigurationError, HttpError } from "./errors.js";
+import { apiError, ConfigurationError, HttpError, serverError } from "./errors.js";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -25,7 +25,7 @@ export const allowedRoots = Effect.fn("security.allowedRoots")(function* () {
     (root) =>
       Effect.tryPromise({
         try: () => realpath(root),
-        catch: (cause) => applicationError("workspace-roots.resolve", cause),
+        catch: (cause) => serverError("workspace-roots.resolve", cause),
       }),
     { concurrency: "unbounded" },
   );
@@ -41,7 +41,7 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
   });
   const details = yield* Effect.tryPromise({
     try: () => stat(canonical),
-    catch: (cause) => applicationError("workspace.stat", cause),
+    catch: (cause) => serverError("workspace.stat", cause),
   });
   if (!details.isDirectory())
     return yield* Effect.fail(

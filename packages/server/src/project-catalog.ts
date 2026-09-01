@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { ProjectCandidate } from "@pidex/api";
 import { Effect } from "effect";
-import { apiError, applicationError, type ApiErrorCode } from "./errors.js";
+import { apiError, type ApiErrorCode, serverError } from "./errors.js";
 import { isDescendant } from "./security.js";
 
 const execFileAsync = promisify(execFile);
@@ -36,7 +36,7 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
   );
   yield* Effect.tryPromise({
     try: () => mkdir(path.dirname(worktreeRoot), { recursive: true, mode: 0o700 }),
-    catch: (cause) => applicationError("worktree.directory.create", cause),
+    catch: (cause) => serverError("worktree.directory.create", cause),
   });
   yield* runGit(
     repository.worktreeRoot,
@@ -48,7 +48,7 @@ export const createProjectWorktree = Effect.fn("projects.createWorktree")(functi
   const mappedProjectPath = path.join(worktreeRoot, relativeProjectPath);
   return yield* Effect.tryPromise({
     try: () => realpath(mappedProjectPath),
-    catch: (cause) => applicationError("worktree.project.resolve", cause),
+    catch: (cause) => serverError("worktree.project.resolve", cause),
   }).pipe(
     Effect.catch(() =>
       rollbackWorktree(repository.worktreeRoot, worktreeRoot, branch).pipe(

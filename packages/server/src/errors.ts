@@ -75,9 +75,9 @@ class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>
   },
 ) {}
 
-type ApplicationError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
+type ServerError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
 
-export function applicationError(operation: string, cause: unknown): ApplicationError {
+export function serverError(operation: string, cause: unknown): ServerError {
   if (
     cause instanceof ActionProtocolError ||
     cause instanceof ConfigurationError ||

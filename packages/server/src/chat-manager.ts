@@ -26,7 +26,7 @@ import type {
   PiSdkServiceApi,
 } from "./pi-sdk.js";
 import { bounded, boundedResource, messageId, messageItems, textOf, thinkingOf } from "./pi-sdk.js";
-import { applicationError } from "./errors.js";
+import { serverError } from "./errors.js";
 import type { MetadataService } from "./metadata.js";
 import { safeError } from "./security.js";
 
@@ -116,7 +116,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function getWorkspace(id: string) {
     return Effect.fromNullishOr(workspaces.get(id)).pipe(
       Effect.mapError(() =>
-        applicationError("chats.workspace", new Error("Workspace is no longer open")),
+        serverError("chats.workspace", new Error("Workspace is no longer open")),
       ),
     );
   }
@@ -147,7 +147,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     return Effect.gen(function* () {
       if (!(yield* workspaceCanBeRemoved(id)))
         return yield* Effect.fail(
-          applicationError("chats.forgetWorkspace", new Error("Workspace cannot be removed")),
+          serverError("chats.forgetWorkspace", new Error("Workspace cannot be removed")),
         );
       const workspaceChats = [...chats.values()].filter((chat) => chat.workspaceId === id);
       yield* Effect.forEach(workspaceChats, (chat) => dispose(chat), { discard: true });
@@ -241,9 +241,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       if (active) return active;
       const persisted = yield* metadata.task(taskId);
       if (!persisted)
-        return yield* Effect.fail(
-          applicationError("chats.resume", new Error("Task no longer exists")),
-        );
+        return yield* Effect.fail(serverError("chats.resume", new Error("Task no longer exists")));
       let workspace = workspaces.get(persisted.workspaceId);
       if (!workspace) {
         yield* openWorkspace(persisted.workspaceId, persisted.workspacePath);
@@ -256,7 +254,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       );
       if (!listed?.nativePath)
         return yield* Effect.fail(
-          applicationError("chats.resume", new Error("Session no longer exists")),
+          serverError("chats.resume", new Error("Session no longer exists")),
         );
       const owner = owners.get(listed.nativePath);
       if (owner) return yield* getChat(owner);
@@ -271,7 +269,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
 
   function getChat(id: string) {
     return Effect.fromNullishOr(chats.get(id)).pipe(
-      Effect.mapError(() => applicationError("chats.chat", new Error("Chat was not found"))),
+      Effect.mapError(() => serverError("chats.chat", new Error("Chat was not found"))),
     );
   }
 
@@ -492,7 +490,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       if (outcome.replayed) return;
       if (!chat.session.state.isIdle)
         return yield* Effect.fail(
-          applicationError("chats.startPrompt", new Error("A run is already active")),
+          serverError("chats.startPrompt", new Error("A run is already active")),
         );
       const runState = (status: "running" | "failed") => ({
         runId: outcome.runId,
@@ -541,7 +539,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       if (outcome.replayed) return outcome;
       if (!chat.run || chat.run.runId !== outcome.runId)
         return yield* Effect.fail(
-          applicationError("chats.abort", new Error("Stop no longer targets the active run")),
+          serverError("chats.abort", new Error("Stop no longer targets the active run")),
         );
       chat.abortRequested = true;
       chat.runStatus = "stopping";
@@ -772,7 +770,7 @@ function upsert(chat: ChatRecord, item: TranscriptItem) {
 function toolOutput(chat: ChatRecord, resourceId: string, offset: number, requestedLimit: number) {
   return Effect.fromNullishOr(chat.resources.get(resourceId)).pipe(
     Effect.mapError(() =>
-      applicationError(
+      serverError(
         "chats.toolOutput",
         new Error("Tool output is no longer available; rerun the tool to regenerate it"),
       ),

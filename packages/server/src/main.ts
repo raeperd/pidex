@@ -16,7 +16,7 @@ import {
   HttpStaticServer,
 } from "effect/unstable/http";
 import { makeChatManager } from "./chat-manager.js";
-import { apiErrorStatus, applicationError, HttpError } from "./errors.js";
+import { apiErrorStatus, HttpError, serverError } from "./errors.js";
 import { createRpcApiRouter } from "./http-api.js";
 import { makeMetadataLayer, Metadata } from "./metadata.js";
 import { makePiSdk, makePiSdkService } from "./pi-sdk.js";
@@ -79,7 +79,7 @@ const pidexHttpHandler = Effect.gen(function* () {
     } else {
       const webBuildExists = yield* fileSystem
         .exists(webRoot)
-        .pipe(Effect.mapError((cause) => applicationError("server.webRoot", cause)));
+        .pipe(Effect.mapError((cause) => serverError("server.webRoot", cause)));
       if (!webBuildExists)
         return yield* HttpError.make({
           status: 503,
@@ -123,7 +123,7 @@ const pidexHttpHandler = Effect.gen(function* () {
   return { handleRequest, manager };
 });
 
-export async function createPidexApplication() {
+export async function createPidexNodeHandler() {
   const scope = await Effect.runPromise(Scope.make());
   let closePromise: Promise<void> | undefined;
   const close = () => (closePromise ??= Effect.runPromise(Scope.close(scope, Exit.void)));
@@ -135,14 +135,16 @@ export async function createPidexApplication() {
         scope,
       ),
     );
-    const application = await Effect.runPromise(
+    const nodeHandler = await Effect.runPromise(
       Effect.gen(function* () {
-        const app = yield* pidexHttpHandler;
-        const handleRequest = yield* NodeHttpServer.makeHandler(app.handleRequest, { scope });
-        return { ...app, handleRequest };
+        const httpHandler = yield* pidexHttpHandler;
+        const handleRequest = yield* NodeHttpServer.makeHandler(httpHandler.handleRequest, {
+          scope,
+        });
+        return { ...httpHandler, handleRequest };
       }).pipe(Effect.provide(context), Scope.provide(scope)),
     );
-    return { ...application, close };
+    return { ...nodeHandler, close };
   } catch (error) {
     await close();
     throw error;
@@ -153,11 +155,11 @@ const main = Effect.scoped(
   Effect.gen(function* () {
     const port = yield* Effect.try({
       try: () => parsePort(),
-      catch: (cause) => applicationError("server.port", cause),
+      catch: (cause) => serverError("server.port", cause),
     });
     return yield* Effect.gen(function* () {
-      const app = yield* pidexHttpHandler;
-      yield* HttpServer.serveEffect(app.handleRequest);
+      const handler = yield* pidexHttpHandler;
+      yield* HttpServer.serveEffect(handler.handleRequest);
       const server = yield* HttpServer.HttpServer;
       yield* Effect.logInfo(`Pidex ready at ${HttpServer.formatAddress(server.address)}`);
       return yield* Effect.never;
@@ -185,7 +187,7 @@ function inlineScriptHashes(indexFile: string) {
       .map((match) => match[1])
       .filter((script): script is string => Boolean(script))
       .map((script) => createHash("sha256").update(script).digest("base64"));
-  }).pipe(Effect.mapError((cause) => applicationError("server.webScripts", cause)));
+  }).pipe(Effect.mapError((cause) => serverError("server.webScripts", cause)));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
