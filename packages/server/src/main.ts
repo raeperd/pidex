@@ -24,6 +24,19 @@ import {
 export async function createPidexApplication() {
   const runtime = ManagedRuntime.make(makeMetadataLayer());
   let manager: ChatManager | undefined;
+  let closePromise: Promise<void> | undefined;
+
+  const close = () => {
+    closePromise ??= runtime
+      .runPromise(
+        Effect.gen(function* () {
+          if (manager) yield* manager.shutdown();
+        }),
+      )
+      .finally(() => runtime.dispose());
+    return closePromise;
+  };
+
   try {
     const metadata = Context.get(await runtime.context(), Metadata);
     const pi = makePiSdkService(makePiSdk());
@@ -74,26 +87,13 @@ export async function createPidexApplication() {
         );
       }
     };
-    let closed = false;
     return {
       handleRequest: handler,
-      close: async () => {
-        if (closed) return;
-        closed = true;
-        try {
-          await runtime.runPromise(chatManager.shutdown());
-        } finally {
-          await runtime.dispose();
-        }
-      },
+      close,
       manager: chatManager,
     };
   } catch (error) {
-    try {
-      if (manager) await runtime.runPromise(manager.shutdown());
-    } finally {
-      await runtime.dispose();
-    }
+    await close();
     throw error;
   }
 }
