@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import "@orpc/experimental-effect/extensions/effect";
 import { PROTOCOL_VERSION, pidexApiContract, type ExtensionDialog } from "@pidex/api";
 import { ORPCError, implement, os } from "@orpc/server";
@@ -31,9 +30,9 @@ export const createRpcApiRouter = Effect.fn("http.createRpcApiRouter")(function*
 }) {
   const managedWorktreeRoot = yield* managedWorktreesRoot();
   const workspaceRoots = [...roots, managedWorktreeRoot];
-  const base = implement(pidexApiContract).$context<{ req?: IncomingMessage }>();
+  const base = implement(pidexApiContract).$context<{ req?: Request }>();
   const requireCsrf = base.middleware(async ({ context, next }) => {
-    if (context.req?.headers["x-pidex-csrf"] !== csrf)
+    if (context.req?.headers.get("x-pidex-csrf") !== csrf)
       throw new ORPCError("csrf", { message: "Invalid CSRF token" });
     return next();
   });

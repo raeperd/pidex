@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
-import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { NodeHttpServer } from "@effect/platform-node";
 import { getEventMeta, createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import {
@@ -16,9 +16,11 @@ import {
   type PidexApiContractClient,
   type ServerEvent,
 } from "@pidex/api";
-import { Effect } from "effect";
+import { Effect, Exit, Layer, Scope } from "effect";
+import { HttpServer } from "effect/unstable/http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createPidexApplication } from "./main.js";
+import { pidexApplication } from "./main.js";
+import { makeMetadataLayer } from "./metadata.js";
 
 const execFileAsync = promisify(execFile);
 let lastRpcResponseStatus: number | undefined;
@@ -50,8 +52,8 @@ const coveredEndpoints = [
 ] as const;
 
 describe.sequential("HTTP API endpoints", () => {
-  let app: Awaited<ReturnType<typeof createPidexApplication>>;
-  let server: ReturnType<typeof createServer> | undefined;
+  let app: Effect.Success<typeof pidexApplication>;
+  let serverScope: Scope.Closeable | undefined;
   let publicApi: PidexApiContractClient;
   let api: PidexApiContractClient;
   let tempRoot: string;
@@ -103,14 +105,26 @@ describe.sequential("HTTP API endpoints", () => {
     vi.stubEnv("PI_CODING_AGENT_SESSION_DIR", path.join(tempRoot, "sessions"));
     vi.stubEnv("WORKSPACE_ROOTS", [workspacePath, nonGitWorkspacePath].join(path.delimiter));
 
-    app = await createPidexApplication();
-    server = createServer((req, res) => void app.handleRequest(req, res));
-    await new Promise<void>((resolve, reject) => {
-      server?.once("error", reject);
-      server?.listen(0, "127.0.0.1", resolve);
-    });
-    const address = server.address() as AddressInfo;
-    httpUrl = `http://127.0.0.1:${address.port}`;
+    serverScope = await Effect.runPromise(Scope.make());
+    const serverContext = await Effect.runPromise(
+      Layer.buildWithScope(
+        Layer.merge(
+          NodeHttpServer.layer(createServer, { host: "127.0.0.1", port: 0 }),
+          makeMetadataLayer(),
+        ),
+        serverScope,
+      ),
+    );
+    const started = await Effect.runPromise(
+      Effect.gen(function* () {
+        const application = yield* pidexApplication;
+        yield* HttpServer.serveEffect(application.handleRequest);
+        const server = yield* HttpServer.HttpServer;
+        return { application, httpUrl: HttpServer.formatAddress(server.address) };
+      }).pipe(Effect.provide(serverContext), Scope.provide(serverScope)),
+    );
+    app = started.application;
+    httpUrl = started.httpUrl;
     const rpcUrl = `${httpUrl}/api/rpc`;
 
     publicApi = createClient(rpcUrl);
@@ -122,11 +136,7 @@ describe.sequential("HTTP API endpoints", () => {
 
   afterAll(async () => {
     try {
-      try {
-        await app?.close();
-      } finally {
-        if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
+      if (serverScope) await Effect.runPromise(Scope.close(serverScope, Exit.void));
     } finally {
       vi.unstubAllEnvs();
       if (tempRoot) await rm(tempRoot, { recursive: true, force: true });

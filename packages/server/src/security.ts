@@ -1,5 +1,4 @@
 import { realpath, stat } from "node:fs/promises";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
@@ -55,9 +54,9 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
   return canonical;
 });
 
-export const validateRequest = Effect.fn("security.validateRequest")(function* (
-  req: IncomingMessage,
-) {
+export const validateRequest = Effect.fn("security.validateRequest")(function* (req: {
+  readonly headers: Readonly<Record<string, string | undefined>>;
+}) {
   const rawHost = req.headers.host;
   if (!rawHost)
     return yield* Effect.fail(
@@ -102,16 +101,15 @@ export function isDescendant(root: string, candidate: string): boolean {
     (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
   );
 }
-export function securityHeaders(res: ServerResponse, scriptHashes: string[] = []) {
+export function securityHeaders(scriptHashes: string[] = []) {
   const allowedScripts = ["'self'", ...scriptHashes.map((hash) => `'sha256-${hash}'`)].join(" ");
-  res.setHeader(
-    "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self'; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src ${allowedScripts}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
-  );
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  return {
+    "Content-Security-Policy": `default-src 'self'; connect-src 'self'; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src ${allowedScripts}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  };
 }
 
 export function safeError(error: unknown) {
