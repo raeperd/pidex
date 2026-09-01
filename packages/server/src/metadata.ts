@@ -42,7 +42,7 @@ export function makeMetadataLayer(stateDir?: string) {
   );
 }
 
-/** Low-level synchronous SQLite boundary. Application code consumes it through `Metadata`. */
+/** Low-level synchronous SQLite boundary. Effect workflows consume it through `Metadata`. */
 function makeMetadataStore(stateDir?: string) {
   const dir = stateDir ?? process.env.PIDEX_STATE_DIR ?? path.join(os.homedir(), ".pidex");
   mkdirSync(dir, { recursive: true, mode: 0o700 });

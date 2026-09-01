@@ -14,7 +14,7 @@ export class HttpError extends Schema.TaggedErrorClass<HttpError>()("HttpError",
 /**
  * HTTP status for every error code that crosses the oRPC boundary. oRPC 2 dropped `status` from
  * `ORPCError`, so the handler resolves the wire status from `errorStatusMap` keyed by code; this
- * table is both that map's source and the status the raw-Node fallback reads off `HttpError`.
+ * table is both that map's source and the status carried by `HttpError` outside oRPC routes.
  *
  * Codes handled before the oRPC handler runs (`bad_host`, `bad_origin`, `cross_site`, `not_found`,
  * `web_build_missing`) stay out: `bad_host` alone means 400 when the Host header is missing or
@@ -75,19 +75,9 @@ class ServerOperationError extends Schema.TaggedErrorClass<ServerOperationError>
   },
 ) {}
 
-type ApplicationError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
+type ServerError = ActionProtocolError | ConfigurationError | HttpError | ServerOperationError;
 
-export function attemptOperation<A>(
-  operation: string,
-  evaluate: () => A | PromiseLike<A>,
-): Effect.Effect<A, ApplicationError> {
-  return Effect.tryPromise({
-    try: () => Promise.resolve().then(evaluate),
-    catch: (cause) => applicationError(operation, cause),
-  });
-}
-
-export function applicationError(operation: string, cause: unknown): ApplicationError {
+export function serverError(operation: string, cause: unknown): ServerError {
   if (
     cause instanceof ActionProtocolError ||
     cause instanceof ConfigurationError ||

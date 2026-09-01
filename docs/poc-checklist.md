@@ -114,7 +114,8 @@ Use the technologies fixed by `docs/architecture.md` and the existing manifests:
 - Svelte 5, Vite, and Tailwind CSS 4;
 - Valibot for browser-safe API validation and Effect Schema for persisted-data validation;
 - Node's built-in HTTP and `node:sqlite` modules, with Drizzle ORM for typed database access;
-- `@orpc/server/node` and `@orpc/client/fetch` for typed HTTP and SSE-compatible event streams;
+- `@orpc/server/fetch` and `@orpc/client/fetch` for typed HTTP and SSE-compatible event streams
+  bridged through Effect's Node HTTP server;
 - Pi's exact-matched Node SDK;
 - Vitest and Playwright Chromium for verification.
 

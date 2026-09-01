@@ -1,9 +1,8 @@
 import { realpath, stat } from "node:fs/promises";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { apiError, applicationError, ConfigurationError, HttpError } from "./errors.js";
+import { apiError, ConfigurationError, HttpError, serverError } from "./errors.js";
 
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -26,7 +25,7 @@ export const allowedRoots = Effect.fn("security.allowedRoots")(function* () {
     (root) =>
       Effect.tryPromise({
         try: () => realpath(root),
-        catch: (cause) => applicationError("workspace-roots.resolve", cause),
+        catch: (cause) => serverError("workspace-roots.resolve", cause),
       }),
     { concurrency: "unbounded" },
   );
@@ -42,7 +41,7 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
   });
   const details = yield* Effect.tryPromise({
     try: () => stat(canonical),
-    catch: (cause) => applicationError("workspace.stat", cause),
+    catch: (cause) => serverError("workspace.stat", cause),
   });
   if (!details.isDirectory())
     return yield* Effect.fail(
@@ -55,9 +54,9 @@ export const canonicalWorkspace = Effect.fn("security.canonicalWorkspace")(funct
   return canonical;
 });
 
-export const validateRequest = Effect.fn("security.validateRequest")(function* (
-  req: IncomingMessage,
-) {
+export const validateRequest = Effect.fn("security.validateRequest")(function* (req: {
+  readonly headers: Readonly<Record<string, string | undefined>>;
+}) {
   const rawHost = req.headers.host;
   if (!rawHost)
     return yield* Effect.fail(
@@ -102,20 +101,19 @@ export function isDescendant(root: string, candidate: string): boolean {
     (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
   );
 }
-export function securityHeaders(res: ServerResponse, scriptHashes: string[] = []) {
+export function securityHeaders(scriptHashes: string[] = []) {
   const allowedScripts = ["'self'", ...scriptHashes.map((hash) => `'sha256-${hash}'`)].join(" ");
-  res.setHeader(
-    "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self'; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src ${allowedScripts}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
-  );
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  return {
+    "Content-Security-Policy": `default-src 'self'; connect-src 'self'; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src ${allowedScripts}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  };
 }
 
 export function safeError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected error";
+  const message = errorMessage(error);
   return message
     .replace(
       /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi,
@@ -127,6 +125,18 @@ export function safeError(error: unknown) {
       "$1[redacted]",
     )
     .slice(0, 1000);
+}
+
+function errorMessage(error: unknown) {
+  const seen = new Set<object>();
+  let current = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && current.message) return current.message;
+    if (!("cause" in current)) break;
+    current = current.cause;
+  }
+  return "Unexpected error";
 }
 
 function parseRequestHost(
