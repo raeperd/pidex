@@ -45,14 +45,11 @@ export interface AppShellContext {
     readonly workspace: Workspace | undefined;
   };
   readonly task: {
-    readonly active: boolean;
     readonly compactPending: boolean;
     readonly configurationPending: boolean;
     readonly creatingTask: boolean;
     readonly draft: string;
     readonly loadingEarlier: boolean;
-    readonly selectedModel: string;
-    readonly selectedThinkingLevel: ChatSnapshot["thinkingLevel"];
     readonly snapshot: ChatSnapshot | undefined;
     readonly startMode: TaskStartMode;
     readonly startModeEditable: boolean;

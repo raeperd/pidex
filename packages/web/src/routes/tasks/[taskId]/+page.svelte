@@ -42,31 +42,17 @@
   <TaskComposer
     bind:this={() => composerController, attachComposer}
     bind:draft={() => context.task.draft, context.taskActions.setDraft}
-    active={context.task.active}
-    clearQueue={context.taskActions.clearQueue}
+    actions={context.taskActions}
     commands={context.shell.workspace?.commands ?? []}
-    compact={context.taskActions.compact}
     compactPending={context.task.compactPending}
-    configure={context.taskActions.configure}
     configurationPending={context.task.configurationPending}
     connection={context.shell.connection}
-    contextUsage={context.task.snapshot.contextUsage}
     creatingTask={context.task.creatingTask}
-    followUpCount={context.task.snapshot.followUpQueue.length}
     models={context.shell.workspace?.models ?? []}
-    persistDraft={context.taskActions.persistDraft}
     projectName={context.shell.workspace?.name ?? "Project"}
-    requiresAcknowledgement={Boolean(context.task.snapshot.run?.requiresAcknowledgement)}
-    runStatus={context.task.snapshot.runStatus}
-    selectedModel={context.task.selectedModel}
-    selectedThinkingLevel={context.task.selectedThinkingLevel}
-    send={context.taskActions.send}
-    setStartMode={context.taskActions.setStartMode}
+    snapshot={context.task.snapshot}
     startMode={context.task.startMode}
     startModeEditable={context.task.startModeEditable}
-    steeringCount={context.task.snapshot.steeringQueue.length}
-    stop={context.taskActions.stop}
-    taskId={context.task.snapshot.taskId}
   />
 {:else}
   <section

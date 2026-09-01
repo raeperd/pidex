@@ -281,8 +281,6 @@
     void snapshotChatId;
     hasEverConnected = false;
   });
-  let selectedModel = $derived(snapshot?.model ?? "");
-  let selectedThinkingLevel = $derived(snapshot?.thinkingLevel ?? "medium");
   let startModeEditable = $derived(
     Boolean(
       snapshot &&
@@ -409,9 +407,6 @@
       },
     },
     task: {
-      get active() {
-        return active;
-      },
       get creatingTask() {
         return chatLoading;
       },
@@ -426,12 +421,6 @@
       },
       get loadingEarlier() {
         return loadingEarlier;
-      },
-      get selectedModel() {
-        return selectedModel;
-      },
-      get selectedThinkingLevel() {
-        return selectedThinkingLevel;
       },
       get snapshot() {
         return snapshot;
