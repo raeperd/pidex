@@ -26,12 +26,10 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "electron": "41.5.0",
     "electron-builder": "26.15.6",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   },
   "productName": "pidex"
 }
