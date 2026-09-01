@@ -621,18 +621,18 @@ type ActionKind =
   | Parameters<MetadataStore["acceptSessionMutation"]>[0]["kind"]
   | "acknowledge";
 
-const actionKinds = [
-  "prompt",
-  "stop",
-  "steer",
-  "follow-up",
-  "clear-queue",
-  "compact",
-  "config",
-  "dialog",
-  "rename",
-  "acknowledge",
-] as const satisfies ReadonlyArray<ActionKind>;
+const actionKindLiterals = {
+  prompt: "prompt",
+  stop: "stop",
+  steer: "steer",
+  "follow-up": "follow-up",
+  "clear-queue": "clear-queue",
+  compact: "compact",
+  config: "config",
+  dialog: "dialog",
+  rename: "rename",
+  acknowledge: "acknowledge",
+} as const satisfies { readonly [Kind in ActionKind]: Kind };
 
 const workspaces = sqliteTable(
   "workspaces",
@@ -689,7 +689,7 @@ const sessionStateRowSchema = createSelectSchema(sessionState, {
   runStatus: Schema.NullOr(Schema.Literals([...actionStatuses])),
 });
 const actionRowSchema = createSelectSchema(actions, {
-  kind: Schema.Literals([...actionKinds]),
+  kind: Schema.Literals(Object.values(actionKindLiterals)),
   status: Schema.Literals([...actionStatuses]),
 });
 
