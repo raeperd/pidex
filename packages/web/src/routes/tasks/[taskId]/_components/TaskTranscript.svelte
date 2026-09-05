@@ -55,19 +55,6 @@
   function isNearBottom(position: ScrollPosition): boolean {
     return position.scrollHeight - position.scrollTop - position.clientHeight < 96;
   }
-
-  function resolveFollowing(
-    following: boolean,
-    event: { kind: "wheel" | "touchmove" | "scroll"; deltaY?: number },
-    position: ScrollPosition,
-  ): boolean {
-    // A wheel event fires before the browser applies its scroll, so `position` can still read
-    // "at the bottom" for an upward step that is about to move away from it: decide upward wheel
-    // gestures by direction alone, not by this pre-scroll position.
-    if (event.kind === "wheel" && (event.deltaY ?? 0) < 0) return false;
-    if (event.kind === "scroll") return following || isNearBottom(position);
-    return isNearBottom(position);
-  }
 </script>
 
 <script lang="ts">
@@ -104,31 +91,55 @@
   } = $props();
 
   let transcript = $state<HTMLElement>();
+  let content = $state<HTMLElement>();
   let nearBottom = $state(true);
-  let following = $state(true);
+  let following = true;
+  let prepending = false;
+  let contentHeight = 0;
   const darkMode = new MediaQuery("prefers-color-scheme: dark");
   const reducedMotion = new MediaQuery("prefers-reduced-motion: reduce");
   let theme: HighlightTheme = $derived(darkMode.current ? "dark" : "light");
   let rows = $derived(groupTranscriptItems(items));
 
-  export function scrollLatest() {
-    if (!transcript) return;
-    transcript.scrollTop = transcript.scrollHeight;
-    nearBottom = true;
-    following = true;
-  }
-
-  export function scrollIfNearBottom() {
-    if (following) requestAnimationFrame(scrollLatest);
-  }
+  $effect(() => {
+    const container = transcript;
+    const body = content;
+    if (!container || !body) return;
+    container.scrollTop = container.scrollHeight;
+    contentHeight = body.getBoundingClientRect().height;
+    let viewportHeight = container.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const height = body.getBoundingClientRect().height;
+      if (
+        following &&
+        !prepending &&
+        (height !== contentHeight || viewportHeight !== container.clientHeight)
+      )
+        container.scrollTop = container.scrollHeight;
+      contentHeight = height;
+      viewportHeight = container.clientHeight;
+      nearBottom = isNearBottom(container);
+    });
+    observer.observe(body);
+    observer.observe(container);
+    return () => observer.disconnect();
+  });
 
   async function prependEarlierMessages() {
-    const previousScrollHeight = transcript?.scrollHeight;
-    const previousScrollTop = transcript?.scrollTop;
-    await loadEarlier();
-    if (transcript && previousScrollHeight !== undefined && previousScrollTop !== undefined) {
+    const container = transcript;
+    const body = content;
+    if (!container || !body) return;
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+    prepending = true;
+    try {
+      await loadEarlier();
       await tick();
-      transcript.scrollTop = previousScrollTop + transcript.scrollHeight - previousScrollHeight;
+      container.scrollTop = previousScrollTop + container.scrollHeight - previousScrollHeight;
+      // ResizeObserver delivers after tick: consume the prepend's size before following resumes.
+      contentHeight = body.getBoundingClientRect().height;
+    } finally {
+      prepending = false;
     }
   }
 
@@ -144,15 +155,12 @@
 
   function onScroll(event: Event) {
     if (!transcript) return;
-    const kind = event.type as "scroll" | "wheel" | "touchmove";
-    const deltaY = "deltaY" in event ? (event as WheelEvent).deltaY : undefined;
-    const position = {
-      scrollTop: transcript.scrollTop,
-      scrollHeight: transcript.scrollHeight,
-      clientHeight: transcript.clientHeight,
-    };
-    if (kind === "scroll") nearBottom = isNearBottom(position);
-    following = resolveFollowing(following, { kind, deltaY }, position);
+    // Upward wheel events arrive before the browser applies their scroll.
+    if (event instanceof WheelEvent && event.deltaY < 0) following = false;
+    else if (event.type === "scroll") {
+      nearBottom = isNearBottom(transcript);
+      following ||= nearBottom;
+    } else following = isNearBottom(transcript);
   }
 </script>
 
@@ -251,6 +259,7 @@
   aria-relevant="additions text"
 >
   <div
+    bind:this={content}
     class="mx-auto w-full max-w-transcript px-2 pt-2 pb-3.5 font-sans text-body max-[350px]:px-1.5"
   >
     {#if transcriptStart > 0}<button

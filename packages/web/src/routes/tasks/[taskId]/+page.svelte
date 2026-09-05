@@ -3,7 +3,6 @@
   import {
     getAppShellContext,
     type TaskComposerController,
-    type TaskTranscriptController,
   } from "../../_components/AppShellContext.svelte";
   import HostUnavailable from "../../_components/HostUnavailable.svelte";
   import TaskComposer from "../../_components/TaskComposer.svelte";
@@ -11,34 +10,27 @@
 
   const context = getAppShellContext();
   let taskId = $derived(page.params.taskId ?? "");
-  // Track the bound instances so Svelte can detach them from the registry on teardown:
-  // a getter that always returns undefined would never match the destroyed instance.
   let composerController = $state<TaskComposerController>();
-  let transcriptController = $state<TaskTranscriptController>();
 
   function attachComposer(controller: TaskComposerController | undefined) {
     composerController = controller;
     context.taskActions.attachComposer(controller);
   }
-
-  function attachTranscript(controller: TaskTranscriptController | undefined) {
-    transcriptController = controller;
-    context.taskActions.attachTranscript(controller);
-  }
 </script>
 
 {#if taskId && context.task.snapshot}
-  <TaskTranscript
-    bind:this={() => transcriptController, attachTranscript}
-    items={context.task.snapshot.items}
-    transcriptStart={context.task.snapshot.transcriptStart}
-    loadingEarlier={context.task.loadingEarlier}
-    loadEarlier={context.taskActions.loadEarlier}
-    loadToolOutput={context.taskActions.loadToolOutput}
-    toolElapsedNow={context.task.toolElapsedNow}
-    toolOutputs={context.task.toolOutputs}
-    toolTimings={context.task.toolTimings}
-  />
+  {#key context.task.snapshot.taskId}
+    <TaskTranscript
+      items={context.task.snapshot.items}
+      transcriptStart={context.task.snapshot.transcriptStart}
+      loadingEarlier={context.task.loadingEarlier}
+      loadEarlier={context.taskActions.loadEarlier}
+      loadToolOutput={context.taskActions.loadToolOutput}
+      toolElapsedNow={context.task.toolElapsedNow}
+      toolOutputs={context.task.toolOutputs}
+      toolTimings={context.task.toolTimings}
+    />
+  {/key}
   <TaskComposer
     bind:this={() => composerController, attachComposer}
     bind:draft={() => context.task.draft, context.taskActions.setDraft}

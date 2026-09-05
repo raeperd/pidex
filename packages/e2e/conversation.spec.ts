@@ -277,7 +277,10 @@ test("renders grouped tool activity with semantic rows and expandable output", a
   await expect(page.getByRole("button", { name: "Search TODO · src" })).toBeVisible();
 });
 
-test("batches streamed text deltas without reordering channels", async ({ page, request }) => {
+test("batches streamed text in order and follows until the user scrolls away", async ({
+  page,
+  request,
+}) => {
   const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
     type: "message",
@@ -334,7 +337,123 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
 
   await expect(thinking).toContainText("weighing options");
   await expect(page.getByText("Thought", { exact: true })).toHaveCount(0);
+
+  const transcript = page.getByRole("log");
+  const bottomGap = () =>
+    transcript.evaluate(
+      (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+    );
+  const appendText = async (delta: string) => {
+    await emitServerEvent(page, {
+      type: "text_delta",
+      eventId: eventId++,
+      chatId,
+      itemId: "assistant_stream_e2e",
+      channel: "text",
+      delta,
+    });
+    await settleFrames(page);
+  };
+  const paragraphs = "\n\nStreaming content.".repeat(40);
+  await appendText(paragraphs);
+  await expect.poll(bottomGap).toBeLessThan(1);
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await appendText(paragraphs);
+  await expect.poll(bottomGap).toBeLessThan(1);
+
+  // The upward gesture detaches before the browser changes its near-bottom position.
+  await transcript.dispatchEvent("wheel", { deltaY: -10 });
+  const heldTop = await transcript.evaluate((element) => element.scrollTop);
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
+  await appendText(paragraphs);
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBe(heldTop);
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+
+  // Exactly 96px stays detached; scrolling within the threshold attaches again.
+  await transcript.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight - 96;
+  });
+  await settleFrames(page);
+  const thresholdTop = await transcript.evaluate((element) => element.scrollTop);
+  await appendText(paragraphs);
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBe(thresholdTop);
+  await transcript.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight - 95;
+  });
+  await settleFrames(page);
+  await appendText(paragraphs);
+  await expect.poll(bottomGap).toBeLessThan(1);
+
+  // Layout can grow without a server event, such as when code wrapping is toggled.
+  await appendText(`\n\n\`\`\`ts\nconst text = "${"long text ".repeat(100)}";\n\`\`\``);
+  const wrap = page.getByRole("button", { name: "Wrap lines", exact: true });
+  await wrap.click();
+  await expect.poll(bottomGap).toBeLessThan(1);
+  await page.getByRole("button", { name: "Disable line wrap" }).click();
+  await settleFrames(page);
+  await transcript.dispatchEvent("wheel", { deltaY: -300 });
+  await transcript.evaluate((element) => {
+    element.scrollTop -= 300;
+  });
+  await settleFrames(page);
+  const beforeWrap = await transcript.evaluate((element) => element.scrollTop);
+  await wrap.evaluate((button: HTMLButtonElement) => button.click());
+  await settleFrames(page);
+  expect(await transcript.evaluate((element) => element.scrollTop)).toBe(beforeWrap);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Jump to latest" }).click();
+  expect(await bottomGap()).toBeLessThan(1);
 });
+
+for (const detach of [false, true]) {
+  test(`anchors earlier messages while ${detach ? "detached" : "following"}`, async ({
+    page,
+    request,
+  }) => {
+    const { snapshot, chatId } = await startStreamingTask(page, request);
+    const item = {
+      type: "assistant",
+      id: "current_history",
+      text: "Current paragraph.\n\n".repeat(40),
+      complete: true,
+      timestamp: "2026-07-27T00:00:00.000Z",
+    };
+    await emitServerEvent(page, {
+      type: "snapshot",
+      eventId: 1,
+      chatId,
+      snapshot: { ...snapshot.current, items: [item], transcriptStart: 2, transcriptTotal: 3 },
+    });
+    await page.route("**/api/rpc/chats/transcript", (route) =>
+      fulfillJson(route, {
+        items: [{ ...item, id: "earlier_history", text: "Earlier paragraph.\n\n".repeat(20) }],
+        start: 1,
+        total: 3,
+      }),
+    );
+    const transcript = page.getByRole("log");
+    const earlier = page.getByRole("button", { name: /Load earlier messages/ });
+    await expect(earlier).toBeAttached();
+    await settleFrames(page);
+    if (detach) await transcript.dispatchEvent("wheel", { deltaY: -200 });
+    await transcript.evaluate((element) => {
+      element.scrollTop = 200;
+    });
+    await settleFrames(page);
+    const anchor = transcript.getByText("Current paragraph.", { exact: true }).first();
+    const before = await anchor.evaluate((element) => element.getBoundingClientRect().top);
+    // Trigger without Playwright scrolling the offscreen button into view.
+    await earlier.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(
+      transcript.getByText("Earlier paragraph.", { exact: true }).first(),
+    ).toBeAttached();
+    await settleFrames(page);
+    expect(
+      Math.abs((await anchor.evaluate((element) => element.getBoundingClientRect().top)) - before),
+    ).toBeLessThan(1);
+  });
+}
 
 test("shows Pi recovery notices without translating the live event", async ({ page, request }) => {
   const { chatId } = await startStreamingTask(page, request);
@@ -580,11 +699,19 @@ test("isolates pending task operations while navigating between tasks", async ({
     }
     await fulfillJson(route, { sessions });
   });
-  await patchRpcResponse(page, "chats/resume", (json, route) =>
-    routeInput(route).taskId === second.result.taskId
-      ? { ...json, contextUsage: secondUsage }
-      : json,
-  );
+  await patchRpcResponse(page, "chats/resume", (json, route) => ({
+    ...json,
+    ...(routeInput(route).taskId === second.result.taskId ? { contextUsage: secondUsage } : {}),
+    items: [
+      {
+        type: "assistant",
+        id: "history",
+        text: "Task history.\n\n".repeat(40),
+        complete: true,
+        timestamp: now,
+      },
+    ],
+  }));
   await page.route("**/api/rpc/chats/compact", async (route) => {
     compactRequested = true;
     await compactionPending;
@@ -606,6 +733,16 @@ test("isolates pending task operations while navigating between tasks", async ({
   });
 
   await page.goto(`/tasks/${String(firstTask.taskId)}`);
+  const transcript = page.getByRole("log");
+  const bottomGap = () =>
+    transcript.evaluate(
+      (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+    );
+  await expect.poll(bottomGap).toBeLessThan(1);
+  await transcript.dispatchEvent("wheel", { deltaY: -200 });
+  await transcript.evaluate((element) => {
+    element.scrollTop = 0;
+  });
   const prompt = page.getByLabel("Prompt");
   await expect(prompt).toBeVisible();
   const thinking = page.getByLabel("Thinking level");
@@ -619,6 +756,7 @@ test("isolates pending task operations while navigating between tasks", async ({
   await page.getByTitle("First task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(firstTask.taskId)}`);
   await expect(thinking).toBeDisabled();
+  await expect.poll(bottomGap).toBeLessThan(1);
   await page.getByTitle("Second task").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page).toHaveURL(`/tasks/${String(second.result.taskId)}`);
   await expect(thinking).toBeEnabled();

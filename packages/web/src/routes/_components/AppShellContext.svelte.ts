@@ -29,11 +29,6 @@ export interface TaskComposerController {
   resize(): void;
 }
 
-export interface TaskTranscriptController {
-  scrollIfNearBottom(): void;
-  scrollLatest(): void;
-}
-
 export interface AppShellContext {
   readonly shell: {
     readonly bootstrap: Bootstrap | undefined;
@@ -59,7 +54,6 @@ export interface AppShellContext {
   };
   readonly taskActions: {
     attachComposer(controller: TaskComposerController | undefined): void;
-    attachTranscript(controller: TaskTranscriptController | undefined): void;
     clearQueue(): Promise<void>;
     compact(instructions?: string): Promise<boolean>;
     configure(patch: TaskConfigurationPatch): Promise<boolean>;
@@ -86,16 +80,12 @@ export function createTaskViewControllerRegistry(
   scheduleTask: (callback: () => void) => void = (callback) => requestAnimationFrame(callback),
 ): {
   attachComposer(controller: TaskComposerController | undefined): void;
-  attachTranscript(controller: TaskTranscriptController | undefined): void;
   dispose(): void;
   focusComposer(): void;
   resizeComposer(): void;
-  scrollIfNearBottom(): void;
-  scrollLatest(): void;
 } {
   let composer: TaskComposerController | undefined;
   let composerFocusPending = false;
-  let transcript: TaskTranscriptController | undefined;
 
   return {
     attachComposer: (controller) => {
@@ -106,18 +96,14 @@ export function createTaskViewControllerRegistry(
         if (composer === controller) controller.focus();
       });
     },
-    attachTranscript: (controller) => (transcript = controller),
     dispose: () => {
       composer = undefined;
       composerFocusPending = false;
-      transcript = undefined;
     },
     focusComposer: () => {
       if (composer) composer.focus();
       else composerFocusPending = true;
     },
     resizeComposer: () => composer?.resize(),
-    scrollIfNearBottom: () => transcript?.scrollIfNearBottom(),
-    scrollLatest: () => transcript?.scrollLatest(),
   };
 }
