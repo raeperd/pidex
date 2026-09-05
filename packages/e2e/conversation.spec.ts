@@ -318,6 +318,17 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
   await expect(thinking).toContainText("weighing options");
   await expect(thinking.locator("details")).toHaveCount(0);
 
+  // Hold the next frame so the final authoritative message arrives before its queued delta.
+  await page.clock.install({ time: 0 });
+  await page.clock.pauseAt(1000);
+  await emitServerEvent(page, {
+    type: "text_delta",
+    eventId: eventId++,
+    chatId,
+    itemId: "assistant_stream_e2e",
+    channel: "text",
+    delta: " Final.",
+  });
   await emitServerEvent(page, {
     type: "message",
     eventId: eventId++,
@@ -325,57 +336,103 @@ test("batches streamed text deltas without reordering channels", async ({ page, 
     item: {
       type: "assistant",
       id: "assistant_stream_e2e",
-      text: "# Streamed heading\n\nBody text.",
+      text: "# Streamed heading\n\nBody text. Final.",
       thinking: "weighing options",
       complete: true,
       timestamp: "2026-07-27T00:00:00.000Z",
     },
   });
 
+  await page.clock.runFor(32);
+  await expect(page.getByText("Body text. Final.", { exact: true })).toBeVisible();
+  await page.clock.resume();
   await expect(thinking).toContainText("weighing options");
   await expect(page.getByText("Thought", { exact: true })).toHaveCount(0);
 });
 
-test("shows Pi recovery notices without translating the live event", async ({ page, request }) => {
+test("pages complete output directly from a live tool item", async ({ page, request }) => {
   const { chatId } = await startStreamingTask(page, request);
-
-  await emitServerEvent(page, { type: "compaction_start", eventId: 1, chatId });
-  await expect(page.getByText("Context compaction started.", { exact: true })).toBeVisible();
-
+  const output = "visible preview\n" + "large result\n".repeat(2000) + "last output line";
+  let requests = 0;
+  await page.route("**/api/rpc/chats/toolOutput", (route) => {
+    const input = routeInput<{ resourceId: string; offset: number }>(route);
+    expect(input.resourceId).toBe("live_output_123");
+    requests++;
+    const nextOffset = Math.min(input.offset + 16_384, output.length);
+    return fulfillJson(route, {
+      resourceId: input.resourceId,
+      offset: input.offset,
+      nextOffset,
+      total: output.length,
+      text: output.slice(input.offset, nextOffset),
+      complete: nextOffset === output.length,
+      sourceTruncated: false,
+    });
+  });
   await emitServerEvent(page, {
-    type: "compaction_end",
+    type: "tool",
+    eventId: 1,
+    chatId,
+    item: {
+      type: "tool",
+      id: "live_tool_123",
+      name: "bash",
+      argumentSummary: '{"command":"large-output"}',
+      state: "running",
+      preview: "partial output",
+      truncated: true,
+    },
+  });
+  await page.getByRole("button", { name: "$ large-output", exact: true }).click();
+  await expect(page.locator(".tool-call__output")).toHaveText("partial output");
+  await expect(page.getByRole("button", { name: /Load complete output/ })).toHaveCount(0);
+  await emitServerEvent(page, {
+    type: "tool",
     eventId: 2,
     chatId,
-    errorMessage: "Compaction failed: context window is unavailable.",
+    item: {
+      type: "tool",
+      id: "live_tool_123",
+      name: "bash",
+      argumentSummary: '{"command":"large-output"}',
+      state: "success",
+      preview: output.slice(0, 12_000),
+      truncated: true,
+      resourceId: "live_output_123",
+      outputSize: output.length,
+    },
   });
-  await expect(
-    page.getByText("Compaction failed: context window is unavailable.", { exact: true }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: /Load complete output/ }).click();
+  await page.getByRole("button", { name: /Load more/ }).click();
+  await expect(page.locator(".tool-call__output")).toContainText("last output line");
+  await expect(page.getByRole("button", { name: /Load more|Load complete output/ })).toHaveCount(0);
+  expect(requests).toBe(2);
+});
 
+test("renders normalized recovery notices and run status", async ({ page, request }) => {
+  const { chatId } = await startStreamingTask(page, request);
   await emitServerEvent(page, {
-    type: "auto_retry_start",
-    eventId: 3,
+    type: "run_status",
+    eventId: 1,
     chatId,
-    attempt: 1,
-    maxAttempts: 2,
-    errorMessage: "The provider is temporarily unavailable",
+    status: "compacting",
+    revision: 1,
   });
-  await expect(
-    page.getByText("Retrying request (attempt 1/2): The provider is temporarily unavailable", {
-      exact: true,
-    }),
-  ).toBeVisible();
-
-  await emitServerEvent(page, {
-    type: "auto_retry_end",
-    eventId: 4,
-    chatId,
-    success: false,
-    finalError: "Automatic retry failed after 2 attempts.",
-  });
-  await expect(
-    page.getByText("Automatic retry failed after 2 attempts.", { exact: true }),
-  ).toBeVisible();
+  const notices = [
+    ["info", "Context compaction started."],
+    ["error", "Compaction failed: context window is unavailable."],
+    ["warning", "Retrying request (attempt 1/2): The provider is temporarily unavailable"],
+    ["error", "Automatic retry failed after 2 attempts."],
+  ];
+  for (const [index, [level, text]] of notices.entries()) {
+    await emitServerEvent(page, {
+      type: "notice",
+      eventId: index + 2,
+      chatId,
+      item: { type: "notice", id: `recovery_${index}`, level, text },
+    });
+    await expect(page.getByText(text, { exact: true })).toBeVisible();
+  }
 });
 
 test("preserves edits made while slash compaction is pending", async ({

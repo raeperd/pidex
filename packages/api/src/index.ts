@@ -3,7 +3,7 @@ import * as v from "valibot";
 
 export { safeParse } from "valibot";
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 export const MAX_RECENT_WORKSPACES = 100;
 const idSchema = v.pipe(v.string(), v.minLength(8), v.maxLength(128), v.regex(/^[A-Za-z0-9_-]+$/));
 const thinkingLevelSchema = v.picklist(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -165,10 +165,23 @@ const pidexEventSchema = v.variant("type", [
     revision: nonnegativeInteger(),
     run: v.optional(runOutcomeSchema),
   }),
-  v.object({ type: v.literal("notice"), item: noticeItemSchema }),
+  v.object({ type: v.literal("transcript_item"), item: transcriptItemSchema }),
+  v.object({
+    type: v.literal("text_delta"),
+    itemId: boundedString(200),
+    delta: boundedString(1_000_000),
+    channel: v.picklist(["text", "thinking"]),
+  }),
+  v.object({
+    type: v.literal("queue"),
+    steering: v.array(boundedString(20_000)),
+    followUp: v.array(boundedString(20_000)),
+  }),
   v.object({
     type: v.literal("session"),
-    name: v.optional(v.string()),
+    name: v.optional(boundedString(300)),
+    model: v.optional(boundedString(300)),
+    thinkingLevel: thinkingLevelSchema,
   }),
   v.object({
     type: v.literal("context_usage"),
@@ -179,19 +192,11 @@ const pidexEventSchema = v.variant("type", [
     dialog: v.optional(extensionDialogSchema),
   }),
 ]);
-const piEventSchema = v.looseObject({ type: v.string() });
-const serverEventSchema = v.union([
-  v.object({
-    ...eventBase.entries,
-    source: v.literal("pi"),
-    event: piEventSchema,
-  }),
-  v.object({
-    ...eventBase.entries,
-    source: v.literal("pidex"),
-    event: pidexEventSchema,
-  }),
-]);
+const serverEventSchema = v.object({
+  ...eventBase.entries,
+  source: v.literal("pidex"),
+  event: pidexEventSchema,
+});
 const serverEventsSchema: Schema<
   AsyncIteratorObject<v.InferInput<typeof serverEventSchema>>,
   AsyncIteratorObject<v.InferOutput<typeof serverEventSchema>>
@@ -341,7 +346,6 @@ export type RunOutcome = v.InferOutput<typeof runOutcomeSchema>;
 export type ToolOutputChunk = v.InferOutput<typeof toolOutputChunkSchema>;
 export type TranscriptPage = v.InferOutput<typeof transcriptPageSchema>;
 export type ServerEvent = v.InferOutput<typeof serverEventSchema>;
-export type PiEvent = v.InferOutput<typeof piEventSchema>;
 export type PidexEvent = v.InferOutput<typeof pidexEventSchema>;
 
 function boundedString(maximum: number) {

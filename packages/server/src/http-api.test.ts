@@ -308,21 +308,18 @@ describe.sequential("HTTP API endpoints", () => {
     }
   });
 
-  it("forwards native Pi session events without translating their payload", async () => {
+  it("normalizes session changes through the live HTTP contract", async () => {
     const events = await connectChatEvents(api, chatId);
     try {
       const chat = await currentChat();
-      const nativeEvent = nextMatchingEvent(
-        events,
-        (event) => event.source === "pi" && event.event.type === "session_info_changed",
-      );
+      const sessionEvent = nextMatchingEvent(events, (event) => event.event.type === "session");
 
-      await api.chats.rename({ ...actionFor(chat), name: "Native event" });
+      await api.chats.rename({ ...actionFor(chat), name: "Live session" });
 
-      await expect(nativeEvent).resolves.toMatchObject({
-        source: "pi",
+      await expect(sessionEvent).resolves.toMatchObject({
+        source: "pidex",
         chatId,
-        event: { type: "session_info_changed", name: "Native event" },
+        event: { type: "session", name: "Live session", thinkingLevel: chat.thinkingLevel },
       });
     } finally {
       await events.return?.();

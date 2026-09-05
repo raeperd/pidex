@@ -54,7 +54,6 @@ interface ChatRecord {
   generation: number;
   abortRequested: boolean;
 }
-type EventPayload = PidexEvent;
 const LIVE_EVENT_RETRY_MS = 2_000;
 
 export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) {
@@ -334,7 +333,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function snapshotEvent(chat: ChatRecord) {
     return snapshot(chat).pipe(
       Effect.map((currentSnapshot) => {
-        const event = makeServerEvent(chat, "pidex", {
+        const event = makeServerEvent(chat, {
           type: "snapshot",
           snapshot: currentSnapshot,
         });
@@ -371,8 +370,13 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         (entry) => entry.type === "assistant" && entry.id === messageId(piEvent.message),
       );
       if (!item || item.type !== "assistant") return;
-      if (update.type === "text_delta") item.text += update.delta;
-      else item.thinking = `${item.thinking ?? ""}${update.delta}`;
+      const channel = update.type === "text_delta" ? "text" : "thinking";
+      // Replace rather than mutate: earlier replay events must keep their original payload.
+      chat.items[chat.items.indexOf(item)] = {
+        ...item,
+        [channel]: `${item[channel] ?? ""}${update.delta}`,
+      };
+      broadcast(chat, { type: "text_delta", itemId: item.id, delta: update.delta, channel });
     }
     function applyTool(
       piEvent: Extract<
@@ -394,7 +398,12 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         return;
       }
       const running = piEvent.type === "tool_execution_update";
-      const output = boundedResource(running ? piEvent.partialResult : piEvent.result);
+      const result: unknown = running ? piEvent.partialResult : piEvent.result;
+      const output = boundedResource(
+        typeof result === "object" && result !== null && "content" in result
+          ? textOf(result.content)
+          : result,
+      );
       const preview = bounded(output.text);
       const previous = chat.items.find(
         (entry): entry is ToolItem => entry.type === "tool" && entry.id === piEvent.toolCallId,
@@ -410,8 +419,9 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       };
       if (!item.argumentSummary && previous)
         item = { ...item, argumentSummary: previous.argumentSummary };
-      if (item.truncated || output.sourceTruncated) {
-        const resourceId = previous?.resourceId ?? randomUUID().replaceAll("-", "");
+      // A pageable resource is immutable: partial output stays in the streaming preview.
+      if (!running && item.truncated) {
+        const resourceId = randomUUID().replaceAll("-", "");
         chat.resources.set(resourceId, {
           id: resourceId,
           text: output.text,
@@ -433,13 +443,50 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       else if (piEvent.type === "queue_update") {
         chat.steering = [...piEvent.steering];
         chat.followUp = [...piEvent.followUp];
+        broadcast(chat, { type: "queue", steering: chat.steering, followUp: chat.followUp });
+      } else applyLifecycle();
+
+      function applyLifecycle() {
+        if (piEvent.type === "agent_start") {
+          chat.runStatus = "running";
+          broadcastRun(chat);
+        } else if (piEvent.type === "compaction_start") {
+          chat.runStatus = "compacting";
+          broadcastRun(chat);
+          handleNotice(chat, { level: "info", text: "Context compaction started." });
+        } else if (piEvent.type === "compaction_end") {
+          chat.runStatus = chat.abortRequested
+            ? "stopping"
+            : piEvent.willRetry || chat.run?.status === "running"
+              ? "running"
+              : "idle";
+          broadcastRun(chat);
+          handleNotice(chat, {
+            level: piEvent.errorMessage ? "error" : "info",
+            text:
+              piEvent.errorMessage ??
+              (piEvent.aborted ? "Context compaction cancelled." : "Context compaction completed."),
+          });
+        } else if (piEvent.type === "auto_retry_start") {
+          handleNotice(chat, {
+            level: "warning",
+            text: `Retrying request (attempt ${piEvent.attempt}/${piEvent.maxAttempts}): ${piEvent.errorMessage}`,
+          });
+        } else if (piEvent.type === "auto_retry_end" && !piEvent.success) {
+          handleNotice(chat, {
+            level: "error",
+            text: piEvent.finalError ?? "Automatic retry failed.",
+          });
+        } else if (
+          piEvent.type === "session_info_changed" ||
+          piEvent.type === "thinking_level_changed" ||
+          (piEvent.type === "entry_appended" && piEvent.entry.type === "model_change")
+        ) {
+          broadcastSession(chat);
+        }
       }
     }
-    if (event.type === "pi")
-      return Effect.sync(() => {
-        broadcastPi(chat, event.event);
-        applyPiEvent(event.event);
-      });
+    if (event.type === "pi") return Effect.sync(() => applyPiEvent(event.event));
     if (event.type === "settled")
       return Effect.gen(function* () {
         const outcome = chat.abortRequested ? "cancelled" : "completed";
@@ -450,7 +497,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         chat.abortRequested = false;
         chat.runStatus = "idle";
         broadcastRun(chat);
-        yield* broadcastSession(chat);
+        broadcastSession(chat);
       });
     return Effect.sync(() => {
       if (event.type === "notice") {
@@ -475,10 +522,9 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
       type: "notice",
       id: randomUUID().replaceAll("-", ""),
       level: event.level,
-      text: event.text,
+      text: event.text.slice(0, 4000),
     };
-    chat.items.push(item);
-    broadcast(chat, { type: "notice", item });
+    upsert(chat, item);
   }
 
   /** Advances the chat to the action's revision. Returns false when the action was already applied. */
@@ -586,20 +632,18 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   function configure(chat: ChatRecord, input: Parameters<EffectAdapterSession["configure"]>[0]) {
     return Effect.gen(function* () {
       yield* chat.session.configure(input);
-      yield* broadcastSession(chat);
+      broadcastSession(chat);
       const contextUsage = chat.session.state.contextUsage;
       if (contextUsage) broadcast(chat, { type: "context_usage", usage: contextUsage });
     });
   }
-  function rename(chat: ChatRecord, name: string) {
-    return Effect.gen(function* () {
-      yield* chat.session.rename(name);
-      yield* broadcastSession(chat, name);
-    });
-  }
-  function broadcastSession(chat: ChatRecord, name = chat.session.state.sessionName) {
-    return Effect.sync(() => {
-      broadcast(chat, { type: "session", ...(name ? { name } : {}) });
+  function broadcastSession(chat: ChatRecord) {
+    const name = chat.session.state.sessionName;
+    broadcast(chat, {
+      type: "session",
+      ...(name ? { name } : {}),
+      ...(chat.session.state.model ? { model: chat.session.state.model } : {}),
+      thinkingLevel: chat.session.state.thinkingLevel,
     });
   }
   function compact(chat: ChatRecord, instructions?: string) {
@@ -665,7 +709,7 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     performMutation,
     clear: (chat: ChatRecord) => chat.session.clearQueue(),
     configure,
-    rename,
+    rename: (chat: ChatRecord, name: string) => chat.session.rename(name),
     compact,
     dispose,
     shutdown,
@@ -718,33 +762,12 @@ function liveOnlySession(chat: ChatRecord): SessionSummary {
   } satisfies SessionSummary;
 }
 
-function broadcast(chat: ChatRecord, event: EventPayload) {
-  broadcastWithMeta(chat, makeServerEvent(chat, "pidex", event));
+function broadcast(chat: ChatRecord, event: PidexEvent) {
+  broadcastWithMeta(chat, makeServerEvent(chat, event));
 }
 
-function broadcastPi(chat: ChatRecord, event: AgentSessionEvent) {
-  broadcastWithMeta(chat, makeServerEvent(chat, "pi", event));
-}
-
-function makeServerEvent(
-  chat: ChatRecord,
-  source: "pidex",
-  event: PidexEvent,
-): Extract<ServerEvent, { source: "pidex" }>;
-function makeServerEvent(
-  chat: ChatRecord,
-  source: "pi",
-  event: AgentSessionEvent,
-): Extract<ServerEvent, { source: "pi" }>;
-function makeServerEvent(
-  chat: ChatRecord,
-  source: "pidex" | "pi",
-  event: PidexEvent | AgentSessionEvent,
-): ServerEvent {
-  const envelope = { eventId: ++chat.eventId, chatId: chat.id, source, event };
-  return source === "pi"
-    ? (envelope as Extract<ServerEvent, { source: "pi" }>)
-    : (envelope as Extract<ServerEvent, { source: "pidex" }>);
+function makeServerEvent(chat: ChatRecord, event: PidexEvent): ServerEvent {
+  return { eventId: ++chat.eventId, chatId: chat.id, source: "pidex", event };
 }
 
 function broadcastWithMeta(chat: ChatRecord, event: ServerEvent) {
@@ -765,6 +788,7 @@ function upsert(chat: ChatRecord, item: TranscriptItem) {
   const index = chat.items.findIndex((entry) => entry.id === item.id);
   if (index >= 0) chat.items[index] = item;
   else chat.items.push(item);
+  broadcast(chat, { type: "transcript_item", item });
 }
 
 function toolOutput(chat: ChatRecord, resourceId: string, offset: number, requestedLimit: number) {

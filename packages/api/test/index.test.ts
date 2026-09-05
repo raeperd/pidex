@@ -110,16 +110,17 @@ describe("Pidex API schemas", () => {
     ).toMatchObject({ success: false });
   });
 
-  it("preserves raw Pi event payloads in the live contract", async () => {
+  it("validates normalized text deltas in the live contract", async () => {
     const events = (async function* () {
       yield {
-        source: "pi",
+        source: "pidex",
         eventId: 1,
         chatId: "chat_123",
         event: {
-          type: "message_update",
-          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
-          assistantMessageEvent: { type: "text_delta", delta: "hello" },
+          type: "text_delta",
+          itemId: "assistant_123",
+          channel: "text",
+          delta: "hello",
         },
       };
     })();
@@ -129,11 +130,12 @@ describe("Pidex API schemas", () => {
     if (!("value" in result)) return;
     await expect(result.value.next()).resolves.toMatchObject({
       value: {
-        source: "pi",
+        source: "pidex",
         event: {
-          type: "message_update",
-          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
-          assistantMessageEvent: { type: "text_delta", delta: "hello" },
+          type: "text_delta",
+          itemId: "assistant_123",
+          channel: "text",
+          delta: "hello",
         },
       },
       done: false,
