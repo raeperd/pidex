@@ -151,7 +151,6 @@ function makeChatSnapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
     transcriptTotal: 0,
     steeringQueue: [],
     followUpQueue: [],
-    stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
     contextUsage: {
       tokens: 68_000,
       contextWindow: 272_000,

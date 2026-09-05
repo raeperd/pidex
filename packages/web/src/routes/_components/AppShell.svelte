@@ -188,7 +188,7 @@
       onInvalidChat: () => void recoverInvalidChat(),
       onStateChange: (state) => (connection = state),
     },
-    { events: api.events, close: () => {} },
+    { events: api.events },
   );
   let pendingTextDeltas = new Map<string, { text: string; thinking: string }>();
   let pendingTextDeltaFrame: number | undefined;
@@ -1288,7 +1288,6 @@
       snapshot = {
         ...snapshot,
         ...(event.event.name ? { sessionName: event.event.name } : {}),
-        stats: event.event.stats,
       };
       void refreshSessions();
     } else if (event.event.type === "extension_dialog") applyExtensionDialog(event.event.dialog);

@@ -14,7 +14,6 @@ export function makeChatConnection(
       input: { chatId: string; lastEventId?: number },
       options: { signal: AbortSignal },
     ) => Promise<AsyncIterator<ServerEvent>>;
-    close: () => void;
   },
 ) {
   let activeChatId: string | undefined;
@@ -39,7 +38,6 @@ export function makeChatConnection(
     controller = undefined;
     void stream?.return?.();
     stream = undefined;
-    transport.close();
     handlers.onStateChange("disconnected");
   }
 
@@ -56,7 +54,6 @@ export function makeChatConnection(
     controller?.abort();
     void stream?.return?.();
     stream = undefined;
-    transport.close();
     handlers.onStateChange("reconnecting");
 
     const currentGeneration = ++generation;

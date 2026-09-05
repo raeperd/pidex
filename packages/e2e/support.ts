@@ -46,7 +46,6 @@ const makeChatSnapshot = (overrides: Record<string, unknown>): Record<string, un
   transcriptTotal: 0,
   steeringQueue: [],
   followUpQueue: [],
-  stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
   ...overrides,
 });
 
