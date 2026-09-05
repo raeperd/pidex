@@ -443,7 +443,6 @@
     },
     taskActions: {
       attachComposer: taskViews.attachComposer,
-      attachTranscript: taskViews.attachTranscript,
       clearQueue,
       compact,
       configure,
@@ -984,8 +983,6 @@
     if (snapshot) {
       draft = localStorage.getItem(`pidex:draft:${snapshot.taskId}`) ?? "";
       drawerOpen = false;
-      await tick();
-      taskViews.scrollLatest();
     }
 
     try {
@@ -1044,7 +1041,6 @@
       if (dialogElement && !dialogElement.open) dialogElement.showModal();
     }
     taskViews.resizeComposer();
-    taskViews.scrollLatest();
     if (focusComposer) taskViews.focusComposer();
   }
   function replaceItem(item: ChatSnapshot["items"][number]) {
@@ -1086,7 +1082,6 @@
     pendingTextDeltaFrame = requestAnimationFrame(() => {
       pendingTextDeltaFrame = undefined;
       flushPendingTextDeltas();
-      taskViews.scrollIfNearBottom();
     });
   }
   function flushScheduledTextDeltas() {
@@ -1271,7 +1266,6 @@
         } else applyLifecycle(piEvent);
       }
       applyPiEvent(event.chatId, event.event);
-      taskViews.scrollIfNearBottom();
       return;
     }
     flushScheduledTextDeltas();
@@ -1291,7 +1285,6 @@
       };
       void refreshSessions();
     } else if (event.event.type === "extension_dialog") applyExtensionDialog(event.event.dialog);
-    taskViews.scrollIfNearBottom();
   }
   function objectValue(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)

@@ -22,7 +22,6 @@ are in `../archive/future-cleanups/`.
 | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | [extract-project-workspace-registry](extract-project-workspace-registry.md)         | ~700 lines of unnamed project registry inside a 2,244-line component; one concept, seven hops |
 | [collapse-task-state-triple-restatement](collapse-task-state-triple-restatement.md) | One `ChatSnapshot` restated as 13 context members, ~90 getters, and 28 props                  |
-| [transcript-follow-ownership-inversion](transcript-follow-ownership-inversion.md)   | Autoscroll pushed from four data-layer sites instead of owned by the transcript               |
 
 ## Suggested order
 
