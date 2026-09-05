@@ -274,10 +274,9 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
   }
 
   function snapshot(chat: ChatRecord) {
-    return Effect.gen(function* () {
+    return Effect.sync(() => {
       const transcript = transcriptPage(chat, chat.items.length, 200);
       const contextUsage = chat.session.state.contextUsage;
-      const stats = yield* chat.session.getStats();
       return {
         chatId: chat.id,
         workspaceId: chat.workspaceId,
@@ -293,7 +292,6 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
         transcriptTotal: transcript.total,
         steeringQueue: chat.steering,
         followUpQueue: chat.followUp,
-        stats,
         ...(contextUsage ? { contextUsage } : {}),
         ...(chat.extensionDialog ? { extensionDialog: chat.extensionDialog } : {}),
       } satisfies ChatSnapshot;
@@ -600,9 +598,8 @@ export function makeChatManager(pi: PiSdkServiceApi, metadata: MetadataService) 
     });
   }
   function broadcastSession(chat: ChatRecord, name = chat.session.state.sessionName) {
-    return Effect.gen(function* () {
-      const stats = yield* chat.session.getStats();
-      broadcast(chat, { type: "session", ...(name ? { name } : {}), stats });
+    return Effect.sync(() => {
+      broadcast(chat, { type: "session", ...(name ? { name } : {}) });
     });
   }
   function compact(chat: ChatRecord, instructions?: string) {

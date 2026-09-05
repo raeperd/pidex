@@ -3,7 +3,7 @@ import * as v from "valibot";
 
 export { safeParse } from "valibot";
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 export const MAX_RECENT_WORKSPACES = 100;
 const idSchema = v.pipe(v.string(), v.minLength(8), v.maxLength(128), v.regex(/^[A-Za-z0-9_-]+$/));
 const thinkingLevelSchema = v.picklist(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -131,13 +131,6 @@ const extensionDialogSchema = v.object({
   placeholder: v.optional(boundedString(500)),
   prefill: v.optional(boundedString(20_000)),
 });
-const statsSchema = v.object({
-  messages: finiteNumber(),
-  toolCalls: finiteNumber(),
-  tokens: finiteNumber(),
-  cost: finiteNumber(),
-  subscription: v.boolean(),
-});
 const contextUsageSchema = v.object({
   tokens: v.nullable(nonnegativeInteger()),
   contextWindow: positiveInteger(),
@@ -160,7 +153,6 @@ const chatSnapshotSchema = v.object({
   transcriptTotal: nonnegativeInteger(),
   steeringQueue: v.array(boundedString(20_000)),
   followUpQueue: v.array(boundedString(20_000)),
-  stats: statsSchema,
   contextUsage: v.optional(contextUsageSchema),
   extensionDialog: v.optional(extensionDialogSchema),
 });
@@ -177,7 +169,6 @@ const pidexEventSchema = v.variant("type", [
   v.object({
     type: v.literal("session"),
     name: v.optional(v.string()),
-    stats: statsSchema,
   }),
   v.object({
     type: v.literal("context_usage"),

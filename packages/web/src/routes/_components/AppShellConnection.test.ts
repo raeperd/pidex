@@ -176,7 +176,6 @@ function makeTransport(streams: AsyncIterator<ServerEvent>[]) {
   return {
     inputs,
     options: requests,
-    close: vi.fn(),
     events: vi.fn(
       async (
         input: { chatId: string; lastEventId?: number },

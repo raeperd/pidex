@@ -16,7 +16,6 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type {
-  ChatSnapshot,
   ContextUsage,
   ExtensionDialog,
   ModelInfo,
@@ -88,7 +87,6 @@ export interface EffectAdapterSession {
   }): Effect.Effect<void, AdapterSessionError>;
   rename(name: string): Effect.Effect<void, AdapterSessionError>;
   compact(instructions?: string): Effect.Effect<void, AdapterSessionError>;
-  getStats(): Effect.Effect<ChatSnapshot["stats"], AdapterSessionError>;
   respondToDialog(
     requestId: string,
     value: string | boolean | null,
@@ -336,18 +334,6 @@ function makePiSession(session: AgentSession): PiSession {
     }
     if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
   }
-  function getStats() {
-    const stats = session.getSessionStats();
-    return {
-      messages: stats.totalMessages,
-      toolCalls: stats.toolCalls,
-      tokens: stats.tokens.total,
-      cost: stats.cost,
-      subscription: session.model
-        ? session.modelRuntime.isUsingOAuth(session.model.provider)
-        : false,
-    };
-  }
   function respondToDialog(requestId: string, value: string | boolean | null) {
     const resolve = pendingDialogs.get(requestId);
     if (!resolve) throw new Error("Dialog is no longer pending");
@@ -419,7 +405,6 @@ function makePiSession(session: AgentSession): PiSession {
       }),
     compact: (instructions) =>
       attemptSessionPromise("session.compact", () => session.compact(instructions)),
-    getStats: () => attemptSessionSync("session.getStats", getStats),
     respondToDialog: (requestId, value) =>
       attemptSessionSync("session.respondToDialog", () => {
         respondToDialog(requestId, value);

@@ -99,7 +99,6 @@ describe("Pidex API schemas", () => {
         transcriptTotal: 0,
         steeringQueue: [],
         followUpQueue: [],
-        stats: { messages: 0, toolCalls: 0, tokens: 0, cost: 0, subscription: false },
         contextUsage: {
           tokens: null,
           contextWindow: 1,
