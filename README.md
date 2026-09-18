@@ -24,6 +24,10 @@ Add dependencies when their implementation needs them. The empty directories hav
 no package manifests or build steps yet. [Product requirements](docs/prd.md) remain
 as a reference for deciding what to rebuild.
 
+The [v0.0.1 technical spec](docs/v0.0.1-tech-spec.md) defines the next milestone,
+module ownership, and use-case acceptance tests. It is an implementation target;
+the current repository still contains only the skeleton described above.
+
 ## Validation
 
 ```sh
