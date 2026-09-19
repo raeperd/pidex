@@ -1,20 +1,74 @@
 import { _electron as electron, expect, test } from "@playwright/test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
-test("#129 Cancel leaves the project chooser available", async ({}, testInfo) => {
+test("#129 Cancel then choose a project with a fresh idle conversation", async ({}, testInfo) => {
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-129-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
+  const project = join(temporary, "project");
+  const agentDir = join(temporary, ".pi", "agent");
+  await mkdir(project, { recursive: true });
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(
+    join(agentDir, "auth.json"),
+    JSON.stringify({ openai: { type: "api_key", key: "pidex-test-key" } }),
+  );
+  await writeFile(
+    join(agentDir, "settings.json"),
+    JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4.1" }),
+  );
+  let providerRequests = 0;
+  const provider = createServer((_request, response) => {
+    providerRequests++;
+    response.writeHead(500).end("No model request expected during idle startup");
+  });
+  cleanup.defer(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        if (!provider.listening) return resolve();
+        provider.close((error) => (error ? reject(error) : resolve()));
+      }),
+  );
+  await new Promise<void>((resolve, reject) => {
+    provider.once("error", reject);
+    provider.listen(0, "127.0.0.1", resolve);
+  });
+  const address = provider.address();
+  if (!address || typeof address === "string") throw new Error("Provider fixture did not listen");
+  await writeFile(
+    join(agentDir, "models.json"),
+    JSON.stringify({ providers: { openai: { baseUrl: `http://127.0.0.1:${address.port}/v1` } } }),
+  );
   const app = await electron.launch({
     args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
     env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
   });
   const electronProcess = app.process();
   cleanup.defer(async () => {
+    // Observe/clean only this app's owned backend, including on assertion failure.
+    let childPid: number | undefined;
+    try {
+      childPid = Number(
+        execFileSync("pgrep", ["-P", String(electronProcess.pid), "-f", "/dist/backend/main.js"], {
+          encoding: "utf8",
+        }).trim(),
+      );
+    } catch {
+      /* The chooser may not have started a backend. */
+    }
+    if (childPid) {
+      try {
+        process.kill(childPid, "SIGKILL");
+      } catch {
+        /* Already exited. */
+      }
+    }
     if (electronProcess.exitCode === null && electronProcess.signalCode === null) await app.close();
   });
   const logs: string[] = [];
@@ -35,6 +89,18 @@ test("#129 Cancel leaves the project chooser available", async ({}, testInfo) =>
     await expect(page.getByRole("button", { name: "Choose project" })).toBeEnabled();
     expect(await picker.evaluate((observation) => observation.opened)).toBe(true);
     await expect(page.getByRole("region", { name: "Conversation" })).toHaveCount(0);
+    await app.evaluate(({ dialog }, projectPath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [projectPath] });
+    }, project);
+    await page.getByRole("button", { name: "Choose project" }).click();
+    const conversation = page.getByRole("region", { name: "Conversation" });
+    await expect(conversation).toBeVisible();
+    await expect(conversation.getByRole("status")).toHaveText("Idle");
+    await expect(conversation.getByText("GPT-4.1", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("No messages yet.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Choose project" })).toHaveCount(0);
+    expect(providerRequests).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath("idle.png") });
     await app.context().tracing.stop();
   } catch (error) {
     await page.screenshot({ path: testInfo.outputPath("failure.png"), timeout: 5000 });

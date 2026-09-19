@@ -1,4 +1,9 @@
-import { Effect, Schema } from "effect";
+import { fork, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
+import { Conversation, ConversationApi } from "../api/index.js";
+import { Effect, Layer, Schema } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -55,6 +60,13 @@ const program = Effect.gen(function* () {
     respond(false),
   );
   window.webContents.session.setPermissionCheckHandler(() => false);
+  const token = yield* Effect.try({
+    try: () => randomBytes(32).toString("hex"),
+    catch: () => new DesktopError({ message: "Could not create backend credentials" }),
+  });
+  let backend: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
+  let choosing = false;
+  let conversation: typeof Conversation.Type | undefined;
   ipcMain.handle("choose-project", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -65,10 +77,93 @@ const program = Effect.gen(function* () {
         ) {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
-        yield* Effect.tryPromise({
-          try: () => dialog.showOpenDialog(window, { properties: ["openDirectory"] }),
-          catch: () => new DesktopError({ message: "Could not choose a project" }),
-        });
+        if (conversation) return conversation;
+        if (choosing) return null;
+        choosing = true;
+        return yield* Effect.gen(function* () {
+          const selection = yield* Effect.tryPromise({
+            try: () => dialog.showOpenDialog(window, { properties: ["openDirectory"] }),
+            catch: () => new DesktopError({ message: "Could not choose a project" }),
+          });
+          const cwd = selection.filePaths[0];
+          if (selection.canceled || !cwd) return null;
+          const child = yield* Effect.try({
+            try: () =>
+              fork(fileURLToPath(new URL("../backend/main.js", import.meta.url)), [], {
+                cwd,
+                execArgv: [],
+                stdio: ["ignore", "ignore", "ignore", "ipc"],
+                env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PIDEX_BACKEND_TOKEN: token },
+              }),
+            catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
+          });
+          backend = { child };
+          return yield* Effect.gen(function* () {
+            const ready = yield* Effect.callback<
+              { port: number; sessionFile: string },
+              DesktopError
+            >((resume) => {
+              const clear = () => {
+                child.off("message", onMessage);
+                child.off("error", onFailure);
+                child.off("exit", onFailure);
+              };
+              const onMessage = (message: unknown) => {
+                clear();
+                resume(
+                  Schema.decodeUnknownEffect(
+                    Schema.Struct({ port: Schema.Number, sessionFile: Schema.String }),
+                  )(message).pipe(
+                    Effect.mapError(
+                      () => new DesktopError({ message: "Invalid backend response" }),
+                    ),
+                  ),
+                );
+              };
+              const onFailure = () => {
+                clear();
+                resume(Effect.fail(new DesktopError({ message: "Backend startup failed" })));
+              };
+              child.once("message", onMessage);
+              child.once("error", onFailure);
+              child.once("exit", onFailure);
+              return Effect.sync(clear);
+            });
+            backend = { child, ...ready };
+            const transport = RpcClient.layerProtocolHttp({
+              url: `http://127.0.0.1:${ready.port}/rpc`,
+              transformClient: HttpClient.mapRequest(
+                HttpClientRequest.setHeaders({
+                  authorization: `Bearer ${token}`,
+                  origin: "pidex://app",
+                }),
+              ),
+            }).pipe(Layer.provide([FetchHttpClient.layer, RpcSerialization.layerJson]));
+            conversation = yield* Effect.gen(function* () {
+              const client = yield* RpcClient.make(ConversationApi);
+              return yield* client.GetConversation();
+            }).pipe(
+              Effect.provide(transport),
+              Effect.scoped,
+              Effect.mapError(
+                () => new DesktopError({ message: "Could not start the Pi conversation" }),
+              ),
+            );
+            return conversation;
+          }).pipe(
+            Effect.onError(() =>
+              Effect.sync(() => {
+                backend?.child.kill();
+              }),
+            ),
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              choosing = false;
+            }),
+          ),
+        );
       }),
     ),
   );
