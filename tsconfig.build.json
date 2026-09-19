@@ -9,5 +9,10 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["packages/desktop/**/*.ts", "packages/desktop/**/*.cts"]
+  "include": [
+    "packages/desktop/**/*.ts",
+    "packages/desktop/**/*.cts",
+    "packages/api/**/*.ts",
+    "packages/server/**/*.ts"
+  ]
 }

@@ -5,7 +5,13 @@
     "suspicious": "error"
   },
   "rules": {
-    "eslint/complexity": "error"
+    "eslint/complexity": "error",
+    "eslint/no-underscore-dangle": [
+      "error",
+      {
+        "allow": ["_tag"]
+      }
+    ]
   },
   "ignorePatterns": ["**/build/**", "**/dist/**"],
   "options": {

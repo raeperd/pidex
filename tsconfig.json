@@ -1,10 +1,15 @@
 {
   "extends": "./tsconfig.build.json",
-  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
   "include": [
     "packages/desktop/**/*.ts",
     "packages/desktop/**/*.cts",
     "tests/**/*.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "packages/api/**/*.ts",
+    "packages/server/**/*.ts"
   ]
 }
