@@ -16,11 +16,12 @@
   );
 
   async function send() {
+    const submitted = draft;
     sending = true;
     error = "";
     try {
-      await window.desktop.send(draft);
-      draft = "";
+      await window.desktop.send(submitted);
+      if (draft === submitted) draft = "";
     } catch {
       error = "Could not send the prompt. Check the connection and try again.";
     } finally {

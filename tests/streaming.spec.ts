@@ -101,6 +101,26 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
   page.setDefaultTimeout(5000);
   await context.tracing.start({ screenshots: true, snapshots: true });
   try {
+    // Hold the real RPC response after acceptance, without replacing app handlers.
+    const acknowledgement = await app.evaluateHandle(() => {
+      const originalFetch = globalThis.fetch;
+      let held = false;
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        const payload = await request.clone().text();
+        const response = await originalFetch(request);
+        if (payload.includes('"text":"Write hello to note.txt"')) {
+          held = true;
+          await gate;
+        }
+        return response;
+      };
+      return { release: () => release?.(), isHeld: () => held };
+    });
     await app.evaluate(({ dialog }, projectPath) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [projectPath] });
     }, project);
@@ -132,6 +152,9 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     await expect(conversation.getByRole("status")).toHaveText("Running");
     await expect(conversation.getByText("Saved", { exact: true })).toBeVisible();
     await expect(send).toBeDisabled();
+    expect(await acknowledgement.evaluate((gate) => gate.isHeld())).toBe(true);
+    await composer.fill("Next prompt");
+    await acknowledgement.evaluate((gate) => gate.release());
     expect(
       await page.evaluate(async () => {
         try {
@@ -147,7 +170,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     finish?.();
     await expect(conversation.getByText("Saved hello", { exact: true })).toBeVisible();
     await expect(conversation.getByRole("status")).toHaveText("Idle");
-    await composer.fill("Next prompt");
+    await expect(composer).toHaveValue("Next prompt");
     await expect(send).toBeEnabled();
     const files = await readdir(join(agentDir, "sessions"), { recursive: true });
     const historyFile = files.find((file) => file.endsWith(".jsonl"));
