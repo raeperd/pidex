@@ -10,16 +10,16 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
 
 1. Resolve scope and supporting skills.
    - Read the issue, linked spec, comments, blockers, and repository instructions. Apply later user corrections and distinguish implemented behavior from the target.
-   - Locate and read `implement` and `tdd` through the skill catalog or repository/personal skill directories. Confirm the supporting skills required by [review-pr](../review-pr/SKILL.md) are available. Its review phase supplies `implement`'s final independent review without a duplicate pass.
+   - Read installed `implement` and `tdd` skills when available; otherwise use the implementation and TDD steps below. [Review-pr](../review-pr/SKILL.md) supplies the final independent review and includes a standalone fallback for missing supporting skills.
    - Use the issue and spec's approved test boundaries without requesting approval again. Use one scenario → red → minimal green → refactor, preserving already-passing behavior as regression coverage. These repository decisions take precedence over conflicting supporting-skill rules.
-   - Discover applicable implementation skills from the actual files and stack. Report missing supporting skills or prerequisites; ask only for product decisions that block work.
-   - Completion: scope, acceptance criteria, approved test boundaries, and prerequisites are known; required skills are available.
+   - Discover applicable implementation skills from the actual files and stack. Report missing implementation prerequisites; ask only for product decisions that block work.
+   - Completion: scope, acceptance criteria, approved test boundaries, and implementation prerequisites are known.
 
 2. Establish branches and PR boundaries.
    - Inspect working-tree changes and existing implementation PRs before creating a separate branch/worktree. Preserve unrelated work and reuse existing issue work.
    - Verify prerequisite implementations. Base dependent work on their implementation branches or merged commits; report a blocker when required implementation is absent.
    - Plan one cohesive outcome per PR using the size guidance below. Record each layer's starting commit and intended base for later review.
-   - For dependent PRs, locate and read `gh-stack` and its stack-design reference. Create the stack before implementing multiple layers and follow its non-interactive commands and remote selection rules. Report unavailable stack support before dependent operations.
+   - For dependent PRs, read `gh-stack` and its stack-design reference. If the skill is absent, read the [upstream skill](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md) and its linked stack-design reference; install the CLI extension with `gh extension install github/gh-stack` if needed. Create the stack before implementing multiple layers and follow its non-interactive commands and remote selection rules. Report unavailable stack support before dependent operations.
    - Use separate branches or stacks for independent work.
    - Completion: the active branch owns the next change, and each planned PR has a base, scope, and review fixed point.
 

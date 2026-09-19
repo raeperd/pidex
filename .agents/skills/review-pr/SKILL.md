@@ -8,11 +8,11 @@ Run directly with `$review-pr <PR URL>` or as the review phase of `implement-iss
 ## Process
 
 1. Resolve the PR and review scope.
-   - Locate and read `gh-pr-ready-codex`, its referenced skills, and `code-review` through the skill catalog or repository/personal skill directories. Report missing dependencies before proceeding.
-   - Read the PR, linked issue/spec, existing reviews, and repository instructions. Resolve its working branch without disturbing unrelated changes. Reuse the existing draft; report and stop if it is merged, closed, or already ready.
-   - Pin the actual PR base and head SHAs, diff command, and commit list. For stacked PRs, review only the layer above its immediate parent. Locate and read `gh-stack` before changing or synchronizing stack branches.
+   - Read installed `gh-pr-ready-codex`, its referenced skills, and `code-review` when available. For any missing skill, use [standalone review procedures](references/standalone.md); personal skill installation is optional.
+   - Read the PR, linked issue/spec, existing reviews, and repository instructions. Resolve its working branch without disturbing unrelated changes. Stop if merged or closed. For an open ready PR, record its initial state, run `gh pr ready <number> --undo`, and verify draft state before following the supporting draft workflow. Restore readiness only after all gates below pass.
+   - Pin the actual PR base and head SHAs, diff command, and commit list. For stacked PRs, review only the layer above its immediate parent. Before changing stack branches, read installed `gh-stack` or its [upstream skill](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md) and applicable references; install the CLI extension if needed.
    - The parent agent owns edits and GitHub mutations. Reviewers return findings without editing the branch, requesting Codex, or changing readiness.
-   - Completion: the open draft, intended scope, immutable review revisions, and supporting skills are known.
+   - Completion: the open draft, intended scope, immutable review revisions, and supporting procedures are known.
 
 2. Run both reviews.
    - Follow `gh-pr-ready-codex` through draft verification, green CI, and its single Codex review cycle. Hold its final readiness step until the remaining steps here pass.
