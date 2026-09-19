@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pidex Create Issues"
+  short_description: "Draft minimal issues with acceptance scenarios"
+  default_prompt: "Use $pidex-create-issues to draft self-contained issues with acceptance scenarios and blockers, publishing only when requested."
+policy:
+  allow_implicit_invocation: false
