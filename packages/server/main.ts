@@ -114,6 +114,48 @@ const program = Effect.gen(function* () {
             ),
           );
         }
+        if (event.type === "tool_execution_start") {
+          Effect.runSync(
+            Effect.sync(() =>
+              publish({
+                _tag: "EntryUpserted",
+                entry: {
+                  id: event.toolCallId,
+                  role: "tool",
+                  name: event.toolName,
+                  input: JSON.stringify(event.args, null, 2),
+                  result: "",
+                  status: "running",
+                },
+              }),
+            ),
+          );
+        }
+        if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+          Effect.runSync(
+            Effect.sync(() => {
+              const entry = state.entries.find((item) => item.id === event.toolCallId);
+              if (entry?.role !== "tool") return;
+              publish({
+                _tag: "EntryUpserted",
+                entry: {
+                  ...entry,
+                  result: JSON.stringify(
+                    event.type === "tool_execution_end" ? event.result : event.partialResult,
+                    null,
+                    2,
+                  ),
+                  status:
+                    event.type === "tool_execution_update"
+                      ? "running"
+                      : event.isError
+                        ? "failed"
+                        : "completed",
+                },
+              });
+            }),
+          );
+        }
       }),
     ),
     (unsubscribe) =>

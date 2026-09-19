@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
-test("#130 streams a reply, rejects empty and busy submissions, saves history, and cancels on Quit", async ({}, testInfo) => {
+test("#130 streams Markdown and tools, rejects invalid sends, saves history, and cancels on Quit", async ({}, testInfo) => {
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-130-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
@@ -34,12 +34,35 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
       response.write(
         `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
       );
-    chunk({ role: "assistant", content: "Saved " });
-    finish = () => {
-      chunk({ content: "hello" });
+    if (providerRequests !== 2) {
+      chunk({ role: "assistant", content: "Writing " });
+      finish = () => {
+        chunk({ content: "hello" });
+        chunk({
+          tool_calls: [
+            {
+              index: 0,
+              id: "write-note",
+              type: "function",
+              function: {
+                name: "write",
+                arguments: JSON.stringify({ path: "note.txt", content: "hello" }),
+              },
+            },
+          ],
+        });
+        chunk({}, "tool_calls");
+        response.end("data: [DONE]\n\n");
+      };
+    } else {
+      chunk({
+        role: "assistant",
+        content:
+          'Saved **hello**<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">',
+      });
       chunk({}, "stop");
       response.end("data: [DONE]\n\n");
-    };
+    }
   });
   cleanup.defer(
     () =>
@@ -180,7 +203,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     await composer.fill("Write hello to note.txt");
     await send.click();
     await expect(conversation.getByRole("status")).toHaveText("Running");
-    await expect(conversation.getByText("Saved", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("Writing", { exact: true })).toBeVisible();
     await expect(send).toBeDisabled();
     await expect.poll(() => acknowledgement.evaluate((gate) => gate.isHeld())).toBe(true);
     await composer.fill("Next prompt");
@@ -199,6 +222,23 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     expect(finish).toBeDefined();
     finish?.();
     await expect(conversation.getByText("Saved hello", { exact: true })).toBeVisible();
+    await expect(conversation.locator("strong")).toHaveText("hello");
+    await expect(conversation.locator("script, img")).toHaveCount(0);
+    await expect(page).toHaveTitle("pidex");
+    const tool = conversation.locator("details");
+    await expect(tool.locator("summary")).toHaveText("write · Completed");
+    await expect(tool.getByLabel("Input")).not.toBeVisible();
+    await expect(tool.getByLabel("Result")).not.toBeVisible();
+    await tool.locator("summary").click();
+    await expect(tool.getByLabel("Input")).toContainText('"path": "note.txt"');
+    await expect(tool.getByLabel("Input")).toContainText('"content": "hello"');
+    await expect(tool.getByLabel("Result")).toContainText("Successfully wrote to note.txt");
+    await expect(conversation.locator('[aria-label="assistant"], details')).toHaveText([
+      "Writing hello",
+      /write · Completed/,
+      "Saved hello",
+    ]);
+    expect(await readFile(join(project, "note.txt"), "utf8")).toBe("hello");
     await expect(conversation.getByRole("status")).toHaveText("Idle");
     await expect(composer).toHaveValue("Next prompt");
     await expect(send).toBeEnabled();
@@ -207,8 +247,9 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     if (!historyFile) throw new Error("Expected Pi history");
     const history = await readFile(join(agentDir, "sessions", historyFile), "utf8");
     expect(history).toContain("Write hello to note.txt");
-    expect(history).toContain("Saved hello");
-    expect(providerRequests).toBe(1);
+    expect(history).toContain("Saved **hello**");
+    expect(history).toContain("toolResult");
+    expect(providerRequests).toBe(2);
     expect(await acknowledgement.evaluate((gate) => gate.connections())).toBe(1);
     const updates = await acknowledgement.evaluate((gate) => gate.updates());
     for (const messages of [updates.wire, updates.ipc]) {
@@ -226,7 +267,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     await composer.fill("Remain active until Quit");
     await send.click();
     await expect(conversation.getByRole("status")).toHaveText("Running");
-    await expect.poll(() => providerRequests).toBe(2);
+    await expect.poll(() => providerRequests).toBe(3);
     childPid = findServer();
     if (!childPid) throw new Error("Expected an owned server process");
     await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });

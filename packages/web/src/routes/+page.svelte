@@ -1,3 +1,41 @@
+<script module lang="ts">
+  import { marked } from "marked";
+  import DOMPurify from "dompurify";
+
+  function renderMarkdown(text: string) {
+    return DOMPurify.sanitize(marked.parse(text, { async: false }), {
+      ALLOWED_TAGS: [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "del",
+        "blockquote",
+        "pre",
+        "code",
+        "ul",
+        "ol",
+        "li",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "a",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+      ],
+      ALLOWED_ATTR: ["href", "title", "start"],
+    });
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
@@ -60,7 +98,23 @@
       </p>
       {#if conversation.entries.length === 0}<p>No messages yet.</p>{/if}
       {#each conversation.entries as entry (entry.id)}
-        <p aria-label={entry.role}>{entry.text}</p>
+        {#if entry.role === "tool"}
+          <details>
+            <summary
+              >{entry.name} · {entry.status === "running"
+                ? "Running"
+                : entry.status === "failed"
+                  ? "Failed"
+                  : "Completed"}</summary
+            >
+            <pre aria-label="Input">{entry.input}</pre>
+            <pre aria-label="Result">{entry.result}</pre>
+          </details>
+        {:else if entry.role === "assistant"}
+          <div aria-label="assistant">{@html renderMarkdown(entry.text)}</div>
+        {:else}
+          <p aria-label="user">{entry.text}</p>
+        {/if}
       {/each}
       {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
       <form

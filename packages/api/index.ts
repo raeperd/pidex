@@ -1,11 +1,21 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
-const Entry = Schema.Struct({
-  id: Schema.String,
-  role: Schema.Literals(["user", "assistant"]),
-  text: Schema.String,
-});
+const Entry = Schema.Union([
+  Schema.Struct({
+    id: Schema.String,
+    role: Schema.Literals(["user", "assistant"]),
+    text: Schema.String,
+  }),
+  Schema.Struct({
+    id: Schema.String,
+    role: Schema.Literal("tool"),
+    name: Schema.String,
+    input: Schema.String,
+    result: Schema.String,
+    status: Schema.Literals(["running", "completed", "failed"]),
+  }),
+]);
 
 export const Conversation = Schema.Struct({
   id: Schema.String,
