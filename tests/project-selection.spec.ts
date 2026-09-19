@@ -6,10 +6,16 @@ import { join } from "node:path";
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
 test("#129 Cancel leaves the project chooser available", async ({}, testInfo) => {
+  await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-129-"));
+  cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
   const app = await electron.launch({
     args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
     env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
+  });
+  const electronProcess = app.process();
+  cleanup.defer(async () => {
+    if (electronProcess.exitCode === null && electronProcess.signalCode === null) await app.close();
   });
   const logs: string[] = [];
   app.process().stderr?.on("data", (data) => logs.push(String(data)));
@@ -38,8 +44,5 @@ test("#129 Cancel leaves the project chooser available", async ({}, testInfo) =>
     );
     await app.context().tracing.stop({ path: testInfo.outputPath("trace.zip") });
     throw error;
-  } finally {
-    await app.close();
-    await rm(temporary, { recursive: true, force: true });
   }
 });
