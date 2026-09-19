@@ -12,6 +12,9 @@
     "test": "pnpm build && playwright test",
     "typecheck": "tsc6 --noEmit && pnpm --filter @pidex/web typecheck"
   },
+  "dependencies": {
+    "effect": "4.0.0-beta.107"
+  },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "24.12.4",
