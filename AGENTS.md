@@ -5,7 +5,7 @@
 - Keep one-use interfaces local by inlining their shape at the sole consumer instead of declaring a named interface.
 - Keep route-specific components and logic under the route that owns them. Move code to a parent `_components/` directory only when multiple child routes use it.
 - Keep application wiring in one obvious composition root.
-- Before implementing or reviewing effectful application logic, read [effect-ts](.agents/skills/effect-ts/SKILL.md) and its relevant guides, including for new modules with no existing Effect imports. Use Effect for effectful application logic; keep plain TypeScript for pure functions and framework UI code.
+- Before implementing or reviewing effectful application logic, read [pidex-effect-ts](.agents/skills/pidex-effect-ts/SKILL.md) and its relevant guides, including for new modules with no existing Effect imports. Use Effect for effectful application logic; keep plain TypeScript for pure functions and framework UI code.
 - Return typed Effect errors instead of throwing exceptions or exposing raw promises, except at framework boundaries.
 - Prefer real integration tests over mocks; inject dependencies at boundaries when needed.
 - Use [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) for new commit messages and PR titles: `<type>[optional scope][!]: <summary>`. Use `feat` for features, `fix` for bugs, and descriptive types such as `docs`, `refactor`, `test`, `build`, `ci`, or `chore` for other work. Mark breaking changes with `!` or a `BREAKING CHANGE:` footer; use the PR title as the default squash-commit subject.
