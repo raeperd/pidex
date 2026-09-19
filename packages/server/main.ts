@@ -102,9 +102,55 @@ const program = Effect.gen(function* () {
               ...current,
               entries: current.entries.some((entry) => entry.id === messageId)
                 ? current.entries.map((entry) =>
-                    entry.id === messageId ? { ...entry, text: entry.text + delta } : entry,
+                    entry.id === messageId && entry.role !== "tool"
+                      ? { ...entry, text: entry.text + delta }
+                      : entry,
                   )
                 : [...current.entries, { id: messageId, role: "assistant", text: delta }],
+            })),
+          );
+        }
+        if (event.type === "tool_execution_start") {
+          Effect.runSync(
+            SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
+              ...current,
+              entries: [
+                ...current.entries,
+                {
+                  id: event.toolCallId,
+                  role: "tool",
+                  name: event.toolName,
+                  input: JSON.stringify(event.args, null, 2),
+                  result: "",
+                  status: "running",
+                },
+              ],
+            })),
+          );
+        }
+        if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+          const result = JSON.stringify(
+            event.type === "tool_execution_end" ? event.result : event.partialResult,
+            null,
+            2,
+          );
+          Effect.runSync(
+            SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
+              ...current,
+              entries: current.entries.map((entry) =>
+                entry.id === event.toolCallId && entry.role === "tool"
+                  ? {
+                      ...entry,
+                      result,
+                      status:
+                        event.type === "tool_execution_update"
+                          ? "running"
+                          : event.isError
+                            ? "failed"
+                            : "completed",
+                    }
+                  : entry,
+              ),
             })),
           );
         }

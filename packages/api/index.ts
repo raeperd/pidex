@@ -7,11 +7,21 @@ export const Conversation = Schema.Struct({
   status: Schema.Literals(["idle", "running"]),
   messageCount: Schema.Number,
   entries: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      role: Schema.Literals(["user", "assistant"]),
-      text: Schema.String,
-    }),
+    Schema.Union([
+      Schema.Struct({
+        id: Schema.String,
+        role: Schema.Literals(["user", "assistant"]),
+        text: Schema.String,
+      }),
+      Schema.Struct({
+        id: Schema.String,
+        role: Schema.Literal("tool"),
+        name: Schema.String,
+        input: Schema.String,
+        result: Schema.String,
+        status: Schema.Literals(["running", "completed", "failed"]),
+      }),
+    ]),
   ),
   error: Schema.String,
 });
