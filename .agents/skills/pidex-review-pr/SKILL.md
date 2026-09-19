@@ -10,7 +10,7 @@ Run directly with `$pidex-review-pr <PR URL>` or as the review phase of `pidex-i
 1. Resolve the PR and review scope.
    - Use the bundled CI, Codex, and independent review procedures linked below. Require authenticated GitHub CLI access and subagent support; report actual tooling/access blockers.
    - Read the PR, linked issue/spec, existing reviews, and repository instructions. Resolve its working branch without disturbing unrelated changes. Stop if merged or closed. For an open ready PR, record its initial state, run `gh pr ready <number> --undo`, and verify draft state before proceeding. Restore readiness only after all gates below pass.
-   - Check the PR title and new commit messages against the [repository commit/title convention](../../../AGENTS.md). Apply it to review-fix commits and the final PR title.
+   - Check the PR title and new commit messages against the [repository commit/title convention](../references/commit-conventions.md). Apply it to review-fix commits and the final PR title.
    - Pin the actual PR base and head SHAs, diff command, and commit list. For stacked PRs, review only the layer above its immediate parent; follow [stacked PRs](../references/stacked-prs.md) before changing stack branches.
    - The parent agent owns edits and GitHub mutations. Reviewers return findings without editing the branch, requesting Codex, or changing readiness.
    - Completion: the open draft, intended scope, immutable review revisions, and supporting procedures are known.
