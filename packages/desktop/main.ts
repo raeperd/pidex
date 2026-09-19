@@ -1,9 +1,10 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { Socket } from "effect/unstable/socket";
+import { NodeSocket } from "@effect/platform-node";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { Conversation, ConversationApi } from "../api/index.js";
-import { Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { Deferred, Effect, Exit, Layer, Schedule, Schema, Scope, Stream } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -65,12 +66,12 @@ const program = Effect.gen(function* () {
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
   let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
-  let watcher: Fiber.Fiber<void, never> | undefined;
+  const connections = yield* Scope.make();
   let quitting = false;
   const shutdown = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
-    if (watcher) yield* Fiber.interrupt(watcher);
+    yield* Scope.close(connections, Exit.void);
     const child = server?.child;
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
       yield* Effect.callback<void, DesktopError>((resume) => {
@@ -183,59 +184,77 @@ const program = Effect.gen(function* () {
               return Effect.sync(clear);
             });
             server = { child, ...ready };
-            const transport = RpcClient.layerProtocolHttp({
-              url: `http://127.0.0.1:${ready.port}/rpc`,
-              transformClient: HttpClient.mapRequest(
-                HttpClientRequest.setHeaders({
-                  authorization: `Bearer ${serverSecret}`,
-                  origin: "pidex://app",
-                }),
-              ),
-            }).pipe(Layer.provide([FetchHttpClient.layer, RpcSerialization.layerNdjson]));
-            conversation = yield* Effect.gen(function* () {
-              const client = yield* RpcClient.make(ConversationApi);
-              return yield* client.GetConversation();
-            }).pipe(
-              Effect.provide(transport),
-              Effect.scoped,
-              Effect.mapError(
-                () => new DesktopError({ message: "Could not start the Pi conversation" }),
-              ),
-            );
-            sendPrompt = (text) =>
-              Effect.gen(function* () {
-                const client = yield* RpcClient.make(ConversationApi);
-                yield* client.Send({ text });
-              }).pipe(
-                Effect.provide(transport),
-                Effect.scoped,
-                Effect.mapError(
-                  (error) =>
-                    new DesktopError({
-                      message: error._tag === "SendError" ? error.message : "Could not send prompt",
-                    }),
+            const connectionScope = yield* Scope.fork(connections, "sequential");
+            const transport = Layer.effect(
+              RpcClient.Protocol,
+              RpcClient.makeProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
+            ).pipe(
+              Layer.provide([
+                RpcSerialization.layerNdjson,
+                Layer.effect(
+                  Socket.Socket,
+                  NodeSocket.fromDuplex(
+                    Effect.acquireRelease(
+                      Effect.sync(() =>
+                        NodeSocket.NodeWS.createWebSocketStream(
+                          new NodeSocket.NodeWS.WebSocket(`ws://127.0.0.1:${ready.port}/rpc/`, {
+                            headers: {
+                              authorization: `Bearer ${serverSecret}`,
+                              origin: "pidex://app",
+                            },
+                            handshakeTimeout: 10_000,
+                          }),
+                        ),
+                      ),
+                      (stream) =>
+                        Effect.sync(() => {
+                          stream.destroy();
+                        }),
+                    ),
+                  ),
                 ),
+              ]),
+            );
+            return yield* Effect.gen(function* () {
+              const context = yield* Layer.buildWithScope(transport, connectionScope);
+              const client = yield* RpcClient.make(ConversationApi).pipe(
+                Effect.provideContext(context),
+                Scope.provide(connectionScope),
               );
-            watcher = Effect.runFork(
-              Effect.gen(function* () {
-                const client = yield* RpcClient.make(ConversationApi);
-                yield* Stream.runForEach(client.Watch(), (snapshot) =>
-                  Effect.sync(() => {
+              const initial = yield* Deferred.make<typeof Conversation.Type, DesktopError>();
+              sendPrompt = (text) =>
+                client.Send({ text }).pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new DesktopError({
+                        message:
+                          error._tag === "SendError" ? error.message : "Could not send prompt",
+                      }),
+                  ),
+                );
+              yield* client.Watch().pipe(
+                Stream.runForEach((snapshot) =>
+                  Effect.gen(function* () {
                     conversation = snapshot;
                     if (!window.isDestroyed()) window.webContents.send("conversation", snapshot);
-                  }),
-                );
-              }).pipe(
-                Effect.provide(transport),
-                Effect.scoped,
-                Effect.catch(() =>
-                  Effect.sync(() => {
-                    if (!window.isDestroyed()) window.webContents.send("conversation", null);
+                    yield* Deferred.succeed(initial, snapshot);
                   }),
                 ),
-              ),
-            );
-            return conversation;
+                Effect.catch(() =>
+                  Effect.gen(function* () {
+                    sendPrompt = undefined;
+                    if (!window.isDestroyed()) window.webContents.send("conversation", null);
+                    yield* Deferred.fail(
+                      initial,
+                      new DesktopError({ message: "Could not start the Pi conversation" }),
+                    );
+                  }),
+                ),
+                Effect.forkIn(connectionScope),
+              );
+              yield* Deferred.await(initial);
+              return conversation;
+            }).pipe(Effect.onError(() => Scope.close(connectionScope, Exit.void)));
           }).pipe(
             Effect.onError(() =>
               Effect.sync(() => {

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
@@ -101,26 +102,43 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
   page.setDefaultTimeout(5000);
   await context.tracing.start({ screenshots: true, snapshots: true });
   try {
-    // Hold the real RPC response after acceptance, without replacing app handlers.
-    const acknowledgement = await app.evaluateHandle(() => {
-      const originalFetch = globalThis.fetch;
-      let held = false;
-      let release: (() => void) | undefined;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      globalThis.fetch = async (input, init) => {
-        const request = new Request(input, init);
-        const payload = await request.clone().text();
-        const response = await originalFetch(request);
-        if (payload.includes('"text":"Write hello to note.txt"')) {
-          held = true;
-          await gate;
-        }
-        return response;
-      };
-      return { release: () => release?.(), isHeld: () => held };
-    });
+    // Hold the real Send acknowledgement while subscription updates keep flowing.
+    const acknowledgement = await app.evaluateHandle(
+      (_electron, modulePath) => {
+        const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+          modulePath,
+        );
+        const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+        const originalEmit = prototype.emit;
+        let armed = false;
+        let release: (() => void) | undefined;
+        let connections = 0;
+        prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+          if (event === "open") connections++;
+          const data = String(args[0]);
+          if (
+            event === "message" &&
+            armed &&
+            data.includes('"_tag":"Exit"') &&
+            data.includes('"_tag":"Success"')
+          ) {
+            armed = false;
+            release = () => originalEmit.apply(this, [event, ...args]);
+            return true;
+          }
+          return originalEmit.apply(this, [event, ...args]);
+        };
+        return {
+          arm: () => {
+            armed = true;
+          },
+          release: () => release?.(),
+          isHeld: () => release !== undefined,
+          connections: () => connections,
+        };
+      },
+      fileURLToPath(import.meta.resolve("@effect/platform-node")),
+    );
     await app.evaluate(({ dialog }, projectPath) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [projectPath] });
     }, project);
@@ -147,6 +165,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
       ).toBe("rejected");
     }
     expect(providerRequests).toBe(0);
+    await acknowledgement.evaluate((gate) => gate.arm());
     await composer.fill("Write hello to note.txt");
     await send.click();
     await expect(conversation.getByRole("status")).toHaveText("Running");
@@ -179,6 +198,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     expect(history).toContain("Write hello to note.txt");
     expect(history).toContain("Saved hello");
     expect(providerRequests).toBe(1);
+    expect(await acknowledgement.evaluate((gate) => gate.connections())).toBe(1);
     await page.screenshot({ path: testInfo.outputPath("reply.png") });
     await composer.fill("Remain active until Quit");
     await send.click();

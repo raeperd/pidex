@@ -21,7 +21,6 @@ export class SendError extends Schema.TaggedError<SendError>()("SendError", {
 }) {}
 
 export const ConversationApi = RpcGroup.make(
-  Rpc.make("GetConversation", { success: Conversation }),
   Rpc.make("Watch", { success: Conversation, stream: true }),
   Rpc.make("Send", { payload: { text: Schema.String }, error: SendError }),
 );

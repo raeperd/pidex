@@ -160,12 +160,11 @@ const program = Effect.gen(function* () {
       Effect.forkIn(scope),
     );
   });
-  const rpc = yield* RpcServer.toHttpEffect(ConversationApi).pipe(
+  const rpc = yield* RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
     Effect.provide(
       Layer.mergeAll(
         RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
-          GetConversation: () => SubscriptionRef.get(state),
           Watch: () => SubscriptionRef.changes(state),
           Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
@@ -182,7 +181,7 @@ const program = Effect.gen(function* () {
       ) {
         return HttpServerResponse.empty({ status: 403 });
       }
-      if (request.method !== "POST" || request.url !== "/rpc/")
+      if (request.method !== "GET" || request.url !== "/rpc/")
         return HttpServerResponse.empty({ status: 404 });
       return yield* rpc;
     }),
