@@ -13,6 +13,6 @@
     "packages/desktop/**/*.ts",
     "packages/desktop/**/*.cts",
     "packages/api/**/*.ts",
-    "packages/backend/**/*.ts"
+    "packages/server/**/*.ts"
   ]
 }

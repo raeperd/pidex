@@ -11,7 +11,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` builds and opens the desktop app. Electron main owns the window and native folder dialog; a sandboxed preload exposes only `chooseProject`. The renderer loads the static Svelte build through the local `pidex://app` protocol. Main owns one backend child, its per-launch credential, and the exact Pi session path. Main calls the loopback backend over Effect RPC/HTTP, then returns a schema-defined snapshot to the renderer. Credentials and backend imports stay outside the renderer.
+`pnpm dev` builds and opens the desktop app. Electron main owns the window and native folder dialog; a sandboxed preload exposes only `chooseProject`. The renderer loads the static Svelte build through the local `pidex://app` protocol. Main owns one server child, its per-launch credential, and the exact Pi session path. Main calls the loopback server over Effect RPC/HTTP, then returns a schema-defined snapshot to the renderer. Credentials and server imports stay outside the renderer.
 
 ## Verification
 
@@ -30,6 +30,6 @@ For a manual native-dialog check, run `pnpm dev`, click Choose project, and pres
 
 ## Pi integration
 
-Pi 0.85.1 resolves the configured default model and credentials from its usual files or environment. The backend creates a new persistent Pi session; its JSONL file may not exist until the first assistant message. Project instructions, stock tools, retry, and compaction use Pi. External extensions, skills, templates, themes, custom system prompts, and package resources are disabled without changing user settings.
+Pi 0.85.1 resolves the configured default model and credentials from its usual files or environment. The server creates a new persistent Pi session; its JSONL file may not exist until the first assistant message. Project instructions, stock tools, retry, and compaction use Pi. External extensions, skills, templates, themes, custom system prompts, and package resources are disabled without changing user settings.
 
-The backend gives `DefaultResourceLoader` empty in-memory settings because Pi resolves packages before applying its resource filters. The session itself uses the normal settings manager.
+The server gives `DefaultResourceLoader` empty in-memory settings because Pi resolves packages before applying its resource filters. The session itself uses the normal settings manager.

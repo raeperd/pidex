@@ -13,8 +13,8 @@ import { createServer } from "node:http";
 import { ConversationApi } from "../api/index.js";
 
 const program = Effect.gen(function* () {
-  const token = yield* Schema.decodeUnknownEffect(Schema.String)(process.env.PIDEX_BACKEND_TOKEN);
-  delete process.env.PIDEX_BACKEND_TOKEN;
+  const token = yield* Schema.decodeUnknownEffect(Schema.String)(process.env.PIDEX_SERVER_TOKEN);
+  delete process.env.PIDEX_SERVER_TOKEN;
   const { session } = yield* Effect.acquireRelease(
     Effect.gen(function* () {
       const cwd = process.cwd();

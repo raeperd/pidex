@@ -51,16 +51,16 @@ test("#129 Cancel then choose a project with a fresh idle conversation", async (
   });
   const electronProcess = app.process();
   cleanup.defer(async () => {
-    // Observe/clean only this app's owned backend, including on assertion failure.
+    // Observe/clean only this app's owned server, including on assertion failure.
     let childPid: number | undefined;
     try {
       childPid = Number(
-        execFileSync("pgrep", ["-P", String(electronProcess.pid), "-f", "/dist/backend/main.js"], {
+        execFileSync("pgrep", ["-P", String(electronProcess.pid), "-f", "/dist/server/main.js"], {
           encoding: "utf8",
         }).trim(),
       );
     } catch {
-      /* The chooser may not have started a backend. */
+      /* The chooser may not have started a server. */
     }
     if (childPid) {
       try {

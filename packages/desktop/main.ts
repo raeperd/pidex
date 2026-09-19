@@ -62,9 +62,9 @@ const program = Effect.gen(function* () {
   window.webContents.session.setPermissionCheckHandler(() => false);
   const token = yield* Effect.try({
     try: () => randomBytes(32).toString("hex"),
-    catch: () => new DesktopError({ message: "Could not create backend credentials" }),
+    catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
-  let backend: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
+  let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
   let choosing = false;
   let conversation: typeof Conversation.Type | undefined;
   ipcMain.handle("choose-project", (event) =>
@@ -89,15 +89,15 @@ const program = Effect.gen(function* () {
           if (selection.canceled || !cwd) return null;
           const child = yield* Effect.try({
             try: () =>
-              fork(fileURLToPath(new URL("../backend/main.js", import.meta.url)), [], {
+              fork(fileURLToPath(new URL("../server/main.js", import.meta.url)), [], {
                 cwd,
                 execArgv: [],
                 stdio: ["ignore", "ignore", "ignore", "ipc"],
-                env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PIDEX_BACKEND_TOKEN: token },
+                env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PIDEX_SERVER_TOKEN: token },
               }),
             catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
           });
-          backend = { child };
+          server = { child };
           return yield* Effect.gen(function* () {
             const ready = yield* Effect.callback<
               { port: number; sessionFile: string },
@@ -114,22 +114,20 @@ const program = Effect.gen(function* () {
                   Schema.decodeUnknownEffect(
                     Schema.Struct({ port: Schema.Number, sessionFile: Schema.String }),
                   )(message).pipe(
-                    Effect.mapError(
-                      () => new DesktopError({ message: "Invalid backend response" }),
-                    ),
+                    Effect.mapError(() => new DesktopError({ message: "Invalid server response" })),
                   ),
                 );
               };
               const onFailure = () => {
                 clear();
-                resume(Effect.fail(new DesktopError({ message: "Backend startup failed" })));
+                resume(Effect.fail(new DesktopError({ message: "Server startup failed" })));
               };
               child.once("message", onMessage);
               child.once("error", onFailure);
               child.once("exit", onFailure);
               return Effect.sync(clear);
             });
-            backend = { child, ...ready };
+            server = { child, ...ready };
             const transport = RpcClient.layerProtocolHttp({
               url: `http://127.0.0.1:${ready.port}/rpc`,
               transformClient: HttpClient.mapRequest(
@@ -153,7 +151,7 @@ const program = Effect.gen(function* () {
           }).pipe(
             Effect.onError(() =>
               Effect.sync(() => {
-                backend?.child.kill();
+                server?.child.kill();
               }),
             ),
           );
