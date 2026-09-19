@@ -1,10 +1,9 @@
 ---
 name: review-pr
-description: Resolve Codex and independent subagent reviews, pass CI, and mark the verified PR ready for review.
-disable-model-invocation: true
+description: Resolve Codex and independent subagent reviews and mark verified PRs ready. Use when implement-issue reaches review or the user requests PR review and readiness.
 ---
 
-Run with `$review-pr <PR URL>`. This workflow authorizes the Codex review request, review fixes, commits/pushes, replies, thread resolution, and readiness. Merge only when explicitly requested.
+Run directly with `$review-pr <PR URL>` or as the review phase of `implement-issue`. Either request includes the Codex review request, review fixes, commits/pushes, replies, thread resolution, and readiness unless the user narrows the scope. Merge only when explicitly requested.
 
 ## Process
 

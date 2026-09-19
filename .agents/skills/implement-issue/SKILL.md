@@ -1,16 +1,16 @@
 ---
 name: implement-issue
-description: Implement a GitHub issue with behavior-focused TDD and small draft PRs, stacking dependent changes when needed.
+description: Implement a GitHub issue with behavior-focused TDD and small PRs, then compose review-pr to deliver verified ready PRs.
 disable-model-invocation: true
 ---
 
-Run with `$implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, and draft PR creation unless the user narrows the request. Review and readiness are a separate invocation: `$review-pr <PR URL>`.
+Run with `$implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, draft PR creation, and review through readiness unless the user narrows the request. Merge only when explicitly requested.
 
 ## Process
 
 1. Resolve scope and supporting skills.
    - Read the issue, linked spec, comments, blockers, and repository instructions. Apply later user corrections and distinguish implemented behavior from the target.
-   - Locate and read `implement` and `tdd` through the skill catalog or repository/personal skill directories. Follow their implementation and validation guidance; reserve `implement`'s final independent review for `review-pr`.
+   - Locate and read `implement` and `tdd` through the skill catalog or repository/personal skill directories. Confirm the supporting skills required by [review-pr](../review-pr/SKILL.md) are available. Its review phase supplies `implement`'s final independent review without a duplicate pass.
    - Use the issue and spec's approved test boundaries without requesting approval again. Use one scenario → red → minimal green → refactor, preserving already-passing behavior as regression coverage. These repository decisions take precedence over conflicting supporting-skill rules.
    - Discover applicable implementation skills from the actual files and stack. Report missing supporting skills or prerequisites; ask only for product decisions that block work.
    - Completion: scope, acceptance criteria, approved test boundaries, and prerequisites are known; required skills are available.
@@ -37,11 +37,16 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
    - Verify remote bases, diffs, draft state, and CI. Fix PR-caused failures and report unrelated or uncertain blockers accurately.
    - Completion: the layer has a draft PR with verified scope and passing checks, or a specific blocker is recorded.
 
-5. Continue and hand off.
-   - Repeat until all acceptance criteria are implemented. Rebase and revalidate dependent layers after prerequisite changes, following `gh-stack`.
-   - Report completed criteria, remaining work, PR links in dependency order, verification results, and blockers. Provide `$review-pr <PR URL>` for each completed draft; run it only when the user also requests the review phase.
-   - Keep the issue open until all acceptance criteria pass and its implementation PRs merge. This skill finishes with draft PRs; merging requires an explicit request.
-   - Completion: implementation is delivered in verified draft PRs, or remaining work is explicitly blocked.
+5. Run the review-pr subworkflow.
+   - Execute `review-pr` for each completed draft without requiring another user prompt. Pass the PR URL, issue/spec, layer scope, and recorded review fixed point.
+   - Let that skill own Codex, independent subagent review, findings, final CI, and readiness. Keep its run record across layers and follow-up fixes so each PR receives only one Codex trigger during this implementation run.
+   - Completion: the layer is verified ready, or review-pr leaves it in draft with a specific blocker.
+
+6. Continue and report.
+   - Repeat until all acceptance criteria are implemented. Rebase dependent layers after prerequisite changes, following `gh-stack`. Return affected ready PRs to draft and resume their review-pr checks using the existing records before restoring readiness.
+   - Report completed criteria, remaining work, PR links in dependency order, verification and review results, readiness states, and blockers.
+   - Keep the issue open until all acceptance criteria pass and its implementation PRs merge. Merging requires an explicit request.
+   - Completion: implementation is delivered in verified ready PRs, or remaining work and draft PRs have explicit blockers.
 
 ## PR size
 
