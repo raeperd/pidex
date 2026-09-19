@@ -9,6 +9,7 @@
     "packages/desktop/**/*.cts",
     "tests/**/*.ts",
     "playwright.config.ts",
+    "packages/web/src/app.d.ts",
     "packages/api/**/*.ts",
     "packages/server/**/*.ts"
   ]
