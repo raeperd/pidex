@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
-test("#129 Cancel then choose a project with a fresh idle conversation", async ({}, testInfo) => {
+test("#129 Cancel then choose a project with a fresh idle conversation, then Quit", async ({}, testInfo) => {
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-129-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
@@ -50,18 +50,12 @@ test("#129 Cancel then choose a project with a fresh idle conversation", async (
     env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
   });
   const electronProcess = app.process();
+  const context = app.context();
+  const logs: string[] = [];
+  electronProcess.stderr?.on("data", (data) => logs.push(String(data)));
+  let childPid: number | undefined;
   cleanup.defer(async () => {
-    // Observe/clean only this app's owned server, including on assertion failure.
-    let childPid: number | undefined;
-    try {
-      childPid = Number(
-        execFileSync("pgrep", ["-P", String(electronProcess.pid), "-f", "/dist/server/main.js"], {
-          encoding: "utf8",
-        }).trim(),
-      );
-    } catch {
-      /* The chooser may not have started a server. */
-    }
+    childPid ??= findServer();
     if (childPid) {
       try {
         process.kill(childPid, "SIGKILL");
@@ -71,11 +65,9 @@ test("#129 Cancel then choose a project with a fresh idle conversation", async (
     }
     if (electronProcess.exitCode === null && electronProcess.signalCode === null) await app.close();
   });
-  const logs: string[] = [];
-  app.process().stderr?.on("data", (data) => logs.push(String(data)));
   const page = await app.firstWindow();
   page.setDefaultTimeout(5000);
-  await app.context().tracing.start({ screenshots: true, snapshots: true });
+  await context.tracing.start({ screenshots: true, snapshots: true });
   try {
     const picker = await app.evaluateHandle(({ dialog }) => {
       const observation = { opened: false };
@@ -102,14 +94,49 @@ test("#129 Cancel then choose a project with a fresh idle conversation", async (
     await expect(page.getByRole("button", { name: "Choose project" })).toHaveCount(0);
     expect(providerRequests).toBe(0);
     await page.screenshot({ path: testInfo.outputPath("idle.png") });
-    await app.context().tracing.stop();
+    childPid = findServer();
+    if (!childPid) throw new Error("Expected an owned server process");
+    await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });
+    await app.evaluate(({ app: application }) => {
+      setImmediate(() => application.quit());
+    });
+    await expect.poll(() => electronProcess.exitCode).toBe(0);
+    const ownedPid = childPid;
+    await expect
+      .poll(
+        () => {
+          try {
+            process.kill(ownedPid, 0);
+            return true;
+          } catch (error) {
+            if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+            throw error;
+          }
+        },
+        { message: "owned server terminates after Quit" },
+      )
+      .toBe(false);
   } catch (error) {
-    await page.screenshot({ path: testInfo.outputPath("failure.png"), timeout: 5000 });
+    if (!page.isClosed())
+      await page.screenshot({ path: testInfo.outputPath("failure.png"), timeout: 5000 });
     await writeFile(
       testInfo.outputPath("electron.log"),
       logs.join("").replaceAll(temporary, "[temporary]"),
     );
-    await app.context().tracing.stop({ path: testInfo.outputPath("trace.zip") });
+    await context.tracing.stop({ path: testInfo.outputPath("trace.zip") }).catch(() => {});
     throw error;
+  }
+  function findServer() {
+    try {
+      return (
+        Number(
+          execFileSync("pgrep", ["-P", String(electronProcess.pid), "-f", "/dist/server/main.js"], {
+            encoding: "utf8",
+          }).trim(),
+        ) || undefined
+      );
+    } catch {
+      return undefined;
+    }
   }
 });

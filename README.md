@@ -1,6 +1,6 @@
 # pidex
 
-A macOS Electron app with a Svelte renderer. Choose a project using your existing Pi setup to open a fresh idle conversation. This implements startup for [#129](https://github.com/raeperd/pidex/issues/129); verified idle shutdown follows in the next PR.
+A macOS Electron app with a Svelte renderer. Choose a project using your existing Pi setup to open a fresh idle conversation. Quit closes the Pi session and its server before Electron exits. This implements [#129](https://github.com/raeperd/pidex/issues/129).
 
 The [v0.0.1 technical spec](docs/v0.0.1-tech-spec.md) defines the remaining milestone.
 
@@ -22,11 +22,11 @@ pnpm test --grep '#129'
 pnpm build && pnpm exec playwright test --grep '#129' --debug
 ```
 
-The acceptance test launches Electron 44.4.3 with Playwright 1.63.0 on macOS, supplies Cancel before the native dialog is invoked, clicks Choose project, checks that the chooser remains available without a conversation, then supplies a temporary project and verifies GPT-4.1, Idle, and an empty conversation. It uses a temporary home and Chromium profile, preserves the real preload and application handlers, and removes the temporary files after closing Electron. The test creates temporary Pi `auth.json` and `settings.json` files. A `models.json` override points OpenAI at a local fixture, and the test asserts zero provider requests. No personal Pi configuration is used. Test cleanup currently terminates the child explicitly; the next layer tests application-owned shutdown.
+The acceptance test launches Electron 44.4.3 with Playwright 1.63.0 on macOS, supplies Cancel before the native dialog is invoked, clicks Choose project, checks that the chooser remains available without a conversation, then supplies a temporary project and verifies GPT-4.1, Idle, and an empty conversation. It uses a temporary home and Chromium profile, preserves the real preload and application handlers, and removes the temporary files after closing Electron. The test creates temporary Pi `auth.json` and `settings.json` files. A `models.json` override points OpenAI at a local fixture, and the test asserts zero provider requests. No personal Pi configuration is used. After checking the idle conversation, the test requests Quit and observes Electron exiting with code 0 and the owned server PID disappearing. These assertions run before fallback cleanup.
 
-On failure, `test-results/` contains a screenshot, trace, and Electron log with the temporary path redacted. Open a trace with `pnpm exec playwright show-trace <trace.zip>`. Report #129, the pinned versions, steps, and expected versus actual behavior with the artifacts. macOS CI runs formatting, lint, types, build, and acceptance tests and uploads failure artifacts.
+`test-results/` retains an idle screenshot and a trace captured before Quit. Failures also save an Electron log with the temporary path redacted and a failure screenshot when the window is still open. Open a trace with `pnpm exec playwright show-trace <trace.zip>`. Report #129, the pinned versions, steps, and expected versus actual behavior with the artifacts. macOS CI runs formatting, lint, types, build, and acceptance tests and uploads failure artifacts.
 
-For a manual native-dialog check, run `pnpm dev`, click Choose project, and press Cancel. The chooser should remain available.
+For a manual native-dialog check, run `pnpm dev`, click Choose project, and press Cancel. The chooser should remain available. Select a project on the next attempt, check the configured model and Idle status, then use the application menu to Quit.
 
 ## Pi integration
 

@@ -65,6 +65,44 @@ const program = Effect.gen(function* () {
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
   let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
+  let quitting = false;
+  const shutdown = Effect.gen(function* () {
+    if (quitting) return;
+    quitting = true;
+    const child = server?.child;
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      yield* Effect.callback<void, DesktopError>((resume) => {
+        const onExit = () => resume(Effect.void);
+        child.once("exit", onExit);
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          child.off("exit", onExit);
+          resume(Effect.fail(new DesktopError({ message: "Could not stop the Pi server" })));
+        }
+        return Effect.sync(() => {
+          child.off("exit", onExit);
+        });
+      });
+    }
+    yield* Effect.sync(() => app.quit());
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logError(error.message).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            quitting = false;
+          }),
+        ),
+      ),
+    ),
+  );
+  app.on("before-quit", (event) => {
+    const child = server?.child;
+    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+    event.preventDefault();
+    Effect.runFork(shutdown);
+  });
   let choosing = false;
   let conversation: typeof Conversation.Type | undefined;
   ipcMain.handle("choose-project", (event) =>
@@ -78,7 +116,7 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
-        if (choosing) return null;
+        if (choosing || quitting) return null;
         choosing = true;
         return yield* Effect.gen(function* () {
           const selection = yield* Effect.tryPromise({
