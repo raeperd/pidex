@@ -63,7 +63,19 @@ const program = Effect.gen(function* () {
         catch: () => new StartupError(),
       });
     }),
-    ({ session: acquired }) => Effect.sync(() => acquired.dispose()),
+    ({ session: acquired }) =>
+      Effect.gen(function* () {
+        yield* Effect.try({
+          try: () => acquired.dispose(),
+          catch: () => new ShutdownError(),
+        });
+        yield* Effect.tryPromise({
+          try: () => acquired.settingsManager.flush(),
+          catch: () => new ShutdownError(),
+        });
+        const errors = yield* Effect.sync(() => acquired.settingsManager.drainErrors());
+        if (errors.length > 0) return yield* new ShutdownError();
+      }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
   );
   if (!session.model || !session.sessionFile || session.isStreaming)
     return yield* new StartupError();
@@ -105,5 +117,7 @@ const program = Effect.gen(function* () {
 });
 
 class StartupError extends Schema.TaggedError<StartupError>()("StartupError", {}) {}
+
+class ShutdownError extends Schema.TaggedError<ShutdownError>()("ShutdownError", {}) {}
 
 NodeRuntime.runMain(Effect.scoped(program), { disableErrorReporting: true });
