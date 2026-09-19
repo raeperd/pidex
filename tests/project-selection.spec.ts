@@ -94,7 +94,8 @@ test("#129 Cancel then choose a project with a fresh idle conversation", async (
     }, project);
     await page.getByRole("button", { name: "Choose project" }).click();
     const conversation = page.getByRole("region", { name: "Conversation" });
-    await expect(conversation).toBeVisible();
+    // Cold Pi imports can exceed five seconds on macOS CI.
+    await expect(conversation).toBeVisible({ timeout: 15_000 });
     await expect(conversation.getByRole("status")).toHaveText("Idle");
     await expect(conversation.getByText("GPT-4.1", { exact: true })).toBeVisible();
     await expect(conversation.getByText("No messages yet.")).toBeVisible();
