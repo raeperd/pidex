@@ -20,7 +20,7 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
    - Inspect working-tree changes and existing implementation PRs before creating a separate branch/worktree. Preserve unrelated work and reuse existing issue work.
    - Verify prerequisite implementations. Base dependent work on their implementation branches or merged commits; report a blocker when required implementation is absent.
    - Plan one cohesive outcome per PR using the size guidance below. Record each layer's starting commit and intended base for later review.
-   - When PRs depend on one another, follow the bundled [stacked-PR procedure](../review-pr/references/standalone.md#stacked-prs) before creating layers or changing stack branches.
+   - When PRs depend on one another, follow [stacked PRs](../references/stacked-prs.md) before creating layers or changing stack branches.
    - Completion: the active branch owns the next change, and each planned PR has a base, scope, and review fixed point.
 
 3. Implement one acceptance scenario at a time.
@@ -45,9 +45,8 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
 6. Continue and report.
    - Repeat until all acceptance criteria are implemented. Rebase dependent layers after prerequisite changes, following `gh-stack`. Return affected ready PRs to draft and resume their review-pr checks using the existing records before restoring readiness.
    - Keep the issue open until all acceptance criteria pass and its implementation PRs merge. Merging requires an explicit request.
-   - On the issue's final implementation PR, post or update one concise handoff comment. Re-read relevant issue dependencies, PR merge states, and likely code ownership before recommending follow-up work; reuse the existing agent-authored handoff rather than adding duplicates.
-   - State the issue's remaining merge/closure conditions, the recommended next issue with its prerequisite and reason, and which issues can proceed in parallel now or after a named prerequisite. Link actual issues/PRs; distinguish dependency eligibility from likely shared-file or API conflicts and suggest ownership boundaries. Say when no independent work is available or the next issue is unknown.
-   - If implementation is incomplete, report the remaining work and blockers on the latest relevant PR instead of presenting it as the completed final PR. Read back the saved comment and include its URL in the final report alongside criteria, PR order, verification/review results, and readiness states.
+   - Before the final report, follow [issue handoff](references/handoff.md) to publish the final PR comment or an accurate progress comment for blocked work.
+   - Report criteria, PRs in dependency order, verification/review results, readiness states, blockers, and the verified comment URL.
    - Completion: implementation is delivered in verified ready PRs with a verified handoff comment, or remaining work and draft PRs have explicit blockers and a progress comment.
 
 ## PR size
