@@ -1,0 +1,6 @@
+interface:
+  display_name: "Create Spec"
+  short_description: "Draft concise specs with use-case acceptance coverage"
+  default_prompt: "Use $create-spec to turn the agreed context into a concise technical spec with clear ownership and acceptance scenarios."
+policy:
+  allow_implicit_invocation: false
