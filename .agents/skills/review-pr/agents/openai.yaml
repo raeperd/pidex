@@ -1,4 +1,0 @@
-interface:
-  display_name: "Review PR"
-  short_description: "Resolve both reviews and CI before marking a PR ready"
-  default_prompt: "Use $review-pr to run Codex and independent subagent reviews, resolve findings, and mark the linked PR ready only after final-head CI passes."
