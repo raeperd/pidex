@@ -152,7 +152,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     await expect(conversation.getByRole("status")).toHaveText("Running");
     await expect(conversation.getByText("Saved", { exact: true })).toBeVisible();
     await expect(send).toBeDisabled();
-    expect(await acknowledgement.evaluate((gate) => gate.isHeld())).toBe(true);
+    await expect.poll(() => acknowledgement.evaluate((gate) => gate.isHeld())).toBe(true);
     await composer.fill("Next prompt");
     await acknowledgement.evaluate((gate) => gate.release());
     expect(
