@@ -6,11 +6,11 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Schema, SubscriptionRef } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
-import { ConversationApi } from "../api/index.js";
+import { Conversation, ConversationApi, SendError } from "../api/index.js";
 
 const program = Effect.gen(function* () {
   const serverSecret = yield* Schema.decodeUnknownEffect(Schema.String)(
@@ -79,19 +79,88 @@ const program = Effect.gen(function* () {
   );
   if (!session.model || !session.sessionFile || session.isStreaming)
     return yield* new StartupError();
-  const modelName = session.model.name;
+  const scope = yield* Effect.scope;
+  const state = yield* SubscriptionRef.make<typeof Conversation.Type>({
+    id: session.sessionId,
+    modelName: session.model.name,
+    status: "idle",
+    messageCount: 0,
+    entries: [],
+    error: "",
+  });
+  let messageId = "";
+  yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      session.subscribe((event) => {
+        if (event.type === "message_start" && event.message.role === "assistant") {
+          messageId = crypto.randomUUID();
+        }
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          const delta = event.assistantMessageEvent.delta;
+          Effect.runSync(
+            SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
+              ...current,
+              entries: current.entries.some((entry) => entry.id === messageId)
+                ? current.entries.map((entry) =>
+                    entry.id === messageId ? { ...entry, text: entry.text + delta } : entry,
+                  )
+                : [...current.entries, { id: messageId, role: "assistant", text: delta }],
+            })),
+          );
+        }
+      }),
+    ),
+    (unsubscribe) => Effect.sync(unsubscribe),
+  );
+  const send = Effect.fn(function* ({ text }: { text: string }) {
+    if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
+    const accepted = yield* SubscriptionRef.modify(
+      state,
+      (current): [boolean, typeof Conversation.Type] =>
+        current.status !== "idle"
+          ? [false, current]
+          : [
+              true,
+              {
+                ...current,
+                status: "running",
+                error: "",
+                entries: [...current.entries, { id: crypto.randomUUID(), role: "user", text }],
+              },
+            ],
+    );
+    if (!accepted) return yield* new SendError({ message: "Wait for the current reply." });
+    yield* Effect.tryPromise({
+      try: () => session.prompt(text),
+      catch: () =>
+        new SendError({
+          message: "Pi could not complete the prompt. Check your model and credentials.",
+        }),
+    }).pipe(
+      Effect.catch((error) =>
+        SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
+          ...current,
+          error: error.message,
+        })),
+      ),
+      Effect.ensuring(
+        SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
+          ...current,
+          status: "idle",
+          messageCount: session.messages.length,
+        })),
+      ),
+      Effect.forkIn(scope),
+    );
+  });
   const rpc = yield* RpcServer.toHttpEffect(ConversationApi).pipe(
     Effect.provide(
       Layer.mergeAll(
-        RpcSerialization.layerJson,
+        RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
-          GetConversation: () =>
-            Effect.succeed({
-              id: session.sessionId,
-              modelName,
-              status: "idle",
-              messageCount: session.messages.length,
-            }),
+          GetConversation: () => SubscriptionRef.get(state),
+          Watch: () => SubscriptionRef.changes(state),
+          Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
       ),
     ),

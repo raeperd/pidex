@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { Conversation, ConversationApi } from "../api/index.js";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -65,10 +65,12 @@ const program = Effect.gen(function* () {
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
   let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
+  let watcher: Fiber.Fiber<void, never> | undefined;
   let quitting = false;
   const shutdown = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
+    if (watcher) yield* Fiber.interrupt(watcher);
     const child = server?.child;
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
       yield* Effect.callback<void, DesktopError>((resume) => {
@@ -105,6 +107,25 @@ const program = Effect.gen(function* () {
   });
   let choosing = false;
   let conversation: typeof Conversation.Type | undefined;
+  let sendPrompt: ((text: string) => Effect.Effect<void, DesktopError>) | undefined;
+  ipcMain.handle("send-prompt", (event, text: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (
+          event.sender !== window.webContents ||
+          event.senderFrame !== window.webContents.mainFrame ||
+          event.senderFrame.url !== "pidex://app/"
+        )
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
+        );
+        if (!sendPrompt || quitting)
+          return yield* new DesktopError({ message: "Choose a project first" });
+        yield* sendPrompt(prompt);
+      }),
+    ),
+  );
   ipcMain.handle("choose-project", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -178,7 +199,7 @@ const program = Effect.gen(function* () {
                   origin: "pidex://app",
                 }),
               ),
-            }).pipe(Layer.provide([FetchHttpClient.layer, RpcSerialization.layerJson]));
+            }).pipe(Layer.provide([FetchHttpClient.layer, RpcSerialization.layerNdjson]));
             conversation = yield* Effect.gen(function* () {
               const client = yield* RpcClient.make(ConversationApi);
               return yield* client.GetConversation();
@@ -187,6 +208,39 @@ const program = Effect.gen(function* () {
               Effect.scoped,
               Effect.mapError(
                 () => new DesktopError({ message: "Could not start the Pi conversation" }),
+              ),
+            );
+            sendPrompt = (text) =>
+              Effect.gen(function* () {
+                const client = yield* RpcClient.make(ConversationApi);
+                yield* client.Send({ text });
+              }).pipe(
+                Effect.provide(transport),
+                Effect.scoped,
+                Effect.mapError(
+                  (error) =>
+                    new DesktopError({
+                      message: error._tag === "SendError" ? error.message : "Could not send prompt",
+                    }),
+                ),
+              );
+            watcher = Effect.runFork(
+              Effect.gen(function* () {
+                const client = yield* RpcClient.make(ConversationApi);
+                yield* Stream.runForEach(client.Watch(), (snapshot) =>
+                  Effect.sync(() => {
+                    conversation = snapshot;
+                    if (!window.isDestroyed()) window.webContents.send("conversation", snapshot);
+                  }),
+                );
+              }).pipe(
+                Effect.provide(transport),
+                Effect.scoped,
+                Effect.catch(() =>
+                  Effect.sync(() => {
+                    if (!window.isDestroyed()) window.webContents.send("conversation", null);
+                  }),
+                ),
               ),
             );
             return conversation;
