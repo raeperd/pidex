@@ -10,10 +10,11 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
 
 1. Resolve scope and supporting skills.
    - Read the issue, linked spec, comments, blockers, and repository instructions. Apply later user corrections and distinguish implemented behavior from the target.
+   - Before designing or changing application logic, read [effect-ts](../effect-ts/SKILL.md) and the relevant guides. Identify which changes are effectful application logic and which are pure functions or framework UI code; apply the corresponding rules in `AGENTS.md`, including for new modules.
    - Read installed `implement` and `tdd` skills when available; otherwise use the implementation and TDD steps below. [Review-pr](../review-pr/SKILL.md) supplies the final independent review and includes a standalone fallback for missing supporting skills.
    - Use the issue and spec's approved test boundaries without requesting approval again. Use one scenario → red → minimal green → refactor, preserving already-passing behavior as regression coverage. These repository decisions take precedence over conflicting supporting-skill rules.
    - Discover applicable implementation skills from the actual files and stack. Report missing implementation prerequisites; ask only for product decisions that block work.
-   - Completion: scope, acceptance criteria, approved test boundaries, and implementation prerequisites are known.
+   - Completion: scope, acceptance criteria, approved test boundaries, Effect responsibilities, and implementation prerequisites are known.
 
 2. Establish branches and PR boundaries.
    - Inspect working-tree changes and existing implementation PRs before creating a separate branch/worktree. Preserve unrelated work and reuse existing issue work.
