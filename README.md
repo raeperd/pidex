@@ -1,38 +1,29 @@
 # pidex
 
-This branch resets pidex to a minimal pnpm workspace. The web package builds a static SvelteKit page. There is no agent integration, server, database, or desktop runtime.
+A macOS Electron app with a Svelte renderer. This first layer of [#129](https://github.com/raeperd/pidex/issues/129) opens the project picker and keeps the chooser available after Cancel. Pi startup and owned backend shutdown follow in dependent PRs.
 
-Use Node.js 24 and pnpm 11.16.0:
+The [v0.0.1 technical spec](docs/v0.0.1-tech-spec.md) defines the remaining milestone.
+
+Use Node.js 24 and pnpm 11.16.0. From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-## Workspace
+`pnpm dev` builds and opens the desktop app. Electron main owns the window and native folder dialog; a sandboxed preload exposes only `chooseProject`. The renderer loads the static Svelte build through the local `pidex://app` protocol.
 
-```text
-packages/
-├── api/src/       # Empty; reserved for shared contracts
-├── desktop/src/   # Empty; reserved for the desktop entry point
-├── server/src/    # Empty; reserved for the server
-└── web/           # Minimal SvelteKit page and build configuration
-```
-
-Add dependencies when their implementation needs them. The empty directories have no package manifests or build steps yet.
-
-The [v0.0.1 technical spec](docs/v0.0.1-tech-spec.md) defines the next milestone, module ownership, and use-case acceptance tests. It is an implementation target; the current repository still contains only the skeleton described above.
-
-## Validation
+## Verification
 
 ```sh
-pnpm lint
-pnpm test
-pnpm build
+pnpm check
+pnpm test --grep '#129'
+# Step through the same visible Electron scenario in Playwright Inspector:
+pnpm build && pnpm exec playwright test --grep '#129' --debug
 ```
 
-CI runs these commands after a frozen-lockfile install. `pnpm build` writes the web app to `packages/web/dist`. Run `pnpm --filter @pidex/web preview` to view that build.
+The acceptance test launches Electron 44.4.3 with Playwright 1.63.0 on macOS, supplies Cancel before the native dialog is invoked, clicks Choose project, and checks that the chooser remains available without a conversation. It uses a temporary home and Chromium profile, preserves the real preload and application handlers, and removes the temporary files after closing Electron. No personal Pi configuration is used.
 
-There are no behavior tests yet. Vitest discovers `packages/**/*.test.ts` and explicitly allows an empty suite during the reset. Remove `passWithNoTests` from `vitest.config.ts` when adding the first behavior test. A passing test command at this stage does not verify application behavior.
+On failure, `test-results/` contains a screenshot, trace, and Electron log with the temporary path redacted. Open a trace with `pnpm exec playwright show-trace <trace.zip>`. Report #129, the pinned versions, steps, and expected versus actual behavior with the artifacts. macOS CI runs formatting, lint, types, build, and acceptance tests and uploads failure artifacts.
 
-`pnpm check` also checks formatting and web types. Use `pnpm format` to format files.
+For a manual native-dialog check, run `pnpm dev`, click Choose project, and press Cancel. The chooser should remain available.

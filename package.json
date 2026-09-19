@@ -3,19 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @pidex/web build",
+    "build": "pnpm --filter @pidex/web build && tsc -p tsconfig.build.json",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
-    "dev": "pnpm --filter @pidex/web dev",
+    "dev": "pnpm build && electron dist/desktop/main.js",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
-    "test": "vitest run",
-    "typecheck": "pnpm --filter @pidex/web typecheck"
+    "test": "pnpm build && playwright test",
+    "typecheck": "tsc --noEmit && pnpm --filter @pidex/web typecheck"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.12.4",
+    "electron": "44.4.3",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
-    "vitest": "4.1.10"
+    "typescript": "npm:@typescript/typescript6@6.0.2"
   },
   "engines": {
     "node": "24.x"
