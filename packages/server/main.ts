@@ -110,7 +110,14 @@ const program = Effect.gen(function* () {
         }
       }),
     ),
-    (unsubscribe) => Effect.sync(unsubscribe),
+    (unsubscribe) =>
+      Effect.tryPromise({
+        try: () => session.abort(),
+        catch: () => new ShutdownError(),
+      }).pipe(
+        Effect.catch(() => Effect.logError("Could not cancel Pi during shutdown")),
+        Effect.ensuring(Effect.sync(unsubscribe)),
+      ),
   );
   const send = Effect.fn(function* ({ text }: { text: string }) {
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });

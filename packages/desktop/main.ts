@@ -111,11 +111,7 @@ const program = Effect.gen(function* () {
   ipcMain.handle("send-prompt", (event, text: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        if (
-          event.sender !== window.webContents ||
-          event.senderFrame !== window.webContents.mainFrame ||
-          event.senderFrame.url !== "pidex://app/"
-        )
+        if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
         const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
@@ -129,11 +125,7 @@ const program = Effect.gen(function* () {
   ipcMain.handle("choose-project", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        if (
-          event.sender !== window.webContents ||
-          event.senderFrame !== window.webContents.mainFrame ||
-          event.senderFrame.url !== "pidex://app/"
-        ) {
+        if (!isTrustedWindow(event)) {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
@@ -265,6 +257,13 @@ const program = Effect.gen(function* () {
     try: () => window.loadURL("pidex://app/"),
     catch: () => new DesktopError({ message: "Could not load the application window" }),
   });
+  function isTrustedWindow(event: Electron.IpcMainInvokeEvent) {
+    return (
+      event.sender === window.webContents &&
+      event.senderFrame === window.webContents.mainFrame &&
+      event.senderFrame.url === "pidex://app/"
+    );
+  }
 });
 
 class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopError", {

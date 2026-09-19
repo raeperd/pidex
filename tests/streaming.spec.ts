@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
-test("#130 streams a reply, rejects empty and busy submissions, and saves history", async ({}, testInfo) => {
+test("#130 streams a reply, rejects empty and busy submissions, saves history, and cancels on Quit", async ({}, testInfo) => {
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-130-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
@@ -157,6 +157,10 @@ test("#130 streams a reply, rejects empty and busy submissions, and saves histor
     expect(history).toContain("Saved hello");
     expect(providerRequests).toBe(1);
     await page.screenshot({ path: testInfo.outputPath("reply.png") });
+    await composer.fill("Remain active until Quit");
+    await send.click();
+    await expect(conversation.getByRole("status")).toHaveText("Running");
+    await expect.poll(() => providerRequests).toBe(2);
     childPid = findServer();
     if (!childPid) throw new Error("Expected an owned server process");
     await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });
