@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pidex Reference Research"
+  short_description: "Research reference apps and Pi SDK examples"
+  default_prompt: "Use $pidex-reference-research to answer the implementation question from the relevant approved repositories or version-matched Pi SDK examples using fresh temporary shallow clones, fetching history only as needed, then return commit-pinned evidence and a concise recommendation for Pidex."
