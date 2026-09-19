@@ -1,6 +1,6 @@
 # Standalone review procedures
 
-Use these procedures for any missing `gh-pr-ready-codex`, `gh-pr-draft`, `gh-pr-ci`, `gh-pr-review-codex`, or `code-review` skill. They supply the same phases named by the parent workflow. Require an authenticated GitHub CLI and subagent support; report actual tooling/access blockers rather than a missing personal skill.
+These bundled procedures supply the phases named by the parent workflow. Require authenticated GitHub CLI access and subagent support; report actual tooling/access blockers.
 
 ## Draft and CI
 
@@ -41,6 +41,25 @@ The review coordinator launches separate Standards and Spec subagents. Give each
 - **Spec:** provide the issue/spec and accepted decisions. Report missing or partial requirements, unintended scope, and incorrect behavior with requirement quotes and file/line evidence. Judge only the selected layer's promised behavior.
 - Keep reports separate under Standards and Spec, with counts for each. Findings need an actionable consequence; do not turn preferences into blockers. The parent agent classifies and fixes findings and requests follow-up review only for changed portions.
 
-## Final readiness
+## Stacked PRs
 
-Return to the parent workflow's readiness gate. It requires both reviews resolved, no escalation, resolved concluded threads, and final-head CI green. Then run `gh pr ready <number>` and verify `headRefOid`, `baseRefOid`, and `isDraft` with `gh pr view`. Report reviewed/final SHAs, decisions, CI iterations, and readiness. Do not merge.
+Read before creating dependent PR layers or modifying an existing stack. Independent work belongs on separate branches or stacks.
+
+1. Prepare the CLI.
+   - Require authenticated `gh`; install the extension with `gh extension install github/gh-stack` if missing. Use `gh stack <command> --help` for installed command flags and report unavailable tooling before dependent operations.
+   - Inspect `git remote -v` and select the intended remote. Pass `--remote <name>` to remote operations; with multiple remotes, configure `remote.pushDefault` for commands without that flag.
+   - Use non-interactive commands: `gh stack view --json`, `gh stack submit --auto`, and explicit branch names for `init`, `add`, and `checkout`.
+   - Completion: authenticated tooling and the intended remote are available.
+
+2. Establish layer ownership.
+   - Inspect existing stacks with `gh stack view --json`. Create or adopt branches in dependency order with `gh stack init <first> [<next>...] --base <trunk>`; use `gh stack add <branch>` for a new layer above the current one.
+   - Create the stack before implementing multiple layers. Each PR targets its immediate parent, and its diff/review scope includes only its own changes.
+   - Before editing, identify the owning layer from stack state and file history, then run `gh stack checkout <branch>`. Preserve unrelated work.
+   - Completion: the current branch owns the intended change and has the correct parent.
+
+3. Propagate and verify changes.
+   - Commit on the owning layer, then run `gh stack rebase --upstack --remote <name>` to update dependents. Use `--no-trunk` when intentionally updating only inter-branch dependencies. Resolve conflicts, stage resolutions, and run `gh stack rebase --continue`; use `--abort` to restore the stack if necessary.
+   - Publish with `gh stack submit --auto --remote <name>`; new PRs are drafts. Apply the repository commit/title convention to generated titles with `gh pr edit`. Use `gh stack sync --remote <name>` to reconcile remote changes; verify the resulting state even when the command exits successfully.
+   - After prerequisite changes, rerun affected layers' checks. Return changed ready PRs to draft and resume their review-pr checks before restoring readiness. Preserve review records so rebases cannot duplicate a Codex trigger within the run.
+   - Verify remote bases and diffs with `gh pr view` and `gh stack view --json`. Merge only on explicit request; `gh stack merge <target> --yes --squash` includes unmerged ancestors, so verify that full scope is authorized.
+   - Completion: remote bases/diffs are correct and affected PRs are verified or explicitly awaiting review/CI.
