@@ -31,7 +31,7 @@ Run directly with `$pidex-review-pr <PR URL>` or as the review phase of `pidex-i
    - Completion: all findings have decisions, no escalation remains, accepted fixes are verified, concluded threads are resolved, and every reported final-head check passes or skips.
 
 4. Mark the verified head ready.
-   - Check the final body against the shared [PR description format](../references/pr-descriptions.md). Update it to match the delivered scope and actual verification before readiness.
+   - Check the final body against the repository [PR template](../../../.github/pull_request_template.md). Update it to match the delivered scope and actual verification before readiness.
    - Re-read the PR head and base. Require them to match the final verified revisions; the head must match the final green CI SHA and independent review plus follow-up coverage. Validate changed revisions before proceeding.
    - Run `gh pr ready <number>`, then verify `isDraft: false` and the expected head/base SHAs with `gh pr view --json headRefOid,baseRefOid,isDraft,url`.
    - If this run later changes an already-verified stack layer, return that PR to draft and repeat affected independent review and CI checks before restoring readiness. Retain its recorded Codex cycle rather than requesting another.
