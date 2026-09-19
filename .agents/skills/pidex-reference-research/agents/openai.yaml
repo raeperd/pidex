@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pidex Reference Research"
+  short_description: "Research t3code and Paseo implementation patterns"
+  default_prompt: "Use $pidex-reference-research to answer the implementation question from t3code or Paseo using temporary shallow clones, then return commit-pinned evidence and a concise recommendation for Pidex."

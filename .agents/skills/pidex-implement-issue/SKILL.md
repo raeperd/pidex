@@ -13,8 +13,9 @@ Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementa
    - Before designing or changing application logic, read [pidex-effect-ts](../pidex-effect-ts/SKILL.md) and the relevant guides. Identify which changes are effectful application logic and which are pure functions or framework UI code; apply the corresponding rules in `AGENTS.md`, including for new modules.
    - Follow the implementation and TDD steps below; [pidex-review-pr](../pidex-review-pr/SKILL.md) supplies the final independent review. All workflow procedures are repository-local.
    - Use the issue and spec's approved test boundaries without requesting approval again. Use one scenario → red → minimal green → refactor, preserving already-passing behavior as regression coverage.
+   - If a concrete implementation uncertainty could benefit from t3code or Paseo, run [pidex-reference-research](../pidex-reference-research/SKILL.md) before choosing the implementation approach or writing feature code. Carry source-backed findings into the plan and acceptance scenarios; skip this step when local code and accepted decisions suffice.
    - Read applicable repository-local implementation skills from `.agents/skills/`, selected by the actual files and stack. Report missing implementation prerequisites; ask only for product decisions that block work.
-   - Completion: scope, acceptance criteria, approved test boundaries, Effect responsibilities, and implementation prerequisites are known.
+   - Completion: scope, acceptance criteria, approved test boundaries, Effect responsibilities, any needed reference findings, and implementation prerequisites are known.
 
 2. Establish branches and PR boundaries.
    - Inspect working-tree changes and existing implementation PRs before creating a separate branch/worktree. Preserve unrelated work and reuse existing issue work.
