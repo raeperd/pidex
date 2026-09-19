@@ -60,7 +60,7 @@ const program = Effect.gen(function* () {
     respond(false),
   );
   window.webContents.session.setPermissionCheckHandler(() => false);
-  const token = yield* Effect.try({
+  const serverSecret = yield* Effect.try({
     try: () => randomBytes(32).toString("hex"),
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
@@ -93,7 +93,11 @@ const program = Effect.gen(function* () {
                 cwd,
                 execArgv: [],
                 stdio: ["ignore", "ignore", "ignore", "ipc"],
-                env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PIDEX_SERVER_TOKEN: token },
+                env: {
+                  ...process.env,
+                  ELECTRON_RUN_AS_NODE: "1",
+                  PIDEX_SERVER_SECRET: serverSecret,
+                },
               }),
             catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
           });
@@ -132,7 +136,7 @@ const program = Effect.gen(function* () {
               url: `http://127.0.0.1:${ready.port}/rpc`,
               transformClient: HttpClient.mapRequest(
                 HttpClientRequest.setHeaders({
-                  authorization: `Bearer ${token}`,
+                  authorization: `Bearer ${serverSecret}`,
                   origin: "pidex://app",
                 }),
               ),

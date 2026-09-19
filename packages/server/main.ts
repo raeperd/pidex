@@ -13,8 +13,10 @@ import { createServer } from "node:http";
 import { ConversationApi } from "../api/index.js";
 
 const program = Effect.gen(function* () {
-  const token = yield* Schema.decodeUnknownEffect(Schema.String)(process.env.PIDEX_SERVER_TOKEN);
-  delete process.env.PIDEX_SERVER_TOKEN;
+  const serverSecret = yield* Schema.decodeUnknownEffect(Schema.String)(
+    process.env.PIDEX_SERVER_SECRET,
+  );
+  delete process.env.PIDEX_SERVER_SECRET;
   const { session } = yield* Effect.acquireRelease(
     Effect.gen(function* () {
       const cwd = process.cwd();
@@ -87,7 +89,7 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       if (
-        request.headers.authorization !== `Bearer ${token}` ||
+        request.headers.authorization !== `Bearer ${serverSecret}` ||
         request.headers.origin !== "pidex://app"
       ) {
         return HttpServerResponse.empty({ status: 403 });
