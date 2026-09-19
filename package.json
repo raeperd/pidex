@@ -3,14 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @pidex/web build && tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @pidex/web build && tsc6 -p tsconfig.build.json",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck",
     "dev": "pnpm build && electron dist/desktop/main.js",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
     "test": "pnpm build && playwright test",
-    "typecheck": "tsc --noEmit && pnpm --filter @pidex/web typecheck"
+    "typecheck": "tsc6 --noEmit && pnpm --filter @pidex/web typecheck"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
