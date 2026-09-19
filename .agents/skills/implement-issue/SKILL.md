@@ -4,7 +4,7 @@ description: Implement a GitHub issue with behavior-focused TDD and small PRs, t
 disable-model-invocation: true
 ---
 
-Run with `$implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, draft PR creation, and review through readiness unless the user narrows the request. Merge only when explicitly requested.
+Run with `$implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, draft PR creation, review through readiness, and a final PR handoff comment unless the user narrows the request. Merge only when explicitly requested.
 
 ## Process
 
@@ -45,9 +45,11 @@ Run with `$implement-issue <issue URL>`. This workflow includes implementation, 
 
 6. Continue and report.
    - Repeat until all acceptance criteria are implemented. Rebase dependent layers after prerequisite changes, following `gh-stack`. Return affected ready PRs to draft and resume their review-pr checks using the existing records before restoring readiness.
-   - Report completed criteria, remaining work, PR links in dependency order, verification and review results, readiness states, and blockers.
    - Keep the issue open until all acceptance criteria pass and its implementation PRs merge. Merging requires an explicit request.
-   - Completion: implementation is delivered in verified ready PRs, or remaining work and draft PRs have explicit blockers.
+   - On the issue's final implementation PR, post or update one concise handoff comment. Re-read relevant issue dependencies, PR merge states, and likely code ownership before recommending follow-up work; reuse the existing agent-authored handoff rather than adding duplicates.
+   - State the issue's remaining merge/closure conditions, the recommended next issue with its prerequisite and reason, and which issues can proceed in parallel now or after a named prerequisite. Link actual issues/PRs; distinguish dependency eligibility from likely shared-file or API conflicts and suggest ownership boundaries. Say when no independent work is available or the next issue is unknown.
+   - If implementation is incomplete, report the remaining work and blockers on the latest relevant PR instead of presenting it as the completed final PR. Read back the saved comment and include its URL in the final report alongside criteria, PR order, verification/review results, and readiness states.
+   - Completion: implementation is delivered in verified ready PRs with a verified handoff comment, or remaining work and draft PRs have explicit blockers and a progress comment.
 
 ## PR size
 
