@@ -19,9 +19,15 @@ const Entry = Schema.Union([
   }),
 ]);
 
+export class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
+  reason: Schema.Literals(["authentication", "model"]),
+  message: Schema.String,
+}) {}
+
 export const Conversation = Schema.Struct({
   id: Schema.String,
   modelName: Schema.String,
+  setupError: Schema.NullOr(SetupError),
   status: Schema.Literals(["idle", "running"]),
   messageCount: Schema.Number,
   entries: Schema.Array(Entry),

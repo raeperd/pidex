@@ -17,6 +17,7 @@ import {
   ConversationUpdate,
   SendError,
   SubscribeError,
+  SetupError,
 } from "../api/index.js";
 
 const program = Effect.gen(function* () {
@@ -84,12 +85,36 @@ const program = Effect.gen(function* () {
         if (errors.length > 0) return yield* new ShutdownError();
       }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
   );
-  if (!session.model || !session.sessionFile || session.isStreaming)
-    return yield* new StartupError();
+  if (!session.sessionFile || session.isStreaming) return yield* new StartupError();
+  const model = session.model;
+  const setupError = yield* Effect.gen(function* () {
+    const provider = session.settingsManager.getDefaultProvider();
+    const modelId = session.settingsManager.getDefaultModel();
+    if (provider && modelId && !session.modelRuntime.getModel(provider, modelId)) {
+      return yield* new SetupError({
+        reason: "model",
+        message:
+          "Pi's default model could not be resolved. Open Pi in this project, use /model to select an available model and save it as the default, then restart Pidex. Check settings.json and models.json if you use a custom model.",
+      });
+    }
+    const authenticationError = new SetupError({
+      reason: "authentication",
+      message:
+        "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
+    });
+    if (!model) return yield* authenticationError;
+    const auth = yield* Effect.tryPromise({
+      try: () => session.modelRuntime.getAuth(model),
+      catch: () => authenticationError,
+    });
+    if (!auth || (!auth.auth.apiKey && !auth.auth.headers)) return yield* authenticationError;
+    return null;
+  }).pipe(Effect.catch((error) => Effect.succeed(error)));
   const scope = yield* Effect.scope;
   let state: typeof Conversation.Type = {
     id: session.sessionId,
-    modelName: session.model.name,
+    modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
+    setupError,
     status: "idle",
     messageCount: 0,
     entries: [],
@@ -165,6 +190,7 @@ const program = Effect.gen(function* () {
       ),
   );
   const send = Effect.fn(function* ({ text }: { text: string }) {
+    if (state.setupError) return yield* new SendError({ message: state.setupError.message });
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
     const accepted = yield* Effect.sync(() => {
       if (state.status !== "idle") return false;
@@ -185,6 +211,19 @@ const program = Effect.gen(function* () {
           message: "Pi could not complete the prompt. Check your model and credentials.",
         }),
     }).pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          const lastReply = session.messages.findLast((message) => message.role === "assistant");
+          return lastReply?.role === "assistant" && lastReply.stopReason === "error"
+            ? Effect.fail(
+                new SendError({
+                  message:
+                    "The model provider could not complete the reply. Check provider availability, quota, and Pi authentication, then try again.",
+                }),
+              )
+            : Effect.void;
+        }),
+      ),
       Effect.catch((error) =>
         Effect.sync(() =>
           publish({
