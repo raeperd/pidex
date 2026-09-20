@@ -6,11 +6,17 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
-import { ConversationApi } from "../api/index.js";
+import {
+  applyConversationUpdate,
+  Conversation,
+  ConversationApi,
+  ConversationUpdate,
+  SendError,
+} from "../api/index.js";
 
 const program = Effect.gen(function* () {
   const serverSecret = yield* Schema.decodeUnknownEffect(Schema.String)(
@@ -79,19 +85,114 @@ const program = Effect.gen(function* () {
   );
   if (!session.model || !session.sessionFile || session.isStreaming)
     return yield* new StartupError();
-  const modelName = session.model.name;
-  const rpc = yield* RpcServer.toHttpEffect(ConversationApi).pipe(
+  const scope = yield* Effect.scope;
+  let state: typeof Conversation.Type = {
+    id: session.sessionId,
+    modelName: session.model.name,
+    status: "idle",
+    messageCount: 0,
+    entries: [],
+    error: "",
+  };
+  const subscribers = new Set<(update: typeof ConversationUpdate.Type) => void>();
+  let messageId = "";
+  yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      session.subscribe((event) => {
+        if (event.type === "message_start" && event.message.role === "assistant") {
+          messageId = crypto.randomUUID();
+        }
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          const delta = event.assistantMessageEvent.delta;
+          Effect.runSync(
+            Effect.sync(() =>
+              publish({
+                _tag: "TextDelta",
+                id: messageId,
+                delta,
+              }),
+            ),
+          );
+        }
+      }),
+    ),
+    (unsubscribe) =>
+      Effect.tryPromise({
+        try: () => session.abort(),
+        catch: () => new ShutdownError(),
+      }).pipe(
+        Effect.catch(() => Effect.logError("Could not cancel Pi during shutdown")),
+        Effect.ensuring(Effect.sync(unsubscribe)),
+      ),
+  );
+  const send = Effect.fn(function* ({ text }: { text: string }) {
+    if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
+    const accepted = yield* Effect.sync(() => {
+      if (state.status !== "idle") return false;
+      publish({
+        _tag: "StateChanged",
+        status: "running",
+        messageCount: state.messageCount,
+        error: "",
+      });
+      publish({ _tag: "EntryUpserted", entry: { id: crypto.randomUUID(), role: "user", text } });
+      return true;
+    });
+    if (!accepted) return yield* new SendError({ message: "Wait for the current reply." });
+    yield* Effect.tryPromise({
+      try: () => session.prompt(text),
+      catch: () =>
+        new SendError({
+          message: "Pi could not complete the prompt. Check your model and credentials.",
+        }),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() =>
+          publish({
+            _tag: "StateChanged",
+            status: state.status,
+            messageCount: state.messageCount,
+            error: error.message,
+          }),
+        ),
+      ),
+      Effect.ensuring(
+        Effect.sync(() =>
+          publish({
+            _tag: "StateChanged",
+            status: "idle",
+            messageCount: session.messages.length,
+            error: state.error,
+          }),
+        ),
+      ),
+      Effect.forkIn(scope),
+    );
+  });
+  const rpc = yield* RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
     Effect.provide(
       Layer.mergeAll(
-        RpcSerialization.layerJson,
+        RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
-          GetConversation: () =>
-            Effect.succeed({
-              id: session.sessionId,
-              modelName,
-              status: "idle",
-              messageCount: session.messages.length,
-            }),
+          Subscribe: () =>
+            Stream.callback<typeof ConversationUpdate.Type>((queue) =>
+              Effect.acquireRelease(
+                Effect.sync(() => {
+                  const enqueue = (update: typeof ConversationUpdate.Type) => {
+                    Queue.offerUnsafe(queue, update);
+                  };
+                  // Capture the snapshot and register synchronously: no missing or repeated deltas.
+                  enqueue({ _tag: "Snapshot", conversation: state });
+                  subscribers.add(enqueue);
+                  return enqueue;
+                }),
+                (enqueue) =>
+                  Effect.sync(() => {
+                    subscribers.delete(enqueue);
+                  }),
+              ),
+            ),
+          Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
       ),
     ),
@@ -106,7 +207,7 @@ const program = Effect.gen(function* () {
       ) {
         return HttpServerResponse.empty({ status: 403 });
       }
-      if (request.method !== "POST" || request.url !== "/rpc/")
+      if (request.method !== "GET" || request.url !== "/rpc/")
         return HttpServerResponse.empty({ status: 404 });
       return yield* rpc;
     }),
@@ -114,6 +215,11 @@ const program = Effect.gen(function* () {
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
   yield* Effect.never;
+
+  function publish(update: typeof ConversationUpdate.Type) {
+    state = applyConversationUpdate(state, update);
+    for (const enqueue of subscribers) enqueue(update);
+  }
 });
 
 class StartupError extends Schema.TaggedError<StartupError>()("StartupError", {}) {}
