@@ -208,7 +208,12 @@ const program = Effect.gen(function* () {
       });
       publish({
         _tag: "EntryUpserted",
-        entry: { id: crypto.randomUUID(), role: "user", text, submissionId },
+        entry: {
+          id: crypto.randomUUID(),
+          role: "user",
+          text,
+          ...(submissionId === undefined ? {} : { submissionId }),
+        },
       });
       return true;
     });

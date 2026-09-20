@@ -5,6 +5,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Schema } from "effect";
+import { ConversationUpdate } from "../packages/api/index.js";
 
 for (const accepted of [true, false]) {
   // oxlint-disable-next-line no-empty-pattern
@@ -253,6 +255,20 @@ for (const accepted of [true, false]) {
         await expect(conversation.getByLabel("user")).toHaveCount(0);
       }
       expect(providerRequests).toBe(accepted ? 2 : 0);
+      if (!accepted) {
+        // Older callers can explicitly send without a correlation ID. Their wire stays decodable.
+        expect(await page.evaluate(() => window.desktop.send("Manual submission"))).toBe(
+          "accepted",
+        );
+        await expect.poll(() => providerRequests).toBe(1);
+        for (const message of await fault.evaluate((gate) => gate.updates())) {
+          for (const line of message.trim().split("\n")) {
+            Schema.decodeUnknownSync(
+              Schema.Struct({ values: Schema.optional(Schema.Array(ConversationUpdate)) }),
+            )(JSON.parse(line));
+          }
+        }
+      }
       expect(findServer()).toBe(childPid);
       expect(electronProcess.exitCode).toBeNull();
       await page.screenshot({ path: testInfo.outputPath("reconnected.png") });
