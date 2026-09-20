@@ -275,7 +275,7 @@ const program = Effect.gen(function* () {
                 while: (error) =>
                   child.exitCode === null &&
                   child.signalCode === null &&
-                  !Schema.is(Schema.Struct({ reason: Schema.Literal("payload-too-large") }))(error),
+                  !(error._tag === "SubscribeError" && error.reason === "payload-too-large"),
               }),
               Effect.catch(() =>
                 Effect.gen(function* () {
