@@ -122,7 +122,11 @@ test("#137 Cancel Quit keeps work alive; Confirm awaits cancellation before both
         /* Already exited. */
       }
     }
-    if (electronProcess.exitCode === null && electronProcess.signalCode === null) await app.close();
+    if (electronProcess.exitCode === null && electronProcess.signalCode === null) {
+      const exited = new Promise<void>((resolve) => electronProcess.once("exit", () => resolve()));
+      electronProcess.kill("SIGKILL");
+      await exited;
+    }
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(5000);

@@ -65,21 +65,7 @@ const program = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
     // Reconcile with the backend before deciding: the watched state may be behind Send.
-    const child = server?.child;
-    const runId =
-      currentRun && child
-        ? yield* Effect.raceFirst(
-            currentRun,
-            Effect.callback<null>((resume) => {
-              const onExit = () => resume(Effect.succeed(null));
-              if (child.exitCode !== null || child.signalCode !== null) onExit();
-              else child.once("exit", onExit);
-              return Effect.sync(() => {
-                child.off("exit", onExit);
-              });
-            }),
-          )
-        : conversation?.runId;
+    const runId = currentRun ? yield* currentRun : conversation?.runId;
     if (runId) {
       const confirmation = yield* Effect.tryPromise({
         try: () =>
@@ -103,6 +89,7 @@ const program = Effect.gen(function* () {
       yield* stopRun(runId);
     }
     yield* Scope.close(connections, Exit.void);
+    const child = server?.child;
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
       yield* Effect.callback<void, DesktopError>((resume) => {
         const onExit = () => resume(Effect.void);
@@ -209,6 +196,10 @@ const program = Effect.gen(function* () {
             catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
           });
           server = { child };
+          child.once("exit", () => {
+            // A pending Quit must also finish if the backend exits during an RPC.
+            if (quitting) app.quit();
+          });
           return yield* Effect.gen(function* () {
             const ready = yield* Effect.callback<
               { port: number; sessionFile: string },
