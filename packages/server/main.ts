@@ -131,9 +131,7 @@ const program = Effect.gen(function* () {
     status: "idle",
     messageCount: session.messages.length,
     entries: [],
-    error: interrupted
-      ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
-      : "",
+    error: recoveryNotice(),
   };
   // Read the active saved branch, including history before compaction.
   for (const item of session.sessionManager.getBranch()) {
@@ -411,6 +409,18 @@ const program = Effect.gen(function* () {
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
   yield* Effect.never;
+
+  function recoveryNotice() {
+    const last = session.messages.at(-1);
+    const unfinished =
+      Boolean(recoveryFile) &&
+      (last?.role === "user" ||
+        last?.role === "toolResult" ||
+        (last?.role === "assistant" && last.stopReason === "toolUse"));
+    return interrupted || unfinished
+      ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
+      : "";
+  }
 
   function publish(update: typeof ConversationUpdate.Type) {
     state = applyConversationUpdate(state, update);

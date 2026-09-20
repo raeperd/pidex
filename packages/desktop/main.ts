@@ -149,6 +149,8 @@ const program = Effect.gen(function* () {
           const cwd = selection.filePaths[0];
           if (selection.canceled || !cwd) return null;
           project = cwd;
+          sessionFile = undefined;
+          interrupted = false;
           return yield* startServer();
         }).pipe(
           Effect.ensuring(

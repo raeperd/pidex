@@ -96,6 +96,7 @@
       const selected = await window.desktop.chooseProject();
       // The subscription may already have delivered newer updates while IPC was pending.
       if (!conversation) conversation = selected;
+      if (selected) crashed = false;
     } catch {
       error = "Could not open the project. Please try again.";
     } finally {

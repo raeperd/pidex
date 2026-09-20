@@ -95,7 +95,7 @@ async function setup(cleanup: AsyncDisposableStack) {
     requests,
     apps,
     logs,
-    async launch() {
+    async launch(selectProject = true) {
       const app = await electron.launch({
         args: ["dist/desktop/main.js", `--user-data-dir=${home}`],
         env: { PATH: process.env.PATH ?? "", HOME: home, TMPDIR: tmpdir() },
@@ -119,8 +119,10 @@ async function setup(cleanup: AsyncDisposableStack) {
       await app.evaluate(({ dialog }, path) => {
         dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
       }, project);
-      await page.getByRole("button", { name: "Choose project" }).click();
-      await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+      if (selectProject) {
+        await page.getByRole("button", { name: "Choose project" }).click();
+        await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+      }
       return { app, page, process: processHandle, children: () => children(processHandle.pid) };
     },
     complete(text: string) {
@@ -163,15 +165,5 @@ function children(parent: number | undefined) {
       .map(Number);
   } catch {
     return [];
-  }
-}
-
-export function alive(pid: number) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
-    throw error;
   }
 }
