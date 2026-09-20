@@ -59,11 +59,11 @@ The isolated Electron test uses a temporary project, Pi configuration, and local
 
 ## Quit during work (#137)
 
-Quit reads the backend's current run before opening a native confirmation with Cancel as the default. Cancel leaves that run alive. Confirm waits for the same run-targeted cancellation used by Stop, then closes the RPC connection, disposes the owned backend, and exits Electron. Repeated Quit requests share the pending shutdown.
+Quit reads the backend's current run before opening a native confirmation with Cancel as the default. Cancel leaves that run alive. Confirm waits for the same run-targeted cancellation used by Stop, then closes the RPC connection, disposes the owned backend, and exits Electron. Repeated Quit requests share the pending shutdown. If RPC is unavailable, confirmed Quit sends SIGTERM to the owned backend and waits for its Pi cancellation finalizer and process exit.
 
 ```sh
 pnpm test --grep '#137'
 pnpm build && pnpm exec playwright test --grep '#137' --debug
 ```
 
-The isolated test supplies native dialog results before Quit, releases `Still working` after Cancel, and holds provider cancellation acknowledgment after Confirm. It checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. It makes no UI assertions after exit. Artifacts are under `test-results/quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.
+The isolated tests cover connected and disconnected RPC, supply native dialog results before Quit, release `Still working` after Cancel, and hold provider cancellation acknowledgment after Confirm. Each checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. Neither makes UI assertions after exit. Artifacts are under `test-results/quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.

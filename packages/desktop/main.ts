@@ -65,7 +65,9 @@ const program = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
     // Reconcile with the backend before deciding: the watched state may be behind Send.
-    const runId = currentRun ? yield* currentRun : conversation?.runId;
+    const runId = currentRun
+      ? yield* currentRun.pipe(Effect.catch(() => Effect.succeed(conversation?.runId)))
+      : conversation?.runId;
     if (runId) {
       const confirmation = yield* Effect.tryPromise({
         try: () =>
@@ -84,9 +86,9 @@ const program = Effect.gen(function* () {
         quitting = false;
         return;
       }
-      if (!stopRun)
-        return yield* new DesktopError({ message: "Reconnect before quitting this run" });
-      yield* stopRun(runId);
+      // If RPC is lost, SIGTERM below still awaits the backend's Pi finalizer.
+      if (stopRun)
+        yield* stopRun(runId).pipe(Effect.catch((error) => Effect.logWarning(error.message)));
     }
     yield* Scope.close(connections, Exit.void);
     const child = server?.child;
