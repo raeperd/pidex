@@ -133,51 +133,57 @@ const program = Effect.gen(function* () {
     entries: [],
     error: recoveryNotice(),
   };
-  // Read the active saved branch, including history before compaction.
-  for (const item of session.sessionManager.getBranch()) {
-    if (item.type !== "message") continue;
-    const message = item.message;
-    if (message.role === "user" || message.role === "assistant") {
-      const text =
-        typeof message.content === "string"
-          ? message.content
-          : message.content
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("");
-      if (text)
-        state = applyConversationUpdate(state, {
-          _tag: "EntryUpserted",
-          entry: { id: item.id, role: message.role, text },
-        });
-      if (message.role === "assistant")
-        for (const part of message.content) {
-          if (part.type !== "toolCall") continue;
+  yield* Effect.sync(() => {
+    // Read the active saved branch, including history before compaction.
+    for (const item of session.sessionManager.getBranch()) {
+      if (item.type !== "message") continue;
+      const message = item.message;
+      if (message.role === "user" || message.role === "assistant") {
+        const text =
+          typeof message.content === "string"
+            ? message.content
+            : message.content
+                .filter((part) => part.type === "text")
+                .map((part) => part.text)
+                .join("");
+        if (text)
+          state = applyConversationUpdate(state, {
+            _tag: "EntryUpserted",
+            entry: { id: item.id, role: message.role, text },
+          });
+        if (message.role === "assistant")
+          for (const part of message.content) {
+            if (part.type !== "toolCall") continue;
+            state = applyConversationUpdate(state, {
+              _tag: "EntryUpserted",
+              entry: {
+                id: part.id,
+                role: "tool",
+                name: part.name,
+                input: JSON.stringify(part.arguments, null, 2),
+                result: "Interrupted before a saved result.",
+                status: "failed",
+              },
+            });
+          }
+      } else if (message.role === "toolResult") {
+        const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
+        if (entry?.role === "tool")
           state = applyConversationUpdate(state, {
             _tag: "EntryUpserted",
             entry: {
-              id: part.id,
-              role: "tool",
-              name: part.name,
-              input: JSON.stringify(part.arguments, null, 2),
-              result: "Interrupted before a saved result.",
-              status: "failed",
+              ...entry,
+              result: JSON.stringify(
+                { content: message.content, details: message.details },
+                null,
+                2,
+              ),
+              status: message.isError ? "failed" : "completed",
             },
           });
-        }
-    } else if (message.role === "toolResult") {
-      const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
-      if (entry?.role === "tool")
-        state = applyConversationUpdate(state, {
-          _tag: "EntryUpserted",
-          entry: {
-            ...entry,
-            result: JSON.stringify({ content: message.content, details: message.details }, null, 2),
-            status: message.isError ? "failed" : "completed",
-          },
-        });
+      }
     }
-  }
+  });
   const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
   let messageId = "";
   yield* Effect.acquireRelease(
