@@ -44,12 +44,17 @@ export const ConversationUpdate = Schema.Union([
   }),
 ]);
 
+export class SubscribeError extends Schema.TaggedError<SubscribeError>()("SubscribeError", {
+  reason: Schema.Literals(["slow-consumer", "payload-too-large"]),
+  message: Schema.String,
+}) {}
+
 export class SendError extends Schema.TaggedError<SendError>()("SendError", {
   message: Schema.String,
 }) {}
 
 export const ConversationApi = RpcGroup.make(
-  Rpc.make("Subscribe", { success: ConversationUpdate, stream: true }),
+  Rpc.make("Subscribe", { success: ConversationUpdate, error: SubscribeError, stream: true }),
   Rpc.make("Send", { payload: { text: Schema.String }, error: SendError }),
 );
 
