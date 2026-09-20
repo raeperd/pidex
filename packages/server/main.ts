@@ -98,23 +98,61 @@ const program = Effect.gen(function* () {
   let messageId = "";
   yield* Effect.acquireRelease(
     Effect.sync(() =>
-      session.subscribe((event) => {
-        if (event.type === "message_start" && event.message.role === "assistant") {
-          messageId = crypto.randomUUID();
-        }
-        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-          const delta = event.assistantMessageEvent.delta;
-          Effect.runSync(
-            Effect.sync(() =>
-              publish({
-                _tag: "TextDelta",
-                id: messageId,
-                delta,
-              }),
-            ),
-          );
-        }
-      }),
+      session.subscribe((event) =>
+        Effect.runSync(
+          Effect.sync(() => {
+            switch (event.type) {
+              case "message_start":
+                if (event.message.role === "assistant") messageId = crypto.randomUUID();
+                return;
+              case "message_update":
+                if (event.assistantMessageEvent.type !== "text_delta") return;
+                publish({
+                  _tag: "TextDelta",
+                  id: messageId,
+                  delta: event.assistantMessageEvent.delta,
+                });
+                return;
+              case "tool_execution_start":
+                publish({
+                  _tag: "EntryUpserted",
+                  entry: {
+                    id: event.toolCallId,
+                    role: "tool",
+                    name: event.toolName,
+                    input: JSON.stringify(event.args, null, 2),
+                    result: "",
+                    status: "running",
+                  },
+                });
+                return;
+              case "tool_execution_update":
+              case "tool_execution_end": {
+                const entry = state.entries.find((item) => item.id === event.toolCallId);
+                if (entry?.role !== "tool") return;
+                publish({
+                  _tag: "EntryUpserted",
+                  entry: {
+                    ...entry,
+                    result: JSON.stringify(
+                      event.type === "tool_execution_end" ? event.result : event.partialResult,
+                      null,
+                      2,
+                    ),
+                    status:
+                      event.type === "tool_execution_update"
+                        ? "running"
+                        : event.isError
+                          ? "failed"
+                          : "completed",
+                  },
+                });
+                return;
+              }
+            }
+          }),
+        ),
+      ),
     ),
     (unsubscribe) =>
       Effect.tryPromise({

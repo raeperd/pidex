@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
-  let conversation = $state<typeof Conversation.Type | null>(null);
+  import AssistantMessage from "./AssistantMessage.svelte";
+  let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let sending = $state(false);
   let connected = $state(true);
@@ -60,7 +61,26 @@
       </p>
       {#if conversation.entries.length === 0}<p>No messages yet.</p>{/if}
       {#each conversation.entries as entry (entry.id)}
-        <p aria-label={entry.role}>{entry.text}</p>
+        {#if entry.role === "tool"}
+          <details>
+            <summary
+              >{entry.name} · {entry.status === "running"
+                ? "Running"
+                : entry.status === "failed"
+                  ? "Failed"
+                  : "Completed"}</summary
+            >
+            <pre aria-label="Input">{entry.input}</pre>
+            <pre aria-label="Result">{entry.result}</pre>
+          </details>
+        {:else if entry.role === "assistant"}
+          <AssistantMessage
+            text={entry.text}
+            streaming={conversation.status === "running" && entry === conversation.entries.at(-1)}
+          />
+        {:else}
+          <p aria-label="user">{entry.text}</p>
+        {/if}
       {/each}
       {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
       <form
