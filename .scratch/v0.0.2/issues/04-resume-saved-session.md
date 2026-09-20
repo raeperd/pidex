@@ -2,7 +2,7 @@
 
 ## Description
 
-Explicitly select saved history after Quit and continue the exact Pi JSONL session. Assume the completed [v0.0.1 baseline](../../../docs/v0.0.1-tech-spec.md) as a prerequisite. Follow the [v0.0.2 spec](../../../docs/v0.0.2-tech-spec.md).
+Explicitly select a saved Pidex session after Quit and continue its backing Pi session in the same JSONL file. Recreating the live `AgentSession` preserves the Pidex session identity. Assume the completed [v0.0.1 baseline](../../../docs/v0.0.1-tech-spec.md) as a prerequisite. Follow the [v0.0.2 spec](../../../docs/v0.0.2-tech-spec.md).
 
 - Server validates project/session identities, preflights the file, replaces the active Pi session, and rebinds events. Reject busy, stopping, or stale requests; publish the selected snapshot before enabling Send and ignore old-session events. Desktop updates its recovery locator only after success.
 - Use supported installed Pi SDK APIs, Effect application logic, and typed API failures. Retain authenticated transport, stock Pi, context files, resource restrictions, and selected-session lifecycle behavior. Pi owns history.

@@ -4,7 +4,7 @@
 
 Restore composer drafts for saved sessions and session drafts. Supplemental context: [v0.0.2 spec](../../../docs/v0.0.2-tech-spec.md).
 
-- Web owns editable text; Desktop extends its versioned userData metadata file with atomic writes. Use authenticated APIs and typed Effect failures. Key composer drafts by canonical project/session; map local session draft identities to saved Pi sessions without loss. Pi owns history; no transcript copies, database, or credentials.
+- Web owns editable text; Desktop extends its versioned userData metadata file with atomic writes. Use authenticated APIs and typed Effect failures. Key composer drafts by canonical project and stable Pi session identity so they survive replacement of the live `AgentSession`; map local session draft identities to saved Pi sessions without loss. Pi owns history; no transcript copies, database, or credentials.
 - Flush before switching or Quit. Failed writes keep text editable; leaving requires explicit discard. Preserve unreadable metadata and show an error. Abrupt termination guarantees only flushed text.
 - Clear only accepted text; retain later edits and rejected or uncertain submissions until reconciled. Acceptance differs from run completion; restoration never sends.
 
