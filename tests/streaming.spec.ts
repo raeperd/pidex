@@ -26,6 +26,7 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
   );
   let providerRequests = 0;
   let finish: (() => void) | undefined;
+  let advanceMarkdown: (() => void) | undefined;
   const provider = createServer((request, response) => {
     providerRequests++;
     request.resume();
@@ -55,13 +56,19 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
         response.end("data: [DONE]\n\n");
       };
     } else {
-      chunk({
-        role: "assistant",
-        content:
-          'Saved **hello**<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">',
-      });
-      chunk({}, "stop");
-      response.end("data: [DONE]\n\n");
+      chunk({ role: "assistant", content: "Saved **hel" });
+      const parts = [
+        "lo**\n\n```ts\nconst answer = ",
+        "42;\n```\n\n[reference](https://example.",
+        'com)<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">',
+      ];
+      advanceMarkdown = () => {
+        chunk({ content: parts.shift() });
+        if (parts.length === 0) {
+          chunk({}, "stop");
+          response.end("data: [DONE]\n\n");
+        }
+      };
     }
   });
   cleanup.defer(
@@ -221,6 +228,19 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     expect(providerRequests).toBe(1);
     expect(finish).toBeDefined();
     finish?.();
+    await expect(conversation.getByText("Saved **hel", { exact: true })).toBeVisible();
+    await expect(conversation.getByRole("status")).toHaveText("Running");
+    advanceMarkdown?.();
+    await expect(conversation.locator("strong")).toHaveText("hello");
+    await expect(conversation.locator("pre code")).toContainText("const answer =");
+    advanceMarkdown?.();
+    await expect(conversation.locator("pre code")).toHaveText("const answer = 42;\n");
+    await expect(conversation.getByRole("link", { name: "reference" })).toHaveCount(0);
+    advanceMarkdown?.();
+    await expect(conversation.getByRole("link", { name: "reference" })).toHaveAttribute(
+      "href",
+      "https://example.com",
+    );
     await expect(conversation.getByText("Saved hello", { exact: true })).toBeVisible();
     await expect(conversation.locator("strong")).toHaveText("hello");
     await expect(conversation.locator("script, img")).toHaveCount(0);
@@ -236,7 +256,7 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     await expect(conversation.locator('[aria-label="assistant"], details')).toHaveText([
       "Writing hello",
       /write · Completed/,
-      "Saved hello",
+      /Saved hello\s+const answer = 42;\s*reference/,
     ]);
     expect(await readFile(join(project, "note.txt"), "utf8")).toBe("hello");
     await expect(conversation.getByRole("status")).toHaveText("Idle");
