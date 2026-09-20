@@ -85,11 +85,17 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
     env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
   });
   cleanup.defer(() => app.close());
-  const logs: string[] = [];
-  app.process().stdout?.on("data", (data) => logs.push(String(data)));
-  app.process().stderr?.on("data", (data) => logs.push(String(data)));
+  const logs = { stdout: "", stderr: "", renderer: "" };
+  app.process().stdout?.on("data", (data) => {
+    logs.stdout += String(data);
+  });
+  app.process().stderr?.on("data", (data) => {
+    logs.stderr += String(data);
+  });
   const page = await app.firstWindow();
-  page.on("console", (message) => logs.push(message.text()));
+  page.on("console", (message) => {
+    logs.renderer += `${message.text()}\n`;
+  });
   // Observe the real main-process handshake, without replacing transport or handlers.
   // Keep credential extraction outside renderer tracing and never assert its raw value.
   const observation = await app.evaluateHandle(({ BrowserWindow }) => {
@@ -205,7 +211,7 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
     const payloads = await observation.evaluate((value) => value.payloads());
     for (const text of [
       ...payloads,
-      ...logs,
+      ...Object.values(logs),
       ...providerInputs,
       JSON.stringify(control.messages),
     ]) {
@@ -224,8 +230,8 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
     await page.screenshot({ path: testInfo.outputPath("failure.png") }).catch(() => {});
     await writeFile(
       testInfo.outputPath("electron.log"),
-      logs
-        .join("")
+      Object.values(logs)
+        .join("\n")
         .replaceAll(secret, "[credential]")
         .replaceAll("pidex-test-key", "[credential]")
         .replaceAll(temporary, "[temporary]"),
