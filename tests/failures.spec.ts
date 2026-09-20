@@ -168,14 +168,13 @@ async function launch(
     cleanup.defer(async () => {
       await page.screenshot({ path: testInfo.outputPath("result.png") }).catch(() => {});
       await app.context().tracing.stop({ path: testInfo.outputPath("trace.zip") });
-      if (testInfo.status !== testInfo.expectedStatus)
-        await writeFile(
-          testInfo.outputPath("electron.log"),
-          logs
-            .join("")
-            .replaceAll(temporary, "[temporary]")
-            .replaceAll("pidex-test-key", "[credential]"),
-        );
+      await writeFile(
+        testInfo.outputPath("electron.log"),
+        logs
+          .join("")
+          .replaceAll(temporary, "[temporary]")
+          .replaceAll("pidex-test-key", "[credential]"),
+      );
     });
     const updates = await page.evaluateHandle(() => {
       const messages: string[] = [];
