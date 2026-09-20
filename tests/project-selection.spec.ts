@@ -11,7 +11,7 @@ test("#129 #183 Cancel then choose a project with a dark idle conversation, then
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-129-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
-  const project = join(temporary, "project");
+  const project = join(temporary, "project".repeat(14));
   const agentDir = join(temporary, ".pi", "agent");
   await mkdir(project, { recursive: true });
   await mkdir(agentDir, { recursive: true });

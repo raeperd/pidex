@@ -278,6 +278,7 @@
   }
   .project strong {
     font-weight: 500;
+    overflow-wrap: anywhere;
   }
   .project span {
     color: var(--muted);
