@@ -253,6 +253,7 @@ const program = Effect.gen(function* () {
     let active:
       | {
           id: string;
+          failed: boolean;
           started: Deferred.Deferred<void>;
           finished: Deferred.Deferred<void>;
           stopped: Deferred.Deferred<void, StopError>;
@@ -277,6 +278,15 @@ const program = Effect.gen(function* () {
           Effect.runSync(
             Effect.sync(() => {
               switch (event.type) {
+                case "message_end":
+                  // Pi can remove failed replies while compacting or retrying.
+                  // Only a later completed assistant attempt replaces this outcome.
+                  if (active && event.message.role === "assistant")
+                    active.failed = event.message.stopReason === "error";
+                  return;
+                case "compaction_end":
+                  if (active && !event.aborted && event.errorMessage) active.failed = true;
+                  return;
                 case "message_start":
                   if (event.message.role === "assistant") messageId = crypto.randomUUID();
                   return;
@@ -351,6 +361,7 @@ const program = Effect.gen(function* () {
         return yield* new SendError({ message: "Wait for the current reply." });
       const run = {
         id: crypto.randomUUID(),
+        failed: false,
         started: yield* Deferred.make<void>(),
         finished: yield* Deferred.make<void>(),
         stopped: yield* Deferred.make<void, StopError>(),
@@ -381,12 +392,11 @@ const program = Effect.gen(function* () {
       }).pipe(
         Effect.andThen(
           Effect.suspend(() => {
-            const lastReply = session.messages.findLast((message) => message.role === "assistant");
-            return lastReply?.role === "assistant" && lastReply.stopReason === "error"
+            return run.failed && state.status !== "stopping"
               ? Effect.fail(
                   new SendError({
                     message:
-                      "The model provider could not complete the reply. Check provider availability, quota, and Pi authentication, then try again.",
+                      "The model provider could not complete the reply. Check provider availability, quota, and Pi authentication, then try again. For context-limit failures, shorten the prompt or select a larger-context model in Pi before restarting Pidex.",
                   }),
                 )
               : Effect.void;

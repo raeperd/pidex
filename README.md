@@ -42,7 +42,9 @@ For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#
 
 ### Setup and provider failures (#138)
 
-`pnpm test --grep '#138'` runs three Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, and a held provider response that returns HTTP 503 until Pi exhausts its stock retries. Setup failures show correction steps and disable Send while drafts remain editable. Provider failure returns to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
+`pnpm test --grep '#138'` runs Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, exhausted provider retries, context overflow, and recovery through retry or compaction. Setup failures show correction steps and disable Send while drafts remain editable. Exhausted HTTP 503 retries return to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
+
+The server retains each run's SDK failure even when Pi removes the failed reply from its context. A successful assistant retry clears that failure; successful compaction alone does not. Regression scenarios cover overflow with nothing to compact, failed compaction, successful compact-and-retry, repeated overflow, and Stop during compaction. Terminal failures show guidance at Idle; recovery and cancellation leave no stale error.
 
 `pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
 
