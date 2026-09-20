@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
-import { mkdir } from "node:fs/promises";
+import { chmod, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "../support/lifecycle.js";
 
@@ -119,6 +119,94 @@ test("#135 discards an unestablished locator before choosing another project", a
   const files = await lifecycle.history();
   expect(files).toHaveLength(1);
   expect(files[0]?.path).toContain("second-project");
+});
+
+for (const firstTurn of [false, true]) {
+  test(`#136 explains missing history after ${firstTurn ? "an unsaved first turn" : "removing the saved file"}`, async ({
+    lifecycle,
+  }) => {
+    const { page, children } = await lifecycle.launch();
+    const identity = await page.evaluate(() =>
+      window.desktop.chooseProject().then((value) => value?.id),
+    );
+    await page.getByRole("textbox", { name: "Prompt" }).fill("Remember pear");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect.poll(() => lifecycle.requests.length).toBe(1);
+    if (!firstTurn) {
+      lifecycle.complete("Saved pear");
+      await expect(page.getByRole("status")).toHaveText("Idle");
+    }
+    const [child] = children();
+    if (!child) throw new Error("Missing child");
+    process.kill(child, "SIGKILL");
+    await expect.poll(() => alive(child)).toBe(false);
+    const files = await lifecycle.history();
+    expect(files).toHaveLength(firstTurn ? 0 : 1);
+    const other = files[0]
+      ? { path: `${files[0].path}.other.jsonl`, bytes: files[0].bytes }
+      : undefined;
+    if (other) await writeFile(other.path, other.bytes);
+    for (const file of files) await rm(file.path);
+    await page.getByRole("button", { name: "Restart", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Idle");
+    await expect(page.getByRole("alert")).toContainText("Saved history is missing");
+    await expect(page.getByText("No messages yet.")).toBeVisible();
+    expect(
+      await page.evaluate(() => window.desktop.chooseProject().then((value) => value?.id)),
+    ).not.toBe(identity);
+    expect(lifecycle.requests).toHaveLength(1);
+    expect(await lifecycle.history()).toEqual(other ? [other] : []);
+    expect(children()).toHaveLength(1);
+    await page.getByRole("textbox", { name: "Prompt" }).fill("Next");
+    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  });
+}
+
+test("#136 preserves unreadable history and reports the replacement child's permission error", async ({
+  lifecycle,
+}) => {
+  const { app, page: initialPage, children } = await lifecycle.launch();
+  let page = initialPage;
+  await page.getByRole("textbox", { name: "Prompt" }).fill("Remember pear");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved pear");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing history");
+  const [child] = children();
+  if (!child) throw new Error("Missing child");
+  process.kill(child, "SIGKILL");
+  await expect.poll(() => alive(child)).toBe(false);
+  await chmod(saved.path, 0);
+  try {
+    await page.getByRole("button", { name: "Restart", exact: true }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Cannot read saved history" }),
+    ).toContainText("EACCES");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Cannot read saved history" }),
+    ).toContainText("permissions");
+    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+    expect(lifecycle.requests).toHaveLength(1);
+    await expect.poll(children).toEqual([]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+    await expect.poll(() => app.windows().length).toBe(0);
+    await app.evaluate(({ app: application }) => application.emit("activate"));
+    page = await app.firstWindow();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Cannot read saved history" }),
+    ).toContainText("EACCES");
+  } finally {
+    await chmod(saved.path, 0o600);
+    expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
+    expect(await lifecycle.history()).toEqual([saved]);
+  }
+  await page.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("Saved pear");
+  expect(await lifecycle.history()).toEqual([saved]);
+  expect(lifecycle.requests).toHaveLength(1);
 });
 
 test("#135 clears the crash notice when Restart completes in a recreated window", async ({
