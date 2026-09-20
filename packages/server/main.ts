@@ -6,7 +6,7 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
@@ -18,6 +18,7 @@ import {
   SendError,
   SubscribeError,
   SetupError,
+  StopError,
 } from "../api/index.js";
 
 const program = Effect.gen(function* () {
@@ -116,15 +117,36 @@ const program = Effect.gen(function* () {
     modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
     setupError,
     status: "idle",
+    runId: null,
     messageCount: 0,
     entries: [],
     error: "",
   };
   const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
+  let active:
+    | {
+        id: string;
+        started: Deferred.Deferred<void>;
+        finished: Deferred.Deferred<void>;
+        stopped: Deferred.Deferred<void, StopError>;
+      }
+    | undefined;
   let messageId = "";
   yield* Effect.acquireRelease(
     Effect.sync(() =>
-      session.subscribe((event) =>
+      session.subscribe((event) => {
+        if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
+          // Pi can start the pending turn after aborting preflight compaction.
+          const run = active;
+          if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
+          if (event.type === "compaction_start") {
+            // Pi installs the compaction controller after notifying subscribers.
+            queueMicrotask(() => {
+              if (active === run && state.status === "stopping") session.abortCompaction();
+            });
+          }
+          Effect.runSync(Deferred.succeed(run.started, undefined));
+        }
         Effect.runSync(
           Effect.sync(() => {
             switch (event.type) {
@@ -177,8 +199,8 @@ const program = Effect.gen(function* () {
               }
             }
           }),
-        ),
-      ),
+        );
+      }),
     ),
     (unsubscribe) =>
       Effect.tryPromise({
@@ -198,26 +220,31 @@ const program = Effect.gen(function* () {
   }) {
     if (state.setupError) return yield* new SendError({ message: state.setupError.message });
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
-    const accepted = yield* Effect.sync(() => {
-      if (state.status !== "idle") return false;
-      publish({
-        _tag: "StateChanged",
-        status: "running",
-        messageCount: state.messageCount,
-        error: "",
-      });
-      publish({
-        _tag: "EntryUpserted",
-        entry: {
-          id: crypto.randomUUID(),
-          role: "user",
-          text,
-          ...(submissionId === undefined ? {} : { submissionId }),
-        },
-      });
-      return true;
+    if (state.status !== "idle")
+      return yield* new SendError({ message: "Wait for the current reply." });
+    const run = {
+      id: crypto.randomUUID(),
+      started: yield* Deferred.make<void>(),
+      finished: yield* Deferred.make<void>(),
+      stopped: yield* Deferred.make<void, StopError>(),
+    };
+    active = run;
+    publish({
+      _tag: "StateChanged",
+      status: "running",
+      runId: run.id,
+      messageCount: state.messageCount,
+      error: "",
     });
-    if (!accepted) return yield* new SendError({ message: "Wait for the current reply." });
+    publish({
+      _tag: "EntryUpserted",
+      entry: {
+        id: crypto.randomUUID(),
+        role: "user",
+        text,
+        ...(submissionId === undefined ? {} : { submissionId }),
+      },
+    });
     yield* Effect.tryPromise({
       try: () => session.prompt(text),
       catch: () =>
@@ -243,22 +270,58 @@ const program = Effect.gen(function* () {
           publish({
             _tag: "StateChanged",
             status: state.status,
+            runId: state.runId,
             messageCount: state.messageCount,
             error: error.message,
           }),
         ),
       ),
       Effect.ensuring(
-        Effect.sync(() =>
-          publish({
-            _tag: "StateChanged",
-            status: "idle",
-            messageCount: session.messages.length,
-            error: state.error,
-          }),
-        ),
+        Effect.gen(function* () {
+          // A preflight failure may finish without emitting agent_start.
+          yield* Deferred.succeed(run.started, undefined);
+          yield* Deferred.succeed(run.finished, undefined);
+          if (state.status !== "stopping") finishRun();
+        }),
       ),
       Effect.forkIn(scope),
+    );
+  });
+  const stop = Effect.fn(function* ({ runId }: { runId: string }) {
+    const run = active;
+    if (!run || run.id !== runId) return;
+    if (state.status === "stopping") return yield* Deferred.await(run.stopped);
+    run.stopped = yield* Deferred.make<void, StopError>();
+    publish({
+      _tag: "StateChanged",
+      status: "stopping",
+      runId,
+      messageCount: state.messageCount,
+      error: "",
+    });
+    return yield* Effect.gen(function* () {
+      // abort() before Pi starts is a no-op. Wait for start or preflight failure.
+      yield* Deferred.await(run.started);
+      yield* Effect.tryPromise({
+        try: () => session.abort(),
+        catch: () => new StopError({ message: "Pi could not stop. Try Stop again." }),
+      });
+      yield* Deferred.await(run.finished);
+      finishRun();
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.sync(() => {
+          publish({
+            _tag: "StateChanged",
+            status: "running",
+            runId,
+            messageCount: state.messageCount,
+            error: error.message,
+          });
+        }),
+      ),
+      (effect) => Deferred.complete(run.stopped, effect),
+      Effect.andThen(Deferred.await(run.stopped)),
     );
   });
   const rpc = yield* RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
@@ -328,6 +391,7 @@ const program = Effect.gen(function* () {
                 );
               }),
             ),
+          Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
           Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
       ),
@@ -351,6 +415,17 @@ const program = Effect.gen(function* () {
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
   yield* Effect.never;
+
+  function finishRun() {
+    active = undefined;
+    publish({
+      _tag: "StateChanged",
+      status: "idle",
+      runId: null,
+      messageCount: session.messages.length,
+      error: state.error,
+    });
+  }
 
   function publish(update: typeof ConversationUpdate.Type) {
     state = applyConversationUpdate(state, update);

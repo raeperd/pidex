@@ -45,3 +45,14 @@ For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#
 `pnpm test --grep '#138'` runs three Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, and a held provider response that returns HTTP 503 until Pi exhausts its stock retries. Setup failures show correction steps and disable Send while drafts remain editable. Provider failure returns to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
 
 `pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
+
+## Stop and continue (#132)
+
+Stop targets the observed `runId` through authenticated RPC. Snapshots and state updates carry a nullable `runId` and `idle`, `running`, or `stopping` status. Stop stays pending until Pi acknowledges cancellation and the prompt finishes. Duplicate Stops wait for that cancellation; stale IDs do nothing. The same Pi session accepts the next prompt. Available output, saved history, and tool edits remain; interrupted tokens may not have been saved.
+
+```sh
+pnpm test --grep '#132'
+pnpm build && pnpm exec playwright test --grep '#132' --debug
+```
+
+The isolated Electron test uses a temporary project, Pi configuration, and local OpenAI response server. A test-only Node import holds the provider response's cancellation error until the fixture releases it. It leaves Pi, stock tools, application handlers, preload, and authenticated RPC unchanged. The test checks Stopping, editable drafts, disabled Send, preserved history and `note.txt`, then continuation in the same session. A second isolated variant stops stock preflight compaction and verifies its pending turn cannot escape cancellation. Repeated authenticated Stop calls wait for acknowledgment; calls targeting the old run cannot stop the later run. `test-results/stop-run-*/` contains `stopping.png` and `trace.zip`; failures also retain a screenshot and redacted Electron log.

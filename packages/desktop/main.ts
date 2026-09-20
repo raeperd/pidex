@@ -107,6 +107,21 @@ const program = Effect.gen(function* () {
         submissionId?: string,
       ) => Effect.Effect<"accepted" | "uncertain", DesktopError>)
     | undefined;
+  let stopRun: ((runId: string) => Effect.Effect<void, DesktopError>) | undefined;
+  ipcMain.handle("stop-run", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const runId = yield* Schema.decodeUnknownEffect(Schema.String)(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid run identity" })),
+        );
+        if (!stopRun || quitting)
+          return yield* new DesktopError({ message: "No connected conversation" });
+        yield* stopRun(runId);
+      }),
+    ),
+  );
   ipcMain.handle("send-prompt", (event, text: unknown, submissionId: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -229,6 +244,18 @@ const program = Effect.gen(function* () {
                     if (update._tag === "Snapshot") {
                       conversation = update.conversation;
                       connectionError = "";
+                      stopRun = (runId) =>
+                        client.Stop({ runId }).pipe(
+                          Effect.mapError(
+                            (error) =>
+                              new DesktopError({
+                                message:
+                                  error._tag === "StopError"
+                                    ? error.message
+                                    : "Could not stop the run",
+                              }),
+                          ),
+                        );
                       sendPrompt = (text, submissionId) =>
                         client.Send({ text, submissionId }).pipe(
                           Effect.map((): "accepted" => "accepted"),
@@ -252,6 +279,7 @@ const program = Effect.gen(function* () {
               Effect.ensuring(
                 Effect.sync(() => {
                   sendPrompt = undefined;
+                  stopRun = undefined;
                   if (window && !window.isDestroyed())
                     window.webContents.send("conversation", null);
                 }),
