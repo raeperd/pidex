@@ -1,3 +1,4 @@
+- Before naming domain concepts in code, APIs, UI, or documentation, read and follow the [Pidex glossary](docs/glossary.md).
 - Organize code top-down: put high-level entry points first and implementation details below them.
 - Prefer simple, direct solutions over unnecessary abstractions and dependencies.
 - Export only what another module requires; keep test-only helpers private.
