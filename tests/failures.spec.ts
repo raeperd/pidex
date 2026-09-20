@@ -4,7 +4,12 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-for (const setup of ["missing credentials", "unresolved default model"] as const) {
+for (const setup of [
+  "missing credentials",
+  "missing Bedrock credentials",
+  "missing Vertex credentials",
+  "unresolved default model",
+] as const) {
   // Playwright requires destructuring even when only testInfo is needed.
   // oxlint-disable-next-line no-empty-pattern
   test(`#138 explains ${setup} and disables Send without losing drafts`, async ({}, testInfo) => {
@@ -13,10 +18,10 @@ for (const setup of ["missing credentials", "unresolved default model"] as const
     await page.getByRole("button", { name: "Choose project" }).click();
     const alert = page.getByRole("alert");
     await expect(alert).toContainText(
-      setup === "missing credentials" ? "authentication" : "model",
+      setup === "unresolved default model" ? "model" : "authentication",
       { timeout: 15_000 },
     );
-    await expect(alert).toContainText(setup === "missing credentials" ? "/login" : "/model");
+    await expect(alert).toContainText(setup === "unresolved default model" ? "/model" : "/login");
     await expect(alert).toContainText("restart Pidex");
     const composer = page.getByRole("textbox", { name: "Prompt" });
     await expect(composer).toBeEditable();
@@ -179,7 +184,12 @@ test("#138 clears transient provider failures when a retry succeeds", async ({},
 
 async function launch(
   testInfo: TestInfo,
-  setup: "missing credentials" | "unresolved default model" | "ready",
+  setup:
+    | "missing credentials"
+    | "missing Bedrock credentials"
+    | "missing Vertex credentials"
+    | "unresolved default model"
+    | "ready",
   options: {
     failure?: "unavailable" | "context overflow";
     manual?: boolean;
@@ -194,7 +204,7 @@ async function launch(
     const agentDir = join(temporary, ".pi", "agent");
     await mkdir(project, { recursive: true });
     await mkdir(agentDir, { recursive: true });
-    if (setup !== "missing credentials")
+    if (!setup.startsWith("missing"))
       await writeFile(
         join(agentDir, "auth.json"),
         JSON.stringify({ openai: { type: "api_key", key: "pidex-test-key" } }),
@@ -202,8 +212,20 @@ async function launch(
     await writeFile(
       join(agentDir, "settings.json"),
       JSON.stringify({
-        defaultProvider: "openai",
-        defaultModel: setup === "unresolved default model" ? "missing-model" : "gpt-5.6-luna",
+        defaultProvider:
+          setup === "missing Bedrock credentials"
+            ? "amazon-bedrock"
+            : setup === "missing Vertex credentials"
+              ? "google-vertex"
+              : "openai",
+        defaultModel:
+          setup === "missing Bedrock credentials"
+            ? "amazon.nova-lite-v1:0"
+            : setup === "missing Vertex credentials"
+              ? "gemini-2.5-flash"
+              : setup === "unresolved default model"
+                ? "missing-model"
+                : "gpt-5.6-luna",
         ...(options.keepRecentTokens === undefined
           ? {}
           : { compaction: { keepRecentTokens: options.keepRecentTokens } }),

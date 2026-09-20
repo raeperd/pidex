@@ -176,7 +176,8 @@ const program = Effect.gen(function* () {
         try: () => session.modelRuntime.getAuth(model),
         catch: () => authenticationError,
       });
-      if (!auth || (!auth.auth.apiKey && !auth.auth.headers)) return yield* authenticationError;
+      // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
+      if (!auth) return yield* authenticationError;
       return null;
     }).pipe(Effect.catch((error) => Effect.succeed(error)));
     const scope = yield* Effect.scope;
