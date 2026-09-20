@@ -151,10 +151,21 @@ for (const connection of ["connected", "disconnected", "unobserved"]) {
           const originalEmit = prototype.emit;
           let disconnect: (() => void) | undefined;
           let dropNextRun = false;
+          let reconnectBlocked = false;
           prototype.emit = function (event: string | symbol, ...args: unknown[]) {
-            if (event === "open") disconnect = () => this.terminate();
+            if (event === "open") {
+              if (reconnectBlocked) {
+                this.terminate();
+                return false;
+              }
+              disconnect = () => {
+                reconnectBlocked = true;
+                this.terminate();
+              };
+            }
             if (event === "message" && dropNextRun && String(args[0]).includes('"StateChanged"')) {
               dropNextRun = false;
+              reconnectBlocked = true;
               this.terminate();
               return false;
             }
