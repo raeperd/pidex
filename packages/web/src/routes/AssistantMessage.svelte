@@ -258,18 +258,18 @@
   {/each}
 </div>
 
-<style>
+<style lang="postcss">
+  @reference "../app.css";
+
   [aria-label="assistant"] {
-    overflow-wrap: anywhere;
-    color: var(--text);
+    @apply text-foreground wrap-anywhere;
   }
   [aria-label="assistant"] :global {
     p,
     ul,
     ol,
     blockquote {
-      margin: 0 0 16px;
-      max-width: 66ch;
+      @apply mt-0 mb-4 max-w-[66ch];
     }
     h1,
     h2,
@@ -277,76 +277,42 @@
     h4,
     h5,
     h6 {
-      color: var(--yellow);
-      font-size: 16px;
-      font-weight: 500;
-      line-height: 1.4;
-      margin: 24px 0 8px;
+      @apply mx-0 mt-6 mb-2 text-base leading-[1.4] font-medium text-heading;
     }
     ul,
     ol {
-      padding-left: 24px;
+      @apply pl-6;
     }
     li {
-      margin-bottom: 4px;
+      @apply mb-1;
     }
     a {
-      color: var(--teal);
-      text-underline-offset: 3px;
+      @apply text-info underline-offset-[3px];
     }
     blockquote {
-      margin-left: 0;
-      padding-left: 16px;
-      border-left: 2px solid var(--border);
-      color: var(--muted);
+      @apply ml-0 border-0 border-l-2 border-solid border-border pl-4 text-muted;
     }
     code {
-      font:
-        12px/1.65 ui-monospace,
-        "SFMono-Regular",
-        Menlo,
-        monospace;
-      color: var(--teal);
-      background: #1d2426;
-      border-radius: 4px;
-      padding: 2px 4px;
+      @apply rounded-sm bg-inline-code px-1 py-0.5 font-mono text-xs leading-[1.65] text-info;
     }
     pre {
-      max-width: 100%;
-      overflow-x: auto;
-      padding: 12px 16px;
-      background: var(--raised);
-      border-radius: 6px;
-      margin: 16px 0;
+      @apply mx-0 my-4 max-w-full overflow-x-auto rounded-md bg-raised px-4 py-3;
     }
     pre code {
-      padding: 0;
-      background: transparent;
-      color: var(--text);
+      @apply bg-transparent p-0 text-foreground;
     }
     table {
-      display: block;
-      max-width: 100%;
-      overflow-x: auto;
-      border-collapse: collapse;
-      margin: 16px 0;
+      @apply mx-0 my-4 block max-w-full border-collapse overflow-x-auto;
     }
     th,
     td {
-      min-width: 8rem;
-      overflow-wrap: normal;
-      text-align: left;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border);
+      @apply min-w-[8rem] border-0 border-b border-solid border-border px-3 py-2 text-left wrap-normal;
     }
     th {
-      font-weight: 500;
-      color: var(--muted);
+      @apply font-medium text-muted;
     }
     hr {
-      border: 0;
-      border-top: 1px solid var(--border);
-      margin: 24px 0;
+      @apply mx-0 my-6 border-0 border-t border-solid border-border;
     }
   }
 </style>

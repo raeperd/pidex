@@ -16,8 +16,11 @@
   --color-heading: #f0c674;
   --color-success: #b5bd68;
   --color-error: #e18b8b;
+  --color-user: #212329;
+  --color-inline-code: #1d2426;
   --spacing: 4px;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
   --text-xs: 12px;
   --text-xs--line-height: 1.6;
   --text-sm: 14px;
@@ -27,6 +30,8 @@
   --text-xl: 20px;
   --text-2xl: 24px;
   --radius-lg: 8px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
 }
 
 @layer base {

@@ -14,7 +14,7 @@ test("#183 keeps long Markdown readable and the composer reachable while preserv
   const prose = "## Project layout\n\n" + "A paragraph describing the project.\n\n".repeat(40);
   const response = lifecycle.requests[0];
   response.write(
-    `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta: { role: "assistant", content: prose }, finish_reason: null }] })}\n\n`,
+    `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta: { role: "assistant", content: prose }, finish_reason: null }] })}\n\n`,
   );
   const heading = page.getByRole("heading", { name: "Project layout" });
   await expect(heading).toHaveCSS("color", "rgb(240, 198, 116)");
@@ -57,10 +57,10 @@ test("#183 opening a long tool result preserves its beginning and keeps Stop rea
   await expect.poll(() => lifecycle.requests.length).toBe(1);
   const response = lifecycle.requests[0];
   response.write(
-    `data: ${JSON.stringify({ id: "read", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "read-long", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "long.txt" }) } }] }, finish_reason: null }] })}\n\n`,
+    `data: ${JSON.stringify({ id: "read", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "read-long", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "long.txt" }) } }] }, finish_reason: null }] })}\n\n`,
   );
   response.write(
-    `data: ${JSON.stringify({ id: "read", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
+    `data: ${JSON.stringify({ id: "read", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
   );
   response.end("data: [DONE]\n\n");
   await expect.poll(() => lifecycle.requests.length).toBe(2);
