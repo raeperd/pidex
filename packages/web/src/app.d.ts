@@ -4,8 +4,15 @@ declare global {
   interface Window {
     desktop: {
       chooseProject: () => Promise<typeof Conversation.Type | null>;
-      send: (text: string) => Promise<void>;
-      subscribe: (onChange: (value: typeof ConversationUpdate.Type | null) => void) => () => void;
+      send: (text: string, submissionId?: string) => Promise<"accepted" | "uncertain">;
+      subscribe: (
+        onChange: (
+          value:
+            | typeof ConversationUpdate.Type
+            | { _tag: "ConnectionError"; message: string }
+            | null,
+        ) => void,
+      ) => () => void;
     };
   }
 }

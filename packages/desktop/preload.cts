@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("desktop", {
-  send: (text: string) => ipcRenderer.invoke("send-prompt", text),
+  send: (text: string, submissionId?: string) =>
+    ipcRenderer.invoke("send-prompt", text, submissionId),
   subscribe: (onChange: (value: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => onChange(value);
     ipcRenderer.on("conversation", listener);

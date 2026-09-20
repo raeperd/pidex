@@ -5,6 +5,7 @@
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let sending = $state(false);
+  let pending: { id: string; text: string } | undefined;
   let connected = $state(true);
   let choosing = $state(false);
   let error = $state("");
@@ -19,21 +20,47 @@
 
   onMount(() =>
     window.desktop.subscribe((update) => {
+      if (update?._tag === "ConnectionError") {
+        error = update.message;
+        connected = false;
+        return;
+      }
       connected = update !== null;
       if (update?._tag === "Snapshot") conversation = update.conversation;
       else if (update && conversation) conversation = applyConversationUpdate(conversation, update);
+      if (
+        pending &&
+        conversation?.entries.some(
+          (entry) => entry.role === "user" && entry.submissionId === pending?.id,
+        )
+      ) {
+        if (draft === pending.text) draft = "";
+        pending = undefined;
+        error = "";
+      }
     }),
   );
 
   async function send() {
     if (!canSend) return;
     const submitted = draft;
+    pending = { id: crypto.randomUUID(), text: submitted };
+    const submission = pending;
     sending = true;
     error = "";
     try {
-      await window.desktop.send(submitted);
-      if (draft === submitted) draft = "";
+      const outcome = await window.desktop.send(submitted, submission.id);
+      if (pending === submission) {
+        if (outcome === "accepted") {
+          if (draft === submitted) draft = "";
+          pending = undefined;
+        } else {
+          error =
+            "Acceptance is uncertain. The prompt may have been lost. Check the conversation before sending again.";
+        }
+      }
     } catch {
+      pending = undefined;
       error = "Could not send the prompt. Check the connection and try again.";
     } finally {
       sending = false;
