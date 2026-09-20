@@ -24,7 +24,7 @@ for (const accepted of [true, false]) {
     );
     await writeFile(
       join(agentDir, "settings.json"),
-      JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4.1" }),
+      JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-5.6-luna" }),
     );
     let providerRequests = 0;
     let finish: (() => void) | undefined;
@@ -35,7 +35,7 @@ for (const accepted of [true, false]) {
       response.writeHead(200, { "content-type": "text/event-stream" });
       const chunk = (delta: object, finish_reason: string | null = null) =>
         response.write(
-          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
         );
       if (providerRequests !== 2) {
         chunk({ role: "assistant", content: "Writing " });
@@ -90,8 +90,8 @@ for (const accepted of [true, false]) {
             api: "openai-completions",
             models: [
               {
-                id: "gpt-4.1",
-                name: "GPT-4.1",
+                id: "gpt-5.6-luna",
+                name: "GPT-5.6 Luna",
                 api: "openai-completions",
                 reasoning: false,
                 input: ["text"],
