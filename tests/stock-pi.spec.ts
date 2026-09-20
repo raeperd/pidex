@@ -116,19 +116,33 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
     const child = app.process();
     const logs: string[] = [];
     child.stderr?.on("data", (data) => logs.push(String(data)));
+    let backendPid: number | undefined;
     cleanup.defer(async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      try {
-        const pid = Number(
-          execFileSync("pgrep", ["-P", String(child.pid), "-f", "/dist/server/main.js"], {
-            encoding: "utf8",
-          }).trim(),
-        );
-        if (pid) process.kill(pid, "SIGKILL");
-      } catch {
-        /* The backend may already have exited. */
+      backendPid ??= findBackend();
+      if (backendPid) {
+        try {
+          process.kill(backendPid, "SIGKILL");
+        } catch {
+          /* The backend may already have exited. */
+        }
+        const pid = backendPid;
+        await expect
+          .poll(
+            () => {
+              try {
+                process.kill(pid, 0);
+                return true;
+              } catch (error) {
+                if (error instanceof Error && "code" in error && error.code === "ESRCH")
+                  return false;
+                throw error;
+              }
+            },
+            { message: "fixture backend exits before removing its project" },
+          )
+          .toBe(false);
       }
-      await app.close();
+      if (child.exitCode === null && child.signalCode === null) await app.close();
     });
     const page = await app.firstWindow();
     await app.context().tracing.start({ screenshots: true, snapshots: true });
@@ -137,6 +151,8 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [projectPath] });
       }, project);
       await page.getByRole("button", { name: "Choose project" }).click();
+      // Remember the child before an Electron crash can reparent it.
+      await expect.poll(() => (backendPid ??= findBackend())).toBeGreaterThan(0);
       const conversation = page.getByRole("region", { name: "Conversation" });
       await expect(conversation).toBeVisible({ timeout: 15_000 });
       await expect(conversation.getByRole("status")).toHaveText("Idle");
@@ -183,6 +199,20 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         .tracing.stop({ path: testInfo.outputPath("trace.zip") })
         .catch(() => {});
       throw error;
+    }
+
+    function findBackend() {
+      try {
+        return (
+          Number(
+            execFileSync("pgrep", ["-P", String(child.pid), "-f", "/dist/server/main.js"], {
+              encoding: "utf8",
+            }).trim(),
+          ) || undefined
+        );
+      } catch {
+        return undefined;
+      }
     }
 
     async function prepareResources() {
