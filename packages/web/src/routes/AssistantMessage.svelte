@@ -257,3 +257,96 @@
     <div>{@html block.html}</div>
   {/each}
 </div>
+
+<style>
+  [aria-label="assistant"] {
+    overflow-wrap: anywhere;
+    color: var(--text);
+  }
+  [aria-label="assistant"] :global {
+    p,
+    ul,
+    ol,
+    blockquote {
+      margin: 0 0 16px;
+      max-width: 66ch;
+    }
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      color: var(--yellow);
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 1.4;
+      margin: 24px 0 8px;
+    }
+    ul,
+    ol {
+      padding-left: 24px;
+    }
+    li {
+      margin-bottom: 4px;
+    }
+    a {
+      color: var(--teal);
+      text-underline-offset: 3px;
+    }
+    blockquote {
+      margin-left: 0;
+      padding-left: 16px;
+      border-left: 2px solid var(--border);
+      color: var(--muted);
+    }
+    code {
+      font:
+        12px/1.65 ui-monospace,
+        "SFMono-Regular",
+        Menlo,
+        monospace;
+      color: var(--teal);
+      background: #1d2426;
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+    pre {
+      max-width: 100%;
+      overflow-x: auto;
+      padding: 12px 16px;
+      background: var(--raised);
+      border-radius: 6px;
+      margin: 16px 0;
+    }
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: var(--text);
+    }
+    table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th,
+    td {
+      min-width: 8rem;
+      overflow-wrap: normal;
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-weight: 500;
+      color: var(--muted);
+    }
+    hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 24px 0;
+    }
+  }
+</style>
