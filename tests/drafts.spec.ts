@@ -100,7 +100,11 @@ test("#131 edits a busy draft, rejects a transport send, then explicitly submits
         /* Already exited. */
       }
     }
-    if (electronProcess.exitCode === null && electronProcess.signalCode === null) await app.close();
+    if (electronProcess.exitCode === null && electronProcess.signalCode === null) {
+      const exited = new Promise<void>((resolve) => electronProcess.once("exit", () => resolve()));
+      electronProcess.kill("SIGKILL");
+      await exited;
+    }
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(5000);
