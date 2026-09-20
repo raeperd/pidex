@@ -207,7 +207,7 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
       conversation.getByRole("heading", { name: "What would you like to build?" }),
     ).toBeVisible();
     const composer = page.getByRole("textbox", { name: "Prompt" });
-    const send = page.getByRole("button", { name: "Send", exact: true });
+    const send = page.getByRole("button", { name: "Send", exact: true, includeHidden: true });
     await expect(send).toBeDisabled();
     for (const prompt of ["", "  \n "]) {
       expect(
