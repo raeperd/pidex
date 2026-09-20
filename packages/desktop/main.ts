@@ -60,9 +60,34 @@ const program = Effect.gen(function* () {
   let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
   const connections = yield* Scope.make();
   let quitting = false;
+  let currentRun: Effect.Effect<string | null, DesktopError> | undefined;
   const shutdown = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
+    // Reconcile with the backend before deciding: the watched state may be behind Send.
+    const runId = currentRun ? yield* currentRun : conversation?.runId;
+    if (runId) {
+      const confirmation = yield* Effect.tryPromise({
+        try: () =>
+          dialog.showMessageBox({
+            type: "question",
+            message: "Stop the current run and quit?",
+            detail: "Saved history and file changes will be kept.",
+            buttons: ["Cancel", "Quit"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          }),
+        catch: () => new DesktopError({ message: "Could not confirm Quit" }),
+      });
+      if (confirmation.response !== 1) {
+        quitting = false;
+        return;
+      }
+      if (!stopRun)
+        return yield* new DesktopError({ message: "Reconnect before quitting this run" });
+      yield* stopRun(runId);
+    }
     yield* Scope.close(connections, Exit.void);
     const child = server?.child;
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
@@ -244,6 +269,19 @@ const program = Effect.gen(function* () {
                     if (update._tag === "Snapshot") {
                       conversation = update.conversation;
                       connectionError = "";
+                      currentRun = client.Subscribe().pipe(
+                        Stream.runHead,
+                        Effect.flatMap((first) =>
+                          first._tag === "Some" && first.value._tag === "Snapshot"
+                            ? Effect.succeed(first.value.conversation.runId)
+                            : Effect.fail(
+                                new DesktopError({ message: "Could not check the current run" }),
+                              ),
+                        ),
+                        Effect.mapError(
+                          () => new DesktopError({ message: "Could not check the current run" }),
+                        ),
+                      );
                       stopRun = (runId) =>
                         client.Stop({ runId }).pipe(
                           Effect.mapError(
@@ -280,6 +318,7 @@ const program = Effect.gen(function* () {
                 Effect.sync(() => {
                   sendPrompt = undefined;
                   stopRun = undefined;
+                  currentRun = undefined;
                   if (window && !window.isDestroyed())
                     window.webContents.send("conversation", null);
                 }),

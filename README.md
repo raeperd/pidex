@@ -56,3 +56,14 @@ pnpm build && pnpm exec playwright test --grep '#132' --debug
 ```
 
 The isolated Electron test uses a temporary project, Pi configuration, and local OpenAI response server. A test-only Node import holds the provider response's cancellation error until the fixture releases it. It leaves Pi, stock tools, application handlers, preload, and authenticated RPC unchanged. The test checks Stopping, editable drafts, disabled Send, preserved history and `note.txt`, then continuation in the same session. A second isolated variant stops stock preflight compaction and verifies its pending turn cannot escape cancellation. Repeated authenticated Stop calls wait for acknowledgment; calls targeting the old run cannot stop the later run. `test-results/stop-run-*/` contains `stopping.png` and `trace.zip`; failures also retain a screenshot and redacted Electron log.
+
+## Quit during work (#137)
+
+Quit reads the backend's current run before opening a native confirmation with Cancel as the default. Cancel leaves that run alive. Confirm waits for the same run-targeted cancellation used by Stop, then closes the RPC connection, disposes the owned backend, and exits Electron. Repeated Quit requests share the pending shutdown.
+
+```sh
+pnpm test --grep '#137'
+pnpm build && pnpm exec playwright test --grep '#137' --debug
+```
+
+The isolated test supplies native dialog results before Quit, releases `Still working` after Cancel, and holds provider cancellation acknowledgment after Confirm. It checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. It makes no UI assertions after exit. Artifacts are under `test-results/quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.
