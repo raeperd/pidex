@@ -165,7 +165,7 @@ const program = Effect.gen(function* () {
       Layer.mergeAll(
         RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
-          Watch: () => SubscriptionRef.changes(state),
+          Subscribe: () => SubscriptionRef.changes(state),
           Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
       ),

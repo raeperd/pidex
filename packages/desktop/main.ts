@@ -232,7 +232,7 @@ const program = Effect.gen(function* () {
                       }),
                   ),
                 );
-              yield* client.Watch().pipe(
+              yield* client.Subscribe().pipe(
                 Stream.runForEach((snapshot) =>
                   Effect.gen(function* () {
                     conversation = snapshot;

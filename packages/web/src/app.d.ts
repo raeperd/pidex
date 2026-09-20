@@ -5,7 +5,7 @@ declare global {
     desktop: {
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       send: (text: string) => Promise<void>;
-      watch: (onChange: (value: typeof Conversation.Type | null) => void) => () => void;
+      subscribe: (onChange: (value: typeof Conversation.Type | null) => void) => () => void;
     };
   }
 }

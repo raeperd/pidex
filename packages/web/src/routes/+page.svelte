@@ -9,7 +9,7 @@
   let error = $state("");
 
   onMount(() =>
-    window.desktop.watch((snapshot) => {
+    window.desktop.subscribe((snapshot) => {
       connected = snapshot !== null;
       if (snapshot) conversation = snapshot;
     }),
