@@ -14,8 +14,8 @@ export const test = base.extend<{ lifecycle: Awaited<ReturnType<typeof setup>> }
     try {
       await use(fixture);
     } finally {
-      for (const app of fixture.apps) {
-        if (app.process().exitCode !== null) continue;
+      for (const { app, process: child } of fixture.apps) {
+        if (child.exitCode !== null || child.signalCode !== null) continue;
         const page = app.windows()[0];
         if (info.status !== info.expectedStatus && page && !page.isClosed())
           await page.screenshot({ path: info.outputPath("failure.png") }).catch(() => {});
@@ -87,7 +87,10 @@ async function setup(cleanup: AsyncDisposableStack) {
       },
     }),
   );
-  const apps: Awaited<ReturnType<typeof electron.launch>>[] = [];
+  const apps: {
+    app: Awaited<ReturnType<typeof electron.launch>>;
+    process: import("node:child_process").ChildProcess;
+  }[] = [];
   const logs: string[] = [];
   return {
     home,
@@ -100,10 +103,11 @@ async function setup(cleanup: AsyncDisposableStack) {
         args: ["dist/desktop/main.js", `--user-data-dir=${home}`],
         env: { PATH: process.env.PATH ?? "", HOME: home, TMPDIR: tmpdir() },
       });
-      apps.push(app);
       const processHandle = app.process();
+      apps.push({ app, process: processHandle });
       processHandle.stderr?.on("data", (data) => logs.push(String(data)));
       cleanup.defer(async () => {
+        if (processHandle.exitCode !== null || processHandle.signalCode !== null) return;
         for (const pid of children(processHandle.pid)) {
           try {
             process.kill(pid, "SIGKILL");
@@ -165,5 +169,15 @@ function children(parent: number | undefined) {
       .map(Number);
   } catch {
     return [];
+  }
+}
+
+export function alive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    throw error;
   }
 }
