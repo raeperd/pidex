@@ -4,6 +4,9 @@
     const onScroll = () => {
       following = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 24;
     };
+    const onDisclosure = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest("summary")) following = false;
+    };
     const observer = new ResizeObserver(() => {
       if (following) viewport.scrollTop = viewport.scrollHeight;
     });
@@ -11,9 +14,11 @@
     if (content) observer.observe(content);
     observer.observe(viewport);
     viewport.addEventListener("scroll", onScroll);
+    viewport.addEventListener("click", onDisclosure);
     return () => {
       observer.disconnect();
       viewport.removeEventListener("scroll", onScroll);
+      viewport.removeEventListener("click", onDisclosure);
     };
   }
 </script>
