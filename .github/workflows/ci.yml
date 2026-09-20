@@ -19,7 +19,6 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.9
       - uses: actions/setup-node@v7.0.0
-        id: node
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -27,31 +26,8 @@ jobs:
       - run: pnpm check
       - name: Build
         run: pnpm build
-      - name: Prepare Electron
-        run: node -e 'console.log(require("electron"))'
-      - name: Record environment
-        run: |
-          {
-            echo "### CI environment"
-            echo "- Tested commit: $GITHUB_SHA"
-            echo "- Source commit: ${{ github.event.pull_request.head.sha || github.sha }}"
-            echo "- Run: $GITHUB_RUN_ID / attempt $GITHUB_RUN_ATTEMPT"
-            echo "- Runner: $RUNNER_OS / $RUNNER_ARCH"
-            echo "- Image: $ImageOS / $ImageVersion"
-            echo "- Node: $(node --version)"
-            echo "- pnpm: $(pnpm --version)"
-            echo "- pnpm cache hit: ${{ steps.node.outputs.cache-hit }}"
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Test
         run: pnpm exec playwright test
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-results-attempt-${{ github.run_attempt }}
-          path: test-results/results.json
-          if-no-files-found: ignore
-          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
