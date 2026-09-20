@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
-import { ConversationUpdate } from "../../packages/api/index.js";
+import { ConversationUpdate } from "../packages/api/index.js";
 
 for (const accepted of [true, false]) {
   // oxlint-disable-next-line no-empty-pattern

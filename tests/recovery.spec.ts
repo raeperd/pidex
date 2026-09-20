@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { chmod, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "../support/lifecycle.js";
+import { test } from "./support/lifecycle.js";
 
 test("#135 manually recovers the exact saved session after idle and busy crashes", async ({
   lifecycle,

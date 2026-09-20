@@ -8,7 +8,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeSocket as PlatformNodeSocket } from "@effect/platform-node";
 import { Schema } from "effect";
-import { ConversationUpdate } from "../../packages/api/index.js";
+import { ConversationUpdate } from "../packages/api/index.js";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern

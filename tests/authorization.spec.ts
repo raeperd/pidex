@@ -10,7 +10,7 @@ import {
   applyConversationUpdate,
   Conversation,
   ConversationUpdate,
-} from "../../packages/api/index.js";
+} from "../packages/api/index.js";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
