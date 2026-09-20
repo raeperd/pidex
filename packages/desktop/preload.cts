@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("desktop", {
   subscribe: (onChange: (value: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => onChange(value);
     ipcRenderer.on("conversation", listener);
+    ipcRenderer.send("subscribe-conversation");
     return () => ipcRenderer.removeListener("conversation", listener);
   },
   chooseProject: () => ipcRenderer.invoke("choose-project"),

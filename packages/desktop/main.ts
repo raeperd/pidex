@@ -52,26 +52,7 @@ const program = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.succeed(new Response(null, { status: 404 })))),
     ),
   );
-  const window = yield* Effect.try({
-    try: () =>
-      new BrowserWindow({
-        width: 960,
-        height: 720,
-        webPreferences: {
-          preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)),
-          contextIsolation: true,
-          sandbox: true,
-          nodeIntegration: false,
-        },
-      }),
-    catch: () => new DesktopError({ message: "Could not open the application window" }),
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
-  window.webContents.session.setPermissionRequestHandler((_contents, _permission, respond) =>
-    respond(false),
-  );
-  window.webContents.session.setPermissionCheckHandler(() => false);
+  let window: BrowserWindow | undefined;
   const serverSecret = yield* Effect.try({
     try: () => randomBytes(32).toString("hex"),
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
@@ -119,6 +100,7 @@ const program = Effect.gen(function* () {
   });
   let choosing = false;
   let conversation: typeof Conversation.Type | undefined;
+  let connectionError = "";
   let sendPrompt:
     | ((
         text: string,
@@ -149,11 +131,12 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
-        if (choosing || quitting) return null;
+        const activeWindow = window;
+        if (!activeWindow || choosing || quitting) return null;
         choosing = true;
         return yield* Effect.gen(function* () {
           const selection = yield* Effect.tryPromise({
-            try: () => dialog.showOpenDialog(window, { properties: ["openDirectory"] }),
+            try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
             catch: () => new DesktopError({ message: "Could not choose a project" }),
           });
           const cwd = selection.filePaths[0];
@@ -245,6 +228,7 @@ const program = Effect.gen(function* () {
                   Effect.gen(function* () {
                     if (update._tag === "Snapshot") {
                       conversation = update.conversation;
+                      connectionError = "";
                       sendPrompt = (text, submissionId) =>
                         client.Send({ text, submissionId }).pipe(
                           Effect.map((): "accepted" => "accepted"),
@@ -257,7 +241,8 @@ const program = Effect.gen(function* () {
                         );
                     } else if (conversation)
                       conversation = applyConversationUpdate(conversation, update);
-                    if (!window.isDestroyed()) window.webContents.send("conversation", update);
+                    if (window && !window.isDestroyed())
+                      window.webContents.send("conversation", update);
                     if (conversation) yield* Deferred.succeed(initial, conversation);
                   }),
                 ),
@@ -267,7 +252,8 @@ const program = Effect.gen(function* () {
               Effect.ensuring(
                 Effect.sync(() => {
                   sendPrompt = undefined;
-                  if (!window.isDestroyed()) window.webContents.send("conversation", null);
+                  if (window && !window.isDestroyed())
+                    window.webContents.send("conversation", null);
                 }),
               ),
               Effect.retry({
@@ -279,11 +265,13 @@ const program = Effect.gen(function* () {
               }),
               Effect.catch(() =>
                 Effect.gen(function* () {
-                  if (!window.isDestroyed())
+                  connectionError = "Could not reconnect. Pi history is preserved.";
+                  if (window && !window.isDestroyed())
                     window.webContents.send("conversation", {
                       _tag: "ConnectionError",
-                      message: "Could not reconnect. Pi history is preserved.",
+                      message: connectionError,
                     });
+                  yield* Effect.logError(connectionError);
                   yield* Deferred.fail(
                     initial,
                     new DesktopError({ message: "Could not connect to Pi" }),
@@ -310,12 +298,54 @@ const program = Effect.gen(function* () {
       }),
     ),
   );
-  yield* Effect.tryPromise({
-    try: () => window.loadURL("pidex://app/"),
-    catch: () => new DesktopError({ message: "Could not load the application window" }),
+  ipcMain.on("subscribe-conversation", (event) => {
+    if (!isTrustedWindow(event)) return;
+    // Main owns the live projection. This snapshot and subsequent IPC updates are ordered.
+    if (conversation) event.sender.send("conversation", { _tag: "Snapshot", conversation });
+    if (connectionError)
+      event.sender.send("conversation", { _tag: "ConnectionError", message: connectionError });
+    else if (conversation && !sendPrompt) event.sender.send("conversation", null);
   });
-  function isTrustedWindow(event: Electron.IpcMainInvokeEvent) {
+  const openWindow = Effect.fn(function* () {
+    if (quitting || (window && !window.isDestroyed())) return;
+    const created = yield* Effect.try({
+      try: () =>
+        new BrowserWindow({
+          width: 960,
+          height: 720,
+          webPreferences: {
+            preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)),
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+          },
+        }),
+      catch: () => new DesktopError({ message: "Could not open the application window" }),
+    });
+    created.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    created.webContents.on("will-navigate", (event) => event.preventDefault());
+    created.webContents.session.setPermissionRequestHandler((_contents, _permission, respond) =>
+      respond(false),
+    );
+    created.webContents.session.setPermissionCheckHandler(() => false);
+    window = created;
+    created.once("closed", () => {
+      if (window === created) window = undefined;
+    });
+    yield* Effect.tryPromise({
+      try: () => created.loadURL("pidex://app/"),
+      catch: () => new DesktopError({ message: "Could not load the application window" }),
+    });
+  });
+  app.on("window-all-closed", () => {});
+  app.on("activate", () => {
+    Effect.runFork(openWindow().pipe(Effect.catch((error) => Effect.logError(error.message))));
+  });
+  yield* openWindow();
+  function isTrustedWindow(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) {
     return (
+      window !== undefined &&
+      !window.isDestroyed() &&
       event.sender === window.webContents &&
       event.senderFrame === window.webContents.mainFrame &&
       event.senderFrame.url === "pidex://app/"
