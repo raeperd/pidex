@@ -26,7 +26,7 @@
       // Shared references let a later definition update links in earlier blocks.
       const env: Env = {};
       const tokens = blockParser.parse(text, env);
-      const lines = text.split("\n");
+      const lines = text.replace(/\r\n?/g, "\n").split("\n");
       const sources = tokens
         .filter((token) => token.level === 0 && token.map)
         .map((token) => (token.map ? lines.slice(token.map[0], token.map[1]).join("\n") : ""));
@@ -174,7 +174,13 @@
       // Keep URL-shaped labels out of the automatic linkifier until the real
       // destination arrives. Restore ordinary text before tokens reach the view.
       for (let index = firstLabelToken; index < state.tokens.length; index++) {
-        if (state.tokens[index].type === "text") state.tokens[index].type = "streaming_link_text";
+        const token = state.tokens[index];
+        if (token.type === "text" || token.type === "link_open" || token.type === "link_close") {
+          token.type = "streaming_link_text";
+          token.tag = "";
+          token.nesting = 0;
+          token.attrs = null;
+        }
       }
     }
     state.pos = state.posMax = end;

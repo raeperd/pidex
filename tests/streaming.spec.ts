@@ -67,7 +67,8 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
         "o**\n\n[late][target]",
         "\n\n[target]: https://example.org\n\n~~strike",
         "~",
-        '~\n\nEscaped \\*literal and some_identifier.\n\n```md\n**literal [link](url\n\nstill code\n```\n\n<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">\n\n[bad](javascript:alert(1))\n\n**unfinished',
+        "~\n\n[<https://example.net>](",
+        '\n\nEscaped \\*literal and some_identifier.\n\n```md\n**literal [link](url\n\nstill code\n```\n\n<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">\n\n[bad](javascript:alert(1))\r\r**unfinished',
       ];
       advanceMarkdown = () => {
         const part = parts.shift();
@@ -280,6 +281,9 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     advance();
     await expect(conversation.locator("s")).toHaveText("strike");
     advance();
+    await expect(conversation.getByText("https://example.net", { exact: true })).toBeVisible();
+    await expect(conversation.locator('a[href="https://example.net"]')).toHaveCount(0);
+    advance();
     await expect(conversation.locator("strong").last()).toHaveText("unfinished");
     await expect(
       conversation.getByText("Escaped *literal and some_identifier.", { exact: true }),
@@ -326,7 +330,7 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     for (const messages of [updates.wire, updates.ipc]) {
       expect(messages.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
       const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
-      expect(deltas).toHaveLength(13);
+      expect(deltas).toHaveLength(14);
       expect(deltas[0]).toContain('"delta":"Writing "');
       expect(deltas[1]).toContain('"delta":"hello"');
       for (const delta of deltas) {
