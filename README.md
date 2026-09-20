@@ -39,3 +39,9 @@ The server gives `DefaultResourceLoader` empty in-memory settings because Pi res
 `pnpm test --grep '#131'` runs the dedicated draft scenario. It holds a local provider response while the real Electron composer edits `next task`, attempts keyboard submission, and verifies authenticated RPC busy rejection. Completion preserves the draft without starting another request; pressing Enter on the enabled Send button submits that exact draft.
 
 For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#131' --debug`. The fixture uses temporary Pi configuration and a local OpenAI-compatible provider, with no paid requests. Traces and screenshots are under `test-results/drafts-*`; failures also save redacted Electron logs. Existing draft and busy-rejection behavior needs no production change.
+
+### Setup and provider failures (#138)
+
+`pnpm test --grep '#138'` runs three Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, and a held provider response that returns HTTP 503 until Pi exhausts its stock retries. Setup failures show correction steps and disable Send while drafts remain editable. Provider failure returns to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
+
+`pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.

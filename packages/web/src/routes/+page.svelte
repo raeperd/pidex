@@ -9,6 +9,14 @@
   let choosing = $state(false);
   let error = $state("");
 
+  let canSend = $derived(
+    !sending &&
+      connected &&
+      conversation?.status === "idle" &&
+      !conversation.setupError &&
+      !!draft.trim(),
+  );
+
   onMount(() =>
     window.desktop.subscribe((update) => {
       connected = update !== null;
@@ -18,6 +26,7 @@
   );
 
   async function send() {
+    if (!canSend) return;
     const submitted = draft;
     sending = true;
     error = "";
@@ -82,6 +91,7 @@
           <p aria-label="user">{entry.text}</p>
         {/if}
       {/each}
+      {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
       {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
       <form
         onsubmit={(event) => {
@@ -91,9 +101,7 @@
       >
         <label for="prompt">Prompt</label>
         <textarea id="prompt" bind:value={draft}></textarea>
-        <button disabled={sending || !connected || conversation.status !== "idle" || !draft.trim()}
-          >Send</button
-        >
+        <button disabled={!canSend}>Send</button>
       </form>
     </section>
   {:else}
