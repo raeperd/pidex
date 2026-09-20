@@ -1,0 +1,52 @@
+/* Keep browser defaults for generated Markdown; import utilities without Preflight. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme static {
+  --color-canvas: #101113;
+  --color-surface: #131416;
+  --color-raised: #191b20;
+  --color-foreground: #ececee;
+  --color-muted: #999ba3;
+  --color-border: #303237;
+  --color-focus: #00d7ff;
+  --color-action: #3268ed;
+  --color-info: #8abeb7;
+  --color-heading: #f0c674;
+  --color-success: #b5bd68;
+  --color-error: #e18b8b;
+  --spacing: 4px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.6;
+  --text-sm: 14px;
+  --text-sm--line-height: 1.6;
+  --text-base: 16px;
+  --text-base--line-height: 1.6;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --radius-lg: 8px;
+}
+
+@layer base {
+  :root {
+    @apply scheme-dark font-sans text-sm text-foreground;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    @apply m-0 bg-canvas;
+  }
+  ::selection {
+    color: #f4f6ff;
+    background: #344669;
+  }
+  :focus-visible {
+    @apply outline-2 outline-solid outline-focus outline-offset-[3px];
+  }
+  [role="alert"] {
+    @apply text-error wrap-anywhere;
+  }
+}

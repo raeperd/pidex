@@ -37,7 +37,9 @@ test("#141 full Quit and relaunch starts a distinct conversation and preserves o
   expect(newChild).not.toBe(originalChild);
   expect(second.children()).toHaveLength(1);
   await expect(second.page.getByRole("status")).toHaveText("Idle");
-  await expect(second.page.getByText("No messages yet.")).toBeVisible();
+  await expect(
+    second.page.getByRole("heading", { name: "What would you like to build?" }),
+  ).toBeVisible();
   await expect(second.page.getByLabel("assistant", { exact: true })).toHaveCount(0);
   expect(await lifecycle.history()).toEqual([original]);
   expect(lifecycle.requests).toHaveLength(1);

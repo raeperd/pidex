@@ -27,6 +27,7 @@ export class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
 
 export const Conversation = Schema.Struct({
   id: Schema.String,
+  projectPath: Schema.String,
   modelName: Schema.String,
   setupError: Schema.NullOr(SetupError),
   status: Schema.Literals(["idle", "running", "stopping"]),

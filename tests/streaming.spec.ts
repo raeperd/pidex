@@ -202,7 +202,9 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     await expect(conversation).toBeVisible({ timeout: 15_000 });
     await expect(conversation.getByRole("status")).toHaveText("Idle");
     await expect(conversation.getByText("GPT-5.6 Luna", { exact: true })).toBeVisible();
-    await expect(conversation.getByText("No messages yet.")).toBeVisible();
+    await expect(
+      conversation.getByRole("heading", { name: "What would you like to build?" }),
+    ).toBeVisible();
     const composer = page.getByRole("textbox", { name: "Prompt" });
     const send = page.getByRole("button", { name: "Send", exact: true });
     await expect(send).toBeDisabled();

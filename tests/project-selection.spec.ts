@@ -7,11 +7,11 @@ import { join } from "node:path";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
-test("#129 Cancel then choose a project with a fresh idle conversation, then Quit", async ({}, testInfo) => {
+test("#129 #183 Cancel then choose a project with a dark idle conversation, then Quit", async ({}, testInfo) => {
   await using cleanup = new AsyncDisposableStack();
   const temporary = await mkdtemp(join(tmpdir(), "pidex-129-"));
   cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
-  const project = join(temporary, "project");
+  const project = join(temporary, "project".repeat(14));
   const agentDir = join(temporary, ".pi", "agent");
   await mkdir(project, { recursive: true });
   await mkdir(agentDir, { recursive: true });
@@ -90,10 +90,18 @@ test("#129 Cancel then choose a project with a fresh idle conversation, then Qui
     await expect(conversation).toBeVisible({ timeout: 15_000 });
     await expect(conversation.getByRole("status")).toHaveText("Idle");
     await expect(conversation.getByText("GPT-5.6 Luna", { exact: true })).toBeVisible();
-    await expect(conversation.getByText("No messages yet.")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Current project" })).toContainText(project);
+    await expect(
+      conversation.getByRole("heading", { name: "What would you like to build?" }),
+    ).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(16, 17, 19)");
     await expect(page.getByRole("button", { name: "Choose project" })).toHaveCount(0);
     expect(providerRequests).toBe(0);
     await page.screenshot({ path: testInfo.outputPath("idle.png") });
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(page.getByRole("textbox", { name: "Prompt" })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
+    await page.screenshot({ path: testInfo.outputPath("idle-narrow.png") });
     childPid = findServer();
     if (!childPid) throw new Error("Expected an owned server process");
     await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });

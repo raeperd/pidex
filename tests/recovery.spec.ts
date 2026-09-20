@@ -150,7 +150,9 @@ for (const firstTurn of [false, true]) {
     await page.getByRole("button", { name: "Restart", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Idle");
     await expect(page.getByRole("alert")).toContainText("Saved history is missing");
-    await expect(page.getByText("No messages yet.")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "What would you like to build?" }),
+    ).toBeVisible();
     expect(
       await page.evaluate(() => window.desktop.chooseProject().then((value) => value?.id)),
     ).not.toBe(identity);

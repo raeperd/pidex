@@ -183,6 +183,7 @@ const program = Effect.gen(function* () {
     const scope = yield* Effect.scope;
     let state: typeof Conversation.Type = {
       id: session.sessionId,
+      projectPath: process.cwd(),
       modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
       setupError,
       status: "idle",
