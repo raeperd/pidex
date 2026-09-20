@@ -7,7 +7,7 @@ import {
   SettingsManager,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, Deferred, Layer, Queue, Schema, Stream } from "effect";
+import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { readFile } from "node:fs/promises";
