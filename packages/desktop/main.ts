@@ -57,7 +57,14 @@ const program = Effect.gen(function* () {
     try: () => randomBytes(32).toString("hex"),
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
   });
-  let server: { child: ChildProcess; port?: number; sessionFile?: string } | undefined;
+  let server: { child: ChildProcess; port?: number } | undefined;
+  // Recovery belongs to this application lifetime, not to a child or a window.
+  let project: string | undefined;
+  let sessionFile: string | undefined;
+  let crashed = false;
+  let starting = false;
+  let interrupted = false;
+  let connectionScope: Scope.Closeable | undefined;
   const connections = yield* Scope.make();
   let quitting = false;
   const shutdown = Effect.gen(function* () {
@@ -141,153 +148,8 @@ const program = Effect.gen(function* () {
           });
           const cwd = selection.filePaths[0];
           if (selection.canceled || !cwd) return null;
-          const child = yield* Effect.try({
-            try: () =>
-              fork(fileURLToPath(new URL("../server/main.js", import.meta.url)), [], {
-                cwd,
-                execArgv: [],
-                stdio: ["ignore", "ignore", "ignore", "ipc"],
-                env: {
-                  ...process.env,
-                  ELECTRON_RUN_AS_NODE: "1",
-                  PIDEX_SERVER_SECRET: serverSecret,
-                },
-              }),
-            catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
-          });
-          server = { child };
-          return yield* Effect.gen(function* () {
-            const ready = yield* Effect.callback<
-              { port: number; sessionFile: string },
-              DesktopError
-            >((resume) => {
-              const clear = () => {
-                child.off("message", onMessage);
-                child.off("error", onFailure);
-                child.off("exit", onFailure);
-              };
-              const onMessage = (message: unknown) => {
-                clear();
-                resume(
-                  Schema.decodeUnknownEffect(
-                    Schema.Struct({ port: Schema.Number, sessionFile: Schema.String }),
-                  )(message).pipe(
-                    Effect.mapError(() => new DesktopError({ message: "Invalid server response" })),
-                  ),
-                );
-              };
-              const onFailure = () => {
-                clear();
-                resume(Effect.fail(new DesktopError({ message: "Server startup failed" })));
-              };
-              child.once("message", onMessage);
-              child.once("error", onFailure);
-              child.once("exit", onFailure);
-              return Effect.sync(clear);
-            });
-            server = { child, ...ready };
-            const initial = yield* Deferred.make<typeof Conversation.Type, DesktopError>();
-            const connect = Effect.gen(function* () {
-              const transport = Layer.effect(
-                RpcClient.Protocol,
-                RpcClient.makeProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
-              ).pipe(
-                Layer.provide([
-                  RpcSerialization.layerNdjson,
-                  Layer.effect(
-                    Socket.Socket,
-                    NodeSocket.fromDuplex(
-                      Effect.acquireRelease(
-                        Effect.sync(() =>
-                          NodeSocket.NodeWS.createWebSocketStream(
-                            new NodeSocket.NodeWS.WebSocket(`ws://127.0.0.1:${ready.port}/rpc/`, {
-                              headers: {
-                                authorization: `Bearer ${serverSecret}`,
-                                origin: "pidex://app",
-                              },
-                              handshakeTimeout: 10_000,
-                            }),
-                          ),
-                        ),
-                        (stream) =>
-                          Effect.sync(() => {
-                            stream.destroy();
-                          }),
-                      ),
-                    ),
-                  ),
-                ]),
-              );
-              const connectionScope = yield* Effect.scope;
-              const context = yield* Layer.buildWithScope(transport, connectionScope);
-              const client = yield* RpcClient.make(ConversationApi).pipe(
-                Effect.provideContext(context),
-              );
-              yield* client.Subscribe().pipe(
-                Stream.runForEach((update) =>
-                  Effect.gen(function* () {
-                    if (update._tag === "Snapshot") {
-                      conversation = update.conversation;
-                      connectionError = "";
-                      sendPrompt = (text, submissionId) =>
-                        client.Send({ text, submissionId }).pipe(
-                          Effect.map((): "accepted" => "accepted"),
-                          Effect.catchCause((cause) => {
-                            const failure = Cause.findErrorOption(cause);
-                            return Option.isSome(failure) && failure.value._tag === "SendError"
-                              ? Effect.fail(new DesktopError({ message: failure.value.message }))
-                              : Effect.succeed<"uncertain">("uncertain");
-                          }),
-                        );
-                    } else if (conversation)
-                      conversation = applyConversationUpdate(conversation, update);
-                    if (window && !window.isDestroyed())
-                      window.webContents.send("conversation", update);
-                    if (conversation) yield* Deferred.succeed(initial, conversation);
-                  }),
-                ),
-              );
-            }).pipe(
-              Effect.scoped,
-              Effect.ensuring(
-                Effect.sync(() => {
-                  sendPrompt = undefined;
-                  if (window && !window.isDestroyed())
-                    window.webContents.send("conversation", null);
-                }),
-              ),
-              Effect.retry({
-                schedule: Schedule.spaced("500 millis"),
-                while: (error) =>
-                  child.exitCode === null &&
-                  child.signalCode === null &&
-                  !(error._tag === "SubscribeError" && error.reason === "payload-too-large"),
-              }),
-              Effect.catch(() =>
-                Effect.gen(function* () {
-                  connectionError = "Could not reconnect. Pi history is preserved.";
-                  if (window && !window.isDestroyed())
-                    window.webContents.send("conversation", {
-                      _tag: "ConnectionError",
-                      message: connectionError,
-                    });
-                  yield* Effect.logError(connectionError);
-                  yield* Deferred.fail(
-                    initial,
-                    new DesktopError({ message: "Could not connect to Pi" }),
-                  );
-                }),
-              ),
-            );
-            yield* connect.pipe(Effect.forkIn(connections));
-            return yield* Deferred.await(initial);
-          }).pipe(
-            Effect.onError(() =>
-              Effect.sync(() => {
-                server?.child.kill();
-              }),
-            ),
-          );
+          project = cwd;
+          return yield* startServer();
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
@@ -298,6 +160,193 @@ const program = Effect.gen(function* () {
       }),
     ),
   );
+  ipcMain.handle("restart-backend", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        if (!crashed || starting || quitting || !project) return;
+        const child = server?.child;
+        if (child && child.exitCode === null && child.signalCode === null) return;
+        yield* startServer();
+      }),
+    ),
+  );
+  const startServer = Effect.fn(function* () {
+    starting = true;
+    return yield* Effect.gen(function* () {
+      if (connectionScope) yield* Scope.close(connectionScope, Exit.void);
+      const child = yield* Effect.try({
+        try: () =>
+          fork(fileURLToPath(new URL("../server/main.js", import.meta.url)), [], {
+            cwd: project,
+            execArgv: [],
+            stdio: ["ignore", "ignore", "ignore", "ipc"],
+            env: {
+              ...process.env,
+              ELECTRON_RUN_AS_NODE: "1",
+              PIDEX_SERVER_SECRET: serverSecret,
+              PIDEX_SESSION_FILE: sessionFile ?? "",
+              PIDEX_INTERRUPTED: interrupted ? "1" : "",
+            },
+          }),
+        catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
+      });
+      server = { child };
+      child.once("exit", () => {
+        if (server?.child !== child || quitting) return;
+        interrupted ||= conversation?.status === "running";
+        crashed = true;
+        connectionError = "";
+        sendPrompt = undefined;
+        if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
+      });
+      return yield* Effect.gen(function* () {
+        const ready = yield* Effect.callback<{ port: number; sessionFile: string }, DesktopError>(
+          (resume) => {
+            const clear = () => {
+              child.off("message", onMessage);
+              child.off("error", onFailure);
+              child.off("exit", onFailure);
+            };
+            const onMessage = (message: unknown) => {
+              clear();
+              resume(
+                Schema.decodeUnknownEffect(
+                  Schema.Struct({ port: Schema.Number, sessionFile: Schema.String }),
+                )(message).pipe(
+                  Effect.mapError(() => new DesktopError({ message: "Invalid server response" })),
+                ),
+              );
+            };
+            const onFailure = () => {
+              clear();
+              resume(Effect.fail(new DesktopError({ message: "Server startup failed" })));
+            };
+            child.once("message", onMessage);
+            child.once("error", onFailure);
+            child.once("exit", onFailure);
+            return Effect.sync(clear);
+          },
+        );
+        server = { child, port: ready.port };
+        sessionFile = ready.sessionFile;
+        const scope = yield* Scope.fork(connections, "sequential");
+        connectionScope = scope;
+        const initial = yield* Deferred.make<typeof Conversation.Type, DesktopError>();
+        const connect = Effect.gen(function* () {
+          const transport = Layer.effect(
+            RpcClient.Protocol,
+            RpcClient.makeProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
+          ).pipe(
+            Layer.provide([
+              RpcSerialization.layerNdjson,
+              Layer.effect(
+                Socket.Socket,
+                NodeSocket.fromDuplex(
+                  Effect.acquireRelease(
+                    Effect.sync(() =>
+                      NodeSocket.NodeWS.createWebSocketStream(
+                        new NodeSocket.NodeWS.WebSocket(`ws://127.0.0.1:${ready.port}/rpc/`, {
+                          headers: {
+                            authorization: `Bearer ${serverSecret}`,
+                            origin: "pidex://app",
+                          },
+                          handshakeTimeout: 10_000,
+                        }),
+                      ),
+                    ),
+                    (stream) =>
+                      Effect.sync(() => {
+                        stream.destroy();
+                      }),
+                  ),
+                ),
+              ),
+            ]),
+          );
+          const connectionScope = yield* Effect.scope;
+          const context = yield* Layer.buildWithScope(transport, connectionScope);
+          const client = yield* RpcClient.make(ConversationApi).pipe(
+            Effect.provideContext(context),
+          );
+          yield* client.Subscribe().pipe(
+            Stream.runForEach((update) =>
+              Effect.gen(function* () {
+                if (update._tag === "Snapshot") {
+                  conversation = update.conversation;
+                  connectionError = "";
+                  sendPrompt = (text, submissionId) =>
+                    client.Send({ text, submissionId }).pipe(
+                      Effect.map((): "accepted" => "accepted"),
+                      Effect.catchCause((cause) => {
+                        const failure = Cause.findErrorOption(cause);
+                        return Option.isSome(failure) && failure.value._tag === "SendError"
+                          ? Effect.fail(new DesktopError({ message: failure.value.message }))
+                          : Effect.succeed<"uncertain">("uncertain");
+                      }),
+                    );
+                } else if (conversation)
+                  conversation = applyConversationUpdate(conversation, update);
+                if (window && !window.isDestroyed())
+                  window.webContents.send("conversation", update);
+                if (conversation) yield* Deferred.succeed(initial, conversation);
+              }),
+            ),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.ensuring(
+            Effect.sync(() => {
+              sendPrompt = undefined;
+              if (window && !window.isDestroyed()) window.webContents.send("conversation", null);
+            }),
+          ),
+          Effect.retry({
+            schedule: Schedule.spaced("500 millis"),
+            while: (error) =>
+              child.exitCode === null &&
+              child.signalCode === null &&
+              !(error._tag === "SubscribeError" && error.reason === "payload-too-large"),
+          }),
+          Effect.catch(() =>
+            Effect.gen(function* () {
+              if (child.exitCode === null && child.signalCode === null) {
+                connectionError = "Could not reconnect. Pi history is preserved.";
+                if (window && !window.isDestroyed())
+                  window.webContents.send("conversation", {
+                    _tag: "ConnectionError",
+                    message: connectionError,
+                  });
+                yield* Effect.logError(connectionError);
+              }
+              yield* Deferred.fail(
+                initial,
+                new DesktopError({ message: "Could not connect to Pi" }),
+              );
+            }),
+          ),
+        );
+        yield* connect.pipe(Effect.forkIn(scope));
+        yield* Deferred.await(initial).pipe(Effect.onError(() => Scope.close(scope, Exit.void)));
+        crashed = false;
+        interrupted = false;
+        return conversation;
+      }).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            server?.child.kill();
+          }),
+        ),
+      );
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          starting = false;
+        }),
+      ),
+    );
+  });
   ipcMain.on("subscribe-conversation", (event) => {
     if (!isTrustedWindow(event)) return;
     // Main owns the live projection. This snapshot and subsequent IPC updates are ordered.
@@ -305,6 +354,7 @@ const program = Effect.gen(function* () {
     if (connectionError)
       event.sender.send("conversation", { _tag: "ConnectionError", message: connectionError });
     else if (conversation && !sendPrompt) event.sender.send("conversation", null);
+    if (crashed) event.sender.send("backend-crashed");
   });
   const openWindow = Effect.fn(function* () {
     if (quitting || (window && !window.isDestroyed())) return;

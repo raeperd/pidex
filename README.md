@@ -45,3 +45,9 @@ For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#
 `pnpm test --grep '#138'` runs three Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, and a held provider response that returns HTTP 503 until Pi exhausts its stock retries. Setup failures show correction steps and disable Send while drafts remain editable. Provider failure returns to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
 
 `pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
+
+## Backend recovery
+
+After a backend crash, click Restart to load the exact saved conversation. An interrupted run stays stopped until you send another prompt. Recovery does not make a provider request; unfinished output may not have been saved by Pi. The recovery locator lives only in Electron main memory.
+
+Run `pnpm test --grep '#135'`, or `pnpm build && pnpm exec playwright test --grep '#135' --debug` for visible step-through. The isolated lifecycle fixture supplies temporary credentials, project, history, and controlled provider replies. It kills the actual owned child after a saved turn and during a held response, checks main survival and one replacement, compares JSONL bytes before/after recovery, then sends manually. Traces, failure screenshots, and redacted Electron logs are in `test-results/`.

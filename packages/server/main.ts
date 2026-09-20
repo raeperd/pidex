@@ -5,6 +5,7 @@ import {
   getAgentDir,
   ModelRuntime,
   SettingsManager,
+  SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { Cause, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -25,6 +26,10 @@ const program = Effect.gen(function* () {
     process.env.PIDEX_SERVER_SECRET,
   );
   delete process.env.PIDEX_SERVER_SECRET;
+  const recoveryFile = process.env.PIDEX_SESSION_FILE;
+  const interrupted = process.env.PIDEX_INTERRUPTED === "1";
+  delete process.env.PIDEX_SESSION_FILE;
+  delete process.env.PIDEX_INTERRUPTED;
   const { session } = yield* Effect.acquireRelease(
     Effect.gen(function* () {
       const cwd = process.cwd();
@@ -58,6 +63,13 @@ const program = Effect.gen(function* () {
         try: () => ModelRuntime.create(),
         catch: () => new StartupError(),
       });
+      const sessionManager = yield* Effect.try({
+        try: () =>
+          recoveryFile
+            ? SessionManager.open(recoveryFile, undefined, cwd)
+            : SessionManager.create(cwd),
+        catch: () => new StartupError(),
+      });
       return yield* Effect.tryPromise({
         try: () =>
           createAgentSession({
@@ -66,6 +78,7 @@ const program = Effect.gen(function* () {
             resourceLoader,
             settingsManager,
             modelRuntime,
+            sessionManager,
             tools: ["read", "bash", "edit", "write"],
           }),
         catch: () => new StartupError(),
@@ -116,10 +129,57 @@ const program = Effect.gen(function* () {
     modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
     setupError,
     status: "idle",
-    messageCount: 0,
+    messageCount: session.messages.length,
     entries: [],
-    error: "",
+    error: interrupted
+      ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
+      : "",
   };
+  // Read the active saved branch, including history before compaction.
+  for (const item of session.sessionManager.getBranch()) {
+    if (item.type !== "message") continue;
+    const message = item.message;
+    if (message.role === "user" || message.role === "assistant") {
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : message.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("");
+      if (text)
+        state = applyConversationUpdate(state, {
+          _tag: "EntryUpserted",
+          entry: { id: item.id, role: message.role, text },
+        });
+      if (message.role === "assistant")
+        for (const part of message.content) {
+          if (part.type !== "toolCall") continue;
+          state = applyConversationUpdate(state, {
+            _tag: "EntryUpserted",
+            entry: {
+              id: part.id,
+              role: "tool",
+              name: part.name,
+              input: JSON.stringify(part.arguments, null, 2),
+              result: "Interrupted before a saved result.",
+              status: "failed",
+            },
+          });
+        }
+    } else if (message.role === "toolResult") {
+      const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
+      if (entry?.role === "tool")
+        state = applyConversationUpdate(state, {
+          _tag: "EntryUpserted",
+          entry: {
+            ...entry,
+            result: JSON.stringify({ content: message.content, details: message.details }, null, 2),
+            status: message.isError ? "failed" : "completed",
+          },
+        });
+    }
+  }
   const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
   let messageId = "";
   yield* Effect.acquireRelease(

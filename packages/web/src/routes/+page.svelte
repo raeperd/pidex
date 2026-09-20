@@ -8,6 +8,8 @@
   let pending: { id: string; text: string } | undefined;
   let connected = $state(true);
   let choosing = $state(false);
+  let crashed = $state(false);
+  let restarting = $state(false);
   let error = $state("");
 
   let canSend = $derived(
@@ -40,6 +42,26 @@
       }
     }),
   );
+
+  onMount(() =>
+    window.desktop.onCrash(() => {
+      crashed = true;
+      connected = false;
+    }),
+  );
+
+  async function restart() {
+    restarting = true;
+    error = "";
+    try {
+      await window.desktop.restart();
+      crashed = false;
+    } catch {
+      error = "Could not restart the backend. Try Restart again.";
+    } finally {
+      restarting = false;
+    }
+  }
 
   async function send() {
     if (!canSend) return;
@@ -120,6 +142,10 @@
       {/each}
       {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
       {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
+      {#if crashed}
+        <p role="alert">The backend stopped. Restart to recover saved history.</p>
+        <button onclick={restart} disabled={restarting}>Restart</button>
+      {/if}
       <form
         onsubmit={(event) => {
           event.preventDefault();
