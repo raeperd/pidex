@@ -265,6 +265,31 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         join(agentDir, "auth.json"),
         JSON.stringify({ openai: { type: "api_key", key: "pidex-test-key" } }),
       );
+
+      async function resources(root: string, scope: string) {
+        const sdkDir = dirname(
+          fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+        );
+        const stockTheme = await readFile(
+          join(sdkDir, "modes/interactive/theme/dark.json"),
+          "utf8",
+        );
+        for (const kind of ["extension", "skill", "prompt", "theme"])
+          excluded.push(`EXCLUDED_${scope}_${kind}`);
+        await fixture(
+          join(root, "extensions/sentinel.js"),
+          `import { writeFileSync } from "node:fs";\nexport default function () { writeFileSync(${JSON.stringify(join(temporary, "extension-loaded"))}, "EXCLUDED_${scope}_extension"); }\n`,
+        );
+        await fixture(
+          join(root, "skills", `${scope}-skill`, "SKILL.md"),
+          `---\nname: ${scope}-skill\ndescription: EXCLUDED_${scope}_skill\n---\nEXCLUDED_${scope}_skill\n`,
+        );
+        await fixture(join(root, "prompts", `${scope}-prompt.md`), `EXCLUDED_${scope}_prompt\n`);
+        await fixture(
+          join(root, "themes/sentinel.json"),
+          stockTheme.replace('"name": "dark"', `"name": "EXCLUDED_${scope}_theme"`),
+        );
+      }
     }
 
     function verifyProviderInput() {
@@ -320,26 +345,6 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, bytes);
       originalFiles.set(path, bytes);
-    }
-
-    async function resources(root: string, scope: string) {
-      const sdkDir = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
-      const stockTheme = await readFile(join(sdkDir, "modes/interactive/theme/dark.json"), "utf8");
-      for (const kind of ["extension", "skill", "prompt", "theme"])
-        excluded.push(`EXCLUDED_${scope}_${kind}`);
-      await fixture(
-        join(root, "extensions/sentinel.js"),
-        `import { writeFileSync } from "node:fs";\nexport default function () { writeFileSync(${JSON.stringify(join(temporary, "extension-loaded"))}, "EXCLUDED_${scope}_extension"); }\n`,
-      );
-      await fixture(
-        join(root, "skills", `${scope}-skill`, "SKILL.md"),
-        `---\nname: ${scope}-skill\ndescription: EXCLUDED_${scope}_skill\n---\nEXCLUDED_${scope}_skill\n`,
-      );
-      await fixture(join(root, "prompts", `${scope}-prompt.md`), `EXCLUDED_${scope}_prompt\n`);
-      await fixture(
-        join(root, "themes/sentinel.json"),
-        stockTheme.replace('"name": "dark"', `"name": "EXCLUDED_${scope}_theme"`),
-      );
     }
 
     async function verifyUnloadedResources() {
