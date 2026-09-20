@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { chmod, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "./support/lifecycle.js";
+import { alive, test } from "./support/lifecycle.js";
 
 test("#135 manually recovers the exact saved session after idle and busy crashes", async ({
   lifecycle,
@@ -295,12 +295,3 @@ test("#135 restores Restart after a backend crash while the window is closed", a
   expect(lifecycle.requests).toHaveLength(1);
 });
 
-function alive(pid: number) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
-    throw error;
-  }
-}
