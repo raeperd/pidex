@@ -6,7 +6,7 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Cause, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
@@ -16,6 +16,7 @@ import {
   ConversationApi,
   ConversationUpdate,
   SendError,
+  SubscribeError,
 } from "../api/index.js";
 
 const program = Effect.gen(function* () {
@@ -94,7 +95,7 @@ const program = Effect.gen(function* () {
     entries: [],
     error: "",
   };
-  const subscribers = new Set<(update: typeof ConversationUpdate.Type) => void>();
+  const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
   let messageId = "";
   yield* Effect.acquireRelease(
     Effect.sync(() =>
@@ -213,22 +214,66 @@ const program = Effect.gen(function* () {
         RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
           Subscribe: () =>
-            Stream.callback<typeof ConversationUpdate.Type>((queue) =>
-              Effect.acquireRelease(
-                Effect.sync(() => {
-                  const enqueue = (update: typeof ConversationUpdate.Type) => {
-                    Queue.offerUnsafe(queue, update);
-                  };
-                  // Capture the snapshot and register synchronously: no missing or repeated deltas.
-                  enqueue({ _tag: "Snapshot", conversation: state });
-                  subscribers.add(enqueue);
-                  return enqueue;
-                }),
-                (enqueue) =>
-                  Effect.sync(() => {
+            Stream.unwrap(
+              Effect.gen(function* () {
+                // Include the item awaiting an RPC acknowledgement in both limits.
+                const maxItems = 64;
+                const maxBytes = 8 * 1024 * 1024;
+                const queue = yield* Queue.bounded<
+                  { update: typeof ConversationUpdate.Type; bytes: number },
+                  SubscribeError
+                >(maxItems);
+                let items = 0;
+                let bytes = 0;
+                let deliveredBytes = 0;
+                let failure: SubscribeError | undefined;
+                const enqueue = (update: typeof ConversationUpdate.Type, size: number) => {
+                  if (failure) return;
+                  if (size > maxBytes || items >= maxItems || bytes + size > maxBytes) {
+                    failure = new SubscribeError({
+                      reason: size > maxBytes ? "payload-too-large" : "slow-consumer",
+                      message:
+                        size > maxBytes
+                          ? "A subscription payload is too large to stream. Pi history is preserved."
+                          : "The subscription fell behind. Subscribe again for the current conversation.",
+                    });
                     subscribers.delete(enqueue);
+                    Queue.failCauseUnsafe(queue, Cause.fail(failure));
+                    return;
+                  }
+                  items++;
+                  bytes += size;
+                  Queue.offerUnsafe(queue, { update, bytes: size });
+                };
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    // Registration and initial snapshot happen together, without a gap.
+                    subscribers.add(enqueue);
+                    const initial = {
+                      _tag: "Snapshot",
+                      conversation: state,
+                    } satisfies typeof ConversationUpdate.Type;
+                    enqueue(initial, Buffer.byteLength(JSON.stringify(initial)));
                   }),
-              ),
+                  () =>
+                    Effect.sync(() => {
+                      subscribers.delete(enqueue);
+                    }).pipe(Effect.andThen(Queue.shutdown(queue))),
+                );
+                return Stream.fromEffectRepeat(
+                  Effect.gen(function* () {
+                    if (failure) return yield* failure;
+                    // The next pull means the previous single-item chunk was acknowledged.
+                    if (deliveredBytes > 0) {
+                      items--;
+                      bytes -= deliveredBytes;
+                    }
+                    const next = yield* Queue.take(queue);
+                    deliveredBytes = next.bytes;
+                    return next.update;
+                  }),
+                );
+              }),
             ),
           Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
@@ -256,7 +301,9 @@ const program = Effect.gen(function* () {
 
   function publish(update: typeof ConversationUpdate.Type) {
     state = applyConversationUpdate(state, update);
-    for (const enqueue of subscribers) enqueue(update);
+    if (subscribers.size === 0) return;
+    const bytes = Buffer.byteLength(JSON.stringify(update));
+    for (const enqueue of subscribers) enqueue(update, bytes);
   }
 });
 
