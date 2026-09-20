@@ -294,4 +294,3 @@ test("#135 restores Restart after a backend crash while the window is closed", a
   expect(await lifecycle.history()).toEqual(saved);
   expect(lifecycle.requests).toHaveLength(1);
 });
-
