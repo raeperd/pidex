@@ -4,7 +4,7 @@ declare global {
   interface Window {
     desktop: {
       chooseProject: () => Promise<typeof Conversation.Type | null>;
-      restart: () => Promise<void>;
+      restart: () => Promise<string | null>;
       onCrash: (onCrash: () => void) => () => void;
 
       stop: (runId: string) => Promise<void>;

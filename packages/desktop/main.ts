@@ -214,7 +214,7 @@ const program = Effect.gen(function* () {
         const child = server?.child;
         if (child && child.exitCode === null && child.signalCode === null) return;
         yield* startServer();
-      }),
+      }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
   );
   const startServer = Effect.fn(function* () {
@@ -384,9 +384,10 @@ const program = Effect.gen(function* () {
             while: (error) =>
               child.exitCode === null &&
               child.signalCode === null &&
+              error._tag !== "RecoveryError" &&
               !(error._tag === "SubscribeError" && error.reason === "payload-too-large"),
           }),
-          Effect.catch(() =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               if (child.exitCode === null && child.signalCode === null) {
                 connectionError = "Could not reconnect. Pi history is preserved.";
@@ -399,7 +400,10 @@ const program = Effect.gen(function* () {
               }
               yield* Deferred.fail(
                 initial,
-                new DesktopError({ message: "Could not connect to Pi" }),
+                new DesktopError({
+                  message:
+                    error._tag === "RecoveryError" ? error.message : "Could not connect to Pi",
+                }),
               );
             }),
           ),
@@ -411,8 +415,14 @@ const program = Effect.gen(function* () {
         return conversation;
       }).pipe(
         Effect.onError(() =>
-          Effect.sync(() => {
-            server?.child.kill();
+          Effect.callback<void>((resume) => {
+            if (child.exitCode !== null || child.signalCode !== null) return resume(Effect.void);
+            const onExit = () => resume(Effect.void);
+            child.once("exit", onExit);
+            child.kill();
+            return Effect.sync(() => {
+              child.off("exit", onExit);
+            });
           }),
         ),
       );

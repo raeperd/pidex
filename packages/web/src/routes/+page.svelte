@@ -57,8 +57,9 @@
     restarting = true;
     error = "";
     try {
-      await window.desktop.restart();
-      crashed = false;
+      const failure = await window.desktop.restart();
+      if (failure) error = failure;
+      else crashed = false;
     } catch {
       error = "Could not restart the backend. Try Restart again.";
     } finally {

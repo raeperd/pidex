@@ -7,9 +7,10 @@ import {
   SettingsManager,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Cause, Deferred, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import {
   applyConversationUpdate,
@@ -17,6 +18,7 @@ import {
   ConversationApi,
   ConversationUpdate,
   SendError,
+  RecoveryError,
   SubscribeError,
   SetupError,
   StopError,
@@ -31,439 +33,541 @@ const program = Effect.gen(function* () {
   const interrupted = process.env.PIDEX_INTERRUPTED === "1";
   delete process.env.PIDEX_SESSION_FILE;
   delete process.env.PIDEX_INTERRUPTED;
-  const { session } = yield* Effect.acquireRelease(
-    Effect.gen(function* () {
-      const cwd = process.cwd();
-      const agentDir = getAgentDir();
-      const resourceLoader = yield* Effect.try({
-        try: () =>
-          new DefaultResourceLoader({
-            cwd,
-            agentDir,
-            // Package resolution reads raw settings, before the no-* filters run.
-            settingsManager: SettingsManager.inMemory(),
-            noExtensions: true,
-            noSkills: true,
-            noPromptTemplates: true,
-            noThemes: true,
-            systemPrompt: "",
-            systemPromptOverride: () => undefined,
-            appendSystemPrompt: [],
+  let readySessionFile = recoveryFile ?? "";
+  const rpc = yield* Effect.gen(function* () {
+    const recoveryMissing = yield* Effect.gen(function* () {
+      const recoveryContents = recoveryFile
+        ? yield* Effect.tryPromise({
+            try: () => readFile(recoveryFile, "utf8"),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.catch((cause) =>
+              cause instanceof Error && "code" in cause && cause.code === "ENOENT"
+                ? Effect.succeed(undefined)
+                : Effect.fail(
+                    new RecoveryError({
+                      message: `Cannot read saved history (${cause instanceof Error && "code" in cause ? String(cause.code) : "read error"}): ${recoveryFile}. Check file and folder permissions, then Restart. The file has not been replaced.`,
+                    }),
+                  ),
+            ),
+          )
+        : undefined;
+      if (recoveryContents !== undefined) {
+        yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            type: Schema.Literal("session"),
+            version: Schema.Literal(3),
+            id: Schema.String,
+            cwd: Schema.String,
           }),
-        catch: () => new StartupError(),
-      });
-      yield* Effect.tryPromise({
-        try: () => resourceLoader.reload(),
-        catch: () => new StartupError(),
-      });
-      const settingsManager = yield* Effect.try({
-        try: () => SettingsManager.create(cwd, agentDir),
-        catch: () => new StartupError(),
-      });
-      const modelRuntime = yield* Effect.tryPromise({
-        try: () => ModelRuntime.create(),
-        catch: () => new StartupError(),
-      });
-      const sessionManager = yield* Effect.try({
-        try: () =>
-          recoveryFile
-            ? SessionManager.open(recoveryFile, undefined, cwd)
-            : SessionManager.create(cwd),
-        catch: () => new StartupError(),
-      });
-      return yield* Effect.tryPromise({
-        try: () =>
-          createAgentSession({
-            cwd,
-            agentDir,
-            resourceLoader,
-            settingsManager,
-            modelRuntime,
-            sessionManager,
-            tools: ["read", "bash", "edit", "write"],
+        )(
+          yield* Effect.try({
+            try: () => JSON.parse(recoveryContents.split("\n")[0] ?? ""),
+            catch: () =>
+              new RecoveryError({
+                message: `Cannot read saved history: ${recoveryFile}. The session header is invalid. Restore a valid Pi session file, then Restart. The file has not been replaced.`,
+              }),
           }),
-        catch: () => new StartupError(),
-      });
-    }),
-    ({ session: acquired }) =>
+        ).pipe(
+          Effect.mapError(
+            () =>
+              new RecoveryError({
+                message: `Cannot read saved history: ${recoveryFile}. The session header is invalid or unsupported. Restore a valid Pi session file, then Restart. The file has not been replaced.`,
+              }),
+          ),
+        );
+      }
+
+      return Boolean(recoveryFile) && recoveryContents === undefined;
+    });
+
+    const { session } = yield* Effect.acquireRelease(
       Effect.gen(function* () {
-        yield* Effect.try({
-          try: () => acquired.dispose(),
-          catch: () => new ShutdownError(),
+        const cwd = process.cwd();
+        const agentDir = getAgentDir();
+        const resourceLoader = yield* Effect.try({
+          try: () =>
+            new DefaultResourceLoader({
+              cwd,
+              agentDir,
+              // Package resolution reads raw settings, before the no-* filters run.
+              settingsManager: SettingsManager.inMemory(),
+              noExtensions: true,
+              noSkills: true,
+              noPromptTemplates: true,
+              noThemes: true,
+              systemPrompt: "",
+              systemPromptOverride: () => undefined,
+              appendSystemPrompt: [],
+            }),
+          catch: () => new StartupError(),
         });
         yield* Effect.tryPromise({
-          try: () => acquired.settingsManager.flush(),
-          catch: () => new ShutdownError(),
+          try: () => resourceLoader.reload(),
+          catch: () => new StartupError(),
         });
-        const errors = yield* Effect.sync(() => acquired.settingsManager.drainErrors());
-        if (errors.length > 0) return yield* new ShutdownError();
-      }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
-  );
-  if (!session.sessionFile || session.isStreaming) return yield* new StartupError();
-  const model = session.model;
-  const setupError = yield* Effect.gen(function* () {
-    const provider = session.settingsManager.getDefaultProvider();
-    const modelId = session.settingsManager.getDefaultModel();
-    if (provider && modelId && !session.modelRuntime.getModel(provider, modelId)) {
-      return yield* new SetupError({
-        reason: "model",
+        const settingsManager = yield* Effect.try({
+          try: () => SettingsManager.create(cwd, agentDir),
+          catch: () => new StartupError(),
+        });
+        const modelRuntime = yield* Effect.tryPromise({
+          try: () => ModelRuntime.create(),
+          catch: () => new StartupError(),
+        });
+        const sessionManager = yield* Effect.try({
+          try: () =>
+            recoveryFile && !recoveryMissing
+              ? SessionManager.open(recoveryFile, undefined, cwd)
+              : SessionManager.create(cwd),
+          catch: () =>
+            recoveryFile
+              ? new RecoveryError({
+                  message: `Cannot read saved history: ${recoveryFile}. Check file permissions and restore a valid Pi session, then Restart. The file has not been replaced.`,
+                })
+              : new StartupError(),
+        });
+        return yield* Effect.tryPromise({
+          try: () =>
+            createAgentSession({
+              cwd,
+              agentDir,
+              resourceLoader,
+              settingsManager,
+              modelRuntime,
+              sessionManager,
+              tools: ["read", "bash", "edit", "write"],
+            }),
+          catch: () => new StartupError(),
+        });
+      }),
+      ({ session: acquired }) =>
+        Effect.gen(function* () {
+          yield* Effect.try({
+            try: () => acquired.dispose(),
+            catch: () => new ShutdownError(),
+          });
+          yield* Effect.tryPromise({
+            try: () => acquired.settingsManager.flush(),
+            catch: () => new ShutdownError(),
+          });
+          const errors = yield* Effect.sync(() => acquired.settingsManager.drainErrors());
+          if (errors.length > 0) return yield* new ShutdownError();
+        }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
+    );
+    if (!session.sessionFile || session.isStreaming) return yield* new StartupError();
+    const model = session.model;
+    const setupError = yield* Effect.gen(function* () {
+      const provider = session.settingsManager.getDefaultProvider();
+      const modelId = session.settingsManager.getDefaultModel();
+      if (provider && modelId && !session.modelRuntime.getModel(provider, modelId)) {
+        return yield* new SetupError({
+          reason: "model",
+          message:
+            "Pi's default model could not be resolved. Open Pi in this project, use /model to select an available model and save it as the default, then restart Pidex. Check settings.json and models.json if you use a custom model.",
+        });
+      }
+      const authenticationError = new SetupError({
+        reason: "authentication",
         message:
-          "Pi's default model could not be resolved. Open Pi in this project, use /model to select an available model and save it as the default, then restart Pidex. Check settings.json and models.json if you use a custom model.",
+          "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
       });
-    }
-    const authenticationError = new SetupError({
-      reason: "authentication",
-      message:
-        "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
-    });
-    if (!model) return yield* authenticationError;
-    const auth = yield* Effect.tryPromise({
-      try: () => session.modelRuntime.getAuth(model),
-      catch: () => authenticationError,
-    });
-    if (!auth || (!auth.auth.apiKey && !auth.auth.headers)) return yield* authenticationError;
-    return null;
-  }).pipe(Effect.catch((error) => Effect.succeed(error)));
-  const scope = yield* Effect.scope;
-  let state: typeof Conversation.Type = {
-    id: session.sessionId,
-    modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
-    setupError,
-    status: "idle",
-    runId: null,
-    messageCount: session.messages.length,
-    entries: [],
-    error: recoveryNotice(),
-  };
-  yield* Effect.sync(() => {
-    // Read the active saved branch, including history before compaction.
-    for (const item of session.sessionManager.getBranch()) {
-      if (item.type !== "message") continue;
-      const message = item.message;
-      switch (message.role) {
-        case "user":
-        case "assistant": {
-          const text =
-            typeof message.content === "string"
-              ? message.content
-              : message.content
-                  .filter((part) => part.type === "text")
-                  .map((part) => part.text)
-                  .join("");
-          if (text)
-            state = applyConversationUpdate(state, {
-              _tag: "EntryUpserted",
-              entry: { id: item.id, role: message.role, text },
-            });
-          if (message.role === "assistant")
-            for (const part of message.content) {
-              if (part.type !== "toolCall") continue;
+      if (!model) return yield* authenticationError;
+      const auth = yield* Effect.tryPromise({
+        try: () => session.modelRuntime.getAuth(model),
+        catch: () => authenticationError,
+      });
+      if (!auth || (!auth.auth.apiKey && !auth.auth.headers)) return yield* authenticationError;
+      return null;
+    }).pipe(Effect.catch((error) => Effect.succeed(error)));
+    const scope = yield* Effect.scope;
+    let state: typeof Conversation.Type = {
+      id: session.sessionId,
+      modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
+      setupError,
+      status: "idle",
+      runId: null,
+      messageCount: session.messages.length,
+      entries: [],
+      error: recoveryMissing
+        ? "Saved history is missing. Started a fresh conversation in the same project; no prompt was replayed."
+        : recoveryNotice(),
+    };
+    yield* Effect.sync(() => {
+      // Read the active saved branch, including history before compaction.
+      for (const item of session.sessionManager.getBranch()) {
+        if (item.type !== "message") continue;
+        const message = item.message;
+        switch (message.role) {
+          case "user":
+          case "assistant": {
+            const text =
+              typeof message.content === "string"
+                ? message.content
+                : message.content
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join("");
+            if (text)
+              state = applyConversationUpdate(state, {
+                _tag: "EntryUpserted",
+                entry: { id: item.id, role: message.role, text },
+              });
+            if (message.role === "assistant")
+              for (const part of message.content) {
+                if (part.type !== "toolCall") continue;
+                state = applyConversationUpdate(state, {
+                  _tag: "EntryUpserted",
+                  entry: {
+                    id: part.id,
+                    role: "tool",
+                    name: part.name,
+                    input: JSON.stringify(part.arguments, null, 2),
+                    result: "Interrupted before a saved result.",
+                    status: "failed",
+                  },
+                });
+              }
+            break;
+          }
+          case "toolResult": {
+            const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
+            if (entry?.role === "tool")
               state = applyConversationUpdate(state, {
                 _tag: "EntryUpserted",
                 entry: {
-                  id: part.id,
-                  role: "tool",
-                  name: part.name,
-                  input: JSON.stringify(part.arguments, null, 2),
-                  result: "Interrupted before a saved result.",
-                  status: "failed",
+                  ...entry,
+                  result: JSON.stringify(
+                    { content: message.content, details: message.details },
+                    null,
+                    2,
+                  ),
+                  status: message.isError ? "failed" : "completed",
                 },
               });
-            }
-          break;
-        }
-        case "toolResult": {
-          const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
-          if (entry?.role === "tool")
-            state = applyConversationUpdate(state, {
-              _tag: "EntryUpserted",
-              entry: {
-                ...entry,
-                result: JSON.stringify(
-                  { content: message.content, details: message.details },
-                  null,
-                  2,
-                ),
-                status: message.isError ? "failed" : "completed",
-              },
-            });
-          break;
-        }
-      }
-    }
-  });
-  const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
-  let active:
-    | {
-        id: string;
-        started: Deferred.Deferred<void>;
-        finished: Deferred.Deferred<void>;
-        stopped: Deferred.Deferred<void, StopError>;
-      }
-    | undefined;
-  let messageId = "";
-  yield* Effect.acquireRelease(
-    Effect.sync(() =>
-      session.subscribe((event) => {
-        if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
-          // Pi can start the pending turn after aborting preflight compaction.
-          const run = active;
-          if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
-          if (event.type === "compaction_start") {
-            // Pi installs the compaction controller after notifying subscribers.
-            queueMicrotask(() => {
-              if (active === run && state.status === "stopping") session.abortCompaction();
-            });
+            break;
           }
-          Effect.runSync(Deferred.succeed(run.started, undefined));
         }
-        Effect.runSync(
-          Effect.sync(() => {
-            switch (event.type) {
-              case "message_start":
-                if (event.message.role === "assistant") messageId = crypto.randomUUID();
-                return;
-              case "message_update":
-                if (event.assistantMessageEvent.type !== "text_delta") return;
-                publish({
-                  _tag: "TextDelta",
-                  id: messageId,
-                  delta: event.assistantMessageEvent.delta,
-                });
-                return;
-              case "tool_execution_start":
-                publish({
-                  _tag: "EntryUpserted",
-                  entry: {
-                    id: event.toolCallId,
-                    role: "tool",
-                    name: event.toolName,
-                    input: JSON.stringify(event.args, null, 2),
-                    result: "",
-                    status: "running",
-                  },
-                });
-                return;
-              case "tool_execution_update":
-              case "tool_execution_end": {
-                const entry = state.entries.find((item) => item.id === event.toolCallId);
-                if (entry?.role !== "tool") return;
-                publish({
-                  _tag: "EntryUpserted",
-                  entry: {
-                    ...entry,
-                    result: JSON.stringify(
-                      event.type === "tool_execution_end" ? event.result : event.partialResult,
-                      null,
-                      2,
-                    ),
-                    status:
-                      event.type === "tool_execution_update"
-                        ? "running"
-                        : event.isError
-                          ? "failed"
-                          : "completed",
-                  },
-                });
-                return;
-              }
+      }
+    });
+    const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
+    let active:
+      | {
+          id: string;
+          started: Deferred.Deferred<void>;
+          finished: Deferred.Deferred<void>;
+          stopped: Deferred.Deferred<void, StopError>;
+        }
+      | undefined;
+    let messageId = "";
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        session.subscribe((event) => {
+          if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
+            // Pi can start the pending turn after aborting preflight compaction.
+            const run = active;
+            if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
+            if (event.type === "compaction_start") {
+              // Pi installs the compaction controller after notifying subscribers.
+              queueMicrotask(() => {
+                if (active === run && state.status === "stopping") session.abortCompaction();
+              });
             }
-          }),
-        );
-      }),
-    ),
-    (unsubscribe) =>
-      Effect.tryPromise({
-        try: () => session.abort(),
-        catch: () => new ShutdownError(),
-      }).pipe(
-        Effect.catch(() => Effect.logError("Could not cancel Pi during shutdown")),
-        Effect.ensuring(Effect.sync(unsubscribe)),
+            Effect.runSync(Deferred.succeed(run.started, undefined));
+          }
+          Effect.runSync(
+            Effect.sync(() => {
+              switch (event.type) {
+                case "message_start":
+                  if (event.message.role === "assistant") messageId = crypto.randomUUID();
+                  return;
+                case "message_update":
+                  if (event.assistantMessageEvent.type !== "text_delta") return;
+                  publish({
+                    _tag: "TextDelta",
+                    id: messageId,
+                    delta: event.assistantMessageEvent.delta,
+                  });
+                  return;
+                case "tool_execution_start":
+                  publish({
+                    _tag: "EntryUpserted",
+                    entry: {
+                      id: event.toolCallId,
+                      role: "tool",
+                      name: event.toolName,
+                      input: JSON.stringify(event.args, null, 2),
+                      result: "",
+                      status: "running",
+                    },
+                  });
+                  return;
+                case "tool_execution_update":
+                case "tool_execution_end": {
+                  const entry = state.entries.find((item) => item.id === event.toolCallId);
+                  if (entry?.role !== "tool") return;
+                  publish({
+                    _tag: "EntryUpserted",
+                    entry: {
+                      ...entry,
+                      result: JSON.stringify(
+                        event.type === "tool_execution_end" ? event.result : event.partialResult,
+                        null,
+                        2,
+                      ),
+                      status:
+                        event.type === "tool_execution_update"
+                          ? "running"
+                          : event.isError
+                            ? "failed"
+                            : "completed",
+                    },
+                  });
+                  return;
+                }
+              }
+            }),
+          );
+        }),
       ),
-  );
-  const send = Effect.fn(function* ({
-    text,
-    submissionId,
-  }: {
-    text: string;
-    submissionId?: string;
-  }) {
-    if (state.setupError) return yield* new SendError({ message: state.setupError.message });
-    if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
-    if (state.status !== "idle")
-      return yield* new SendError({ message: "Wait for the current reply." });
-    const run = {
-      id: crypto.randomUUID(),
-      started: yield* Deferred.make<void>(),
-      finished: yield* Deferred.make<void>(),
-      stopped: yield* Deferred.make<void, StopError>(),
-    };
-    active = run;
-    publish({
-      _tag: "StateChanged",
-      status: "running",
-      runId: run.id,
-      messageCount: state.messageCount,
-      error: "",
-    });
-    publish({
-      _tag: "EntryUpserted",
-      entry: {
+      (unsubscribe) =>
+        Effect.tryPromise({
+          try: () => session.abort(),
+          catch: () => new ShutdownError(),
+        }).pipe(
+          Effect.catch(() => Effect.logError("Could not cancel Pi during shutdown")),
+          Effect.ensuring(Effect.sync(unsubscribe)),
+        ),
+    );
+    const send = Effect.fn(function* ({
+      text,
+      submissionId,
+    }: {
+      text: string;
+      submissionId?: string;
+    }) {
+      if (state.setupError) return yield* new SendError({ message: state.setupError.message });
+      if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
+      if (state.status !== "idle")
+        return yield* new SendError({ message: "Wait for the current reply." });
+      const run = {
         id: crypto.randomUUID(),
-        role: "user",
-        text,
-        ...(submissionId === undefined ? {} : { submissionId }),
-      },
+        started: yield* Deferred.make<void>(),
+        finished: yield* Deferred.make<void>(),
+        stopped: yield* Deferred.make<void, StopError>(),
+      };
+      active = run;
+      publish({
+        _tag: "StateChanged",
+        status: "running",
+        runId: run.id,
+        messageCount: state.messageCount,
+        error: "",
+      });
+      publish({
+        _tag: "EntryUpserted",
+        entry: {
+          id: crypto.randomUUID(),
+          role: "user",
+          text,
+          ...(submissionId === undefined ? {} : { submissionId }),
+        },
+      });
+      yield* Effect.tryPromise({
+        try: () => session.prompt(text),
+        catch: () =>
+          new SendError({
+            message: "Pi could not complete the prompt. Check your model and credentials.",
+          }),
+      }).pipe(
+        Effect.andThen(
+          Effect.suspend(() => {
+            const lastReply = session.messages.findLast((message) => message.role === "assistant");
+            return lastReply?.role === "assistant" && lastReply.stopReason === "error"
+              ? Effect.fail(
+                  new SendError({
+                    message:
+                      "The model provider could not complete the reply. Check provider availability, quota, and Pi authentication, then try again.",
+                  }),
+                )
+              : Effect.void;
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.sync(() =>
+            publish({
+              _tag: "StateChanged",
+              status: state.status,
+              runId: state.runId,
+              messageCount: state.messageCount,
+              error: error.message,
+            }),
+          ),
+        ),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            // A preflight failure may finish without emitting agent_start.
+            yield* Deferred.succeed(run.started, undefined);
+            yield* Deferred.succeed(run.finished, undefined);
+            if (state.status !== "stopping") finishRun();
+          }),
+        ),
+        Effect.forkIn(scope),
+      );
     });
-    yield* Effect.tryPromise({
-      try: () => session.prompt(text),
-      catch: () =>
-        new SendError({
-          message: "Pi could not complete the prompt. Check your model and credentials.",
-        }),
-    }).pipe(
-      Effect.andThen(
-        Effect.suspend(() => {
-          const lastReply = session.messages.findLast((message) => message.role === "assistant");
-          return lastReply?.role === "assistant" && lastReply.stopReason === "error"
-            ? Effect.fail(
-                new SendError({
-                  message:
-                    "The model provider could not complete the reply. Check provider availability, quota, and Pi authentication, then try again.",
+    const stop = Effect.fn(function* ({ runId }: { runId: string }) {
+      const run = active;
+      if (!run || run.id !== runId) return;
+      if (state.status === "stopping") return yield* Deferred.await(run.stopped);
+      run.stopped = yield* Deferred.make<void, StopError>();
+      publish({
+        _tag: "StateChanged",
+        status: "stopping",
+        runId,
+        messageCount: state.messageCount,
+        error: "",
+      });
+      return yield* Effect.gen(function* () {
+        // abort() before Pi starts is a no-op. Wait for start or preflight failure.
+        yield* Deferred.await(run.started);
+        yield* Effect.tryPromise({
+          try: () => session.abort(),
+          catch: () => new StopError({ message: "Pi could not stop. Try Stop again." }),
+        });
+        yield* Deferred.await(run.finished);
+        finishRun();
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            publish({
+              _tag: "StateChanged",
+              status: "running",
+              runId,
+              messageCount: state.messageCount,
+              error: error.message,
+            });
+          }),
+        ),
+        (effect) => Deferred.complete(run.stopped, effect),
+        Effect.andThen(Deferred.await(run.stopped)),
+      );
+    });
+    readySessionFile = session.sessionFile;
+    return yield* RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          RpcSerialization.layerNdjson,
+          ConversationApi.toLayer({
+            Subscribe: () =>
+              Stream.unwrap(
+                Effect.gen(function* () {
+                  // Include the item awaiting an RPC acknowledgement in both limits.
+                  const maxItems = 64;
+                  const maxBytes = 8 * 1024 * 1024;
+                  const queue = yield* Queue.bounded<
+                    { update: typeof ConversationUpdate.Type; bytes: number },
+                    SubscribeError
+                  >(maxItems);
+                  let items = 0;
+                  let bytes = 0;
+                  let deliveredBytes = 0;
+                  let failure: SubscribeError | undefined;
+                  const enqueue = (update: typeof ConversationUpdate.Type, size: number) => {
+                    if (failure) return;
+                    if (size > maxBytes || items >= maxItems || bytes + size > maxBytes) {
+                      failure = new SubscribeError({
+                        reason: size > maxBytes ? "payload-too-large" : "slow-consumer",
+                        message:
+                          size > maxBytes
+                            ? "A subscription payload is too large to stream. Pi history is preserved."
+                            : "The subscription fell behind. Subscribe again for the current conversation.",
+                      });
+                      subscribers.delete(enqueue);
+                      Queue.failCauseUnsafe(queue, Cause.fail(failure));
+                      return;
+                    }
+                    items++;
+                    bytes += size;
+                    Queue.offerUnsafe(queue, { update, bytes: size });
+                  };
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => {
+                      // Registration and initial snapshot happen together, without a gap.
+                      subscribers.add(enqueue);
+                      const initial = {
+                        _tag: "Snapshot",
+                        conversation: state,
+                      } satisfies typeof ConversationUpdate.Type;
+                      enqueue(initial, Buffer.byteLength(JSON.stringify(initial)));
+                    }),
+                    () =>
+                      Effect.sync(() => {
+                        subscribers.delete(enqueue);
+                      }).pipe(Effect.andThen(Queue.shutdown(queue))),
+                  );
+                  return Stream.fromEffectRepeat(
+                    Effect.gen(function* () {
+                      if (failure) return yield* failure;
+                      // The next pull means the previous single-item chunk was acknowledged.
+                      if (deliveredBytes > 0) {
+                        items--;
+                        bytes -= deliveredBytes;
+                      }
+                      const next = yield* Queue.take(queue);
+                      deliveredBytes = next.bytes;
+                      return next.update;
+                    }),
+                  );
                 }),
-              )
-            : Effect.void;
-        }),
-      ),
-      Effect.catch((error) =>
-        Effect.sync(() =>
-          publish({
-            _tag: "StateChanged",
-            status: state.status,
-            runId: state.runId,
-            messageCount: state.messageCount,
-            error: error.message,
+              ),
+            Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
+            Send: (payload) => send(payload).pipe(Effect.uninterruptible),
           }),
         ),
       ),
-      Effect.ensuring(
-        Effect.gen(function* () {
-          // A preflight failure may finish without emitting agent_start.
-          yield* Deferred.succeed(run.started, undefined);
-          yield* Deferred.succeed(run.finished, undefined);
-          if (state.status !== "stopping") finishRun();
-        }),
-      ),
-      Effect.forkIn(scope),
     );
-  });
-  const stop = Effect.fn(function* ({ runId }: { runId: string }) {
-    const run = active;
-    if (!run || run.id !== runId) return;
-    if (state.status === "stopping") return yield* Deferred.await(run.stopped);
-    run.stopped = yield* Deferred.make<void, StopError>();
-    publish({
-      _tag: "StateChanged",
-      status: "stopping",
-      runId,
-      messageCount: state.messageCount,
-      error: "",
-    });
-    return yield* Effect.gen(function* () {
-      // abort() before Pi starts is a no-op. Wait for start or preflight failure.
-      yield* Deferred.await(run.started);
-      yield* Effect.tryPromise({
-        try: () => session.abort(),
-        catch: () => new StopError({ message: "Pi could not stop. Try Stop again." }),
+
+    function recoveryNotice() {
+      const last = session.messages.at(-1);
+      const unfinished =
+        Boolean(recoveryFile) &&
+        (last?.role === "user" ||
+          last?.role === "toolResult" ||
+          (last?.role === "assistant" && last.stopReason === "toolUse"));
+      return interrupted || unfinished
+        ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
+        : "";
+    }
+
+    function finishRun() {
+      active = undefined;
+      publish({
+        _tag: "StateChanged",
+        status: "idle",
+        runId: null,
+        messageCount: session.messages.length,
+        error: state.error,
       });
-      yield* Deferred.await(run.finished);
-      finishRun();
-    }).pipe(
-      Effect.tapError((error) =>
-        Effect.sync(() => {
-          publish({
-            _tag: "StateChanged",
-            status: "running",
-            runId,
-            messageCount: state.messageCount,
-            error: error.message,
-          });
-        }),
-      ),
-      (effect) => Deferred.complete(run.stopped, effect),
-      Effect.andThen(Deferred.await(run.stopped)),
-    );
-  });
-  const rpc = yield* RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        RpcSerialization.layerNdjson,
-        ConversationApi.toLayer({
-          Subscribe: () =>
-            Stream.unwrap(
-              Effect.gen(function* () {
-                // Include the item awaiting an RPC acknowledgement in both limits.
-                const maxItems = 64;
-                const maxBytes = 8 * 1024 * 1024;
-                const queue = yield* Queue.bounded<
-                  { update: typeof ConversationUpdate.Type; bytes: number },
-                  SubscribeError
-                >(maxItems);
-                let items = 0;
-                let bytes = 0;
-                let deliveredBytes = 0;
-                let failure: SubscribeError | undefined;
-                const enqueue = (update: typeof ConversationUpdate.Type, size: number) => {
-                  if (failure) return;
-                  if (size > maxBytes || items >= maxItems || bytes + size > maxBytes) {
-                    failure = new SubscribeError({
-                      reason: size > maxBytes ? "payload-too-large" : "slow-consumer",
-                      message:
-                        size > maxBytes
-                          ? "A subscription payload is too large to stream. Pi history is preserved."
-                          : "The subscription fell behind. Subscribe again for the current conversation.",
-                    });
-                    subscribers.delete(enqueue);
-                    Queue.failCauseUnsafe(queue, Cause.fail(failure));
-                    return;
-                  }
-                  items++;
-                  bytes += size;
-                  Queue.offerUnsafe(queue, { update, bytes: size });
-                };
-                yield* Effect.acquireRelease(
-                  Effect.sync(() => {
-                    // Registration and initial snapshot happen together, without a gap.
-                    subscribers.add(enqueue);
-                    const initial = {
-                      _tag: "Snapshot",
-                      conversation: state,
-                    } satisfies typeof ConversationUpdate.Type;
-                    enqueue(initial, Buffer.byteLength(JSON.stringify(initial)));
-                  }),
-                  () =>
-                    Effect.sync(() => {
-                      subscribers.delete(enqueue);
-                    }).pipe(Effect.andThen(Queue.shutdown(queue))),
-                );
-                return Stream.fromEffectRepeat(
-                  Effect.gen(function* () {
-                    if (failure) return yield* failure;
-                    // The next pull means the previous single-item chunk was acknowledged.
-                    if (deliveredBytes > 0) {
-                      items--;
-                      bytes -= deliveredBytes;
-                    }
-                    const next = yield* Queue.take(queue);
-                    deliveredBytes = next.bytes;
-                    return next.update;
-                  }),
-                );
-              }),
-            ),
-          Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
-          Send: (payload) => send(payload).pipe(Effect.uninterruptible),
-        }),
+    }
+
+    function publish(update: typeof ConversationUpdate.Type) {
+      state = applyConversationUpdate(state, update);
+      if (subscribers.size === 0) return;
+      const bytes = Buffer.byteLength(JSON.stringify(update));
+      for (const enqueue of subscribers) enqueue(update, bytes);
+    }
+  }).pipe(
+    Effect.catchTag("RecoveryError", (error) =>
+      RpcServer.toHttpEffectWebsocket(ConversationApi).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            RpcSerialization.layerNdjson,
+            ConversationApi.toLayer({
+              Subscribe: () => Stream.fail(error),
+              Stop: () => Effect.fail(new StopError({ message: error.message })),
+              Send: () => Effect.fail(new SendError({ message: error.message })),
+            }),
+          ),
+        ),
       ),
     ),
   );
@@ -483,38 +587,8 @@ const program = Effect.gen(function* () {
     }),
   );
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
-  process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
+  process.send?.({ port: server.address.port, sessionFile: readySessionFile });
   yield* Effect.never;
-
-  function recoveryNotice() {
-    const last = session.messages.at(-1);
-    const unfinished =
-      Boolean(recoveryFile) &&
-      (last?.role === "user" ||
-        last?.role === "toolResult" ||
-        (last?.role === "assistant" && last.stopReason === "toolUse"));
-    return interrupted || unfinished
-      ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
-      : "";
-  }
-
-  function finishRun() {
-    active = undefined;
-    publish({
-      _tag: "StateChanged",
-      status: "idle",
-      runId: null,
-      messageCount: session.messages.length,
-      error: state.error,
-    });
-  }
-
-  function publish(update: typeof ConversationUpdate.Type) {
-    state = applyConversationUpdate(state, update);
-    if (subscribers.size === 0) return;
-    const bytes = Buffer.byteLength(JSON.stringify(update));
-    for (const enqueue of subscribers) enqueue(update, bytes);
-  }
 });
 
 class StartupError extends Schema.TaggedError<StartupError>()("StartupError", {}) {}

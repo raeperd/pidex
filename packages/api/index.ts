@@ -66,8 +66,16 @@ export class StopError extends Schema.TaggedError<StopError>()("StopError", {
   message: Schema.String,
 }) {}
 
+export class RecoveryError extends Schema.TaggedError<RecoveryError>()("RecoveryError", {
+  message: Schema.String,
+}) {}
+
 export const ConversationApi = RpcGroup.make(
-  Rpc.make("Subscribe", { success: ConversationUpdate, error: SubscribeError, stream: true }),
+  Rpc.make("Subscribe", {
+    success: ConversationUpdate,
+    error: Schema.Union([SubscribeError, RecoveryError]),
+    stream: true,
+  }),
   Rpc.make("Send", {
     payload: { text: Schema.String, submissionId: Schema.optional(Schema.String) },
     error: SendError,
