@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Only folder-dialog results and provider responses are controlled; Pi runs real stock tools.
+// A temporary home isolates configuration and credentials from the local environment.
 for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
   // Playwright requires destructuring even when only testInfo is needed.
   // oxlint-disable-next-line no-empty-pattern
@@ -181,6 +183,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         setImmediate(() => application.quit());
       });
       await expect.poll(() => child.exitCode).toBe(0);
+      // Compare after graceful Quit so settings flushed during shutdown are checked too.
       for (const [path, bytes] of originalFiles)
         expect(await readFile(path, "utf8"), path).toBe(bytes);
       expect(await readdir(temporary)).not.toContain("extension-loaded");
@@ -219,6 +222,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
       await fixture(join(project, instructions), "PROJECT_RULE_11\n");
       await fixture(join(temporary, "AGENTS.md"), "PARENT_RULE_12\n");
       await fixture(join(agentDir, "AGENTS.md"), "GLOBAL_RULE_13\n");
+      // Stock Pi prefers AGENTS.md in a directory; the CLAUDE-only case covers fallback.
       if (instructions === "AGENTS.md") {
         await fixture(join(project, "CLAUDE.md"), "SHADOWED_CLAUDE_14\n");
       }
@@ -380,6 +384,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
     async function verifyUnloadedResources() {
       // V8 observes the real backend without replacing SDK loaders. Themes and dormant
       // templates cannot be proven unloaded merely by their absence from provider input.
+      // These function names follow the pinned SDK; review them when upgrading Pi.
       const decodeCoverage = Schema.decodeUnknownSync(
         Schema.fromJsonString(
           Schema.Struct({
@@ -417,6 +422,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         ["extensions/loader.js", ["loadExtension"]],
         ["skills.js", ["loadSkills"]],
         ["prompt-templates.js", ["loadPromptTemplates"]],
+        // Package collection happens before resource filters, so check it separately.
         ["package-manager.js", ["collectPackageResources"]],
       ] satisfies [string, string[]][]) {
         const script = scripts.find((entry) => entry.url.endsWith(`/core/${file}`));
