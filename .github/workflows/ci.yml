@@ -15,19 +15,61 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: latest-node-1-worker
+            check-latest: true
+            workers: 1
+          - variant: cached-node-1-worker
+            check-latest: false
+            workers: 1
+          - variant: cached-node-2-workers
+            check-latest: false
+            workers: 2
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.9
       - uses: actions/setup-node@v7.0.0
+        id: node
         with:
           node-version-file: .node-version
-          check-latest: true
+          check-latest: ${{ matrix.check-latest }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      - run: pnpm test
+      - name: Build
+        run: pnpm build
+      - name: Prepare Electron
+        run: node -e 'console.log(require("electron"))'
+      - name: Record environment
+        run: |
+          {
+            echo "### CI environment"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Run: $GITHUB_RUN_ID / attempt $GITHUB_RUN_ATTEMPT"
+            echo "- Runner: $RUNNER_OS / $RUNNER_ARCH"
+            echo "- Image: $ImageOS / $ImageVersion"
+            echo "- Node: $(node --version)"
+            echo "- pnpm: $(pnpm --version)"
+            echo "- pnpm cache hit: ${{ steps.node.outputs.cache-hit }}"
+            echo "- Workers: ${{ matrix.workers }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Test
+        run: pnpm exec playwright test --workers=${{ matrix.workers }}
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-results-${{ matrix.variant }}
+          path: test-results/results.json
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: electron-failure
+          name: electron-failure-${{ matrix.variant }}
           path: test-results/
+          overwrite: true
