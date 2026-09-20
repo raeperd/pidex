@@ -4,6 +4,9 @@ declare global {
   interface Window {
     desktop: {
       chooseProject: () => Promise<typeof Conversation.Type | null>;
+      restart: () => Promise<void>;
+      onCrash: (onCrash: () => void) => () => void;
+
       stop: (runId: string) => Promise<void>;
       send: (text: string, submissionId?: string) => Promise<"accepted" | "uncertain">;
       subscribe: (

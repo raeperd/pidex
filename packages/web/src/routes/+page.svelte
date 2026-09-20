@@ -8,6 +8,8 @@
   let pending: { id: string; text: string } | undefined;
   let connected = $state(true);
   let choosing = $state(false);
+  let crashed = $state(false);
+  let restarting = $state(false);
   let error = $state("");
 
   let canSend = $derived(
@@ -26,8 +28,11 @@
         return;
       }
       connected = update !== null;
-      if (update?._tag === "Snapshot") conversation = update.conversation;
-      else if (update && conversation) conversation = applyConversationUpdate(conversation, update);
+      if (update?._tag === "Snapshot") {
+        conversation = update.conversation;
+        crashed = false;
+      } else if (update && conversation)
+        conversation = applyConversationUpdate(conversation, update);
       if (
         pending &&
         conversation?.entries.some(
@@ -40,6 +45,26 @@
       }
     }),
   );
+
+  onMount(() =>
+    window.desktop.onCrash(() => {
+      crashed = true;
+      connected = false;
+    }),
+  );
+
+  async function restart() {
+    restarting = true;
+    error = "";
+    try {
+      await window.desktop.restart();
+      crashed = false;
+    } catch {
+      error = "Could not restart the backend. Try Restart again.";
+    } finally {
+      restarting = false;
+    }
+  }
 
   async function send() {
     if (!canSend) return;
@@ -85,6 +110,7 @@
       const selected = await window.desktop.chooseProject();
       // The subscription may already have delivered newer updates while IPC was pending.
       if (!conversation) conversation = selected;
+      if (selected) crashed = false;
     } catch {
       error = "Could not open the project. Please try again.";
     } finally {
@@ -137,6 +163,10 @@
       {/each}
       {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
       {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
+      {#if crashed}
+        <p role="alert">The backend stopped. Restart to recover saved history.</p>
+        <button onclick={restart} disabled={restarting}>Restart</button>
+      {/if}
       {#if conversation.status !== "idle"}
         <button onclick={stop} disabled={!connected || conversation.status === "stopping"}
           >Stop</button

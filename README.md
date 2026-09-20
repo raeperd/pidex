@@ -46,6 +46,12 @@ For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#
 
 `pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
 
+## Backend recovery
+
+After a backend crash, click Restart to load the exact saved conversation. An interrupted run stays stopped until you send another prompt. Recovery does not make a provider request; unfinished output may not have been saved by Pi. The recovery locator lives only in Electron main memory.
+
+Run `pnpm test --grep '#135'`, or `pnpm build && pnpm exec playwright test --grep '#135' --debug` for visible step-through. The isolated lifecycle fixture supplies temporary credentials, project, history, and controlled provider replies. It kills the actual owned child after a saved turn and during a held response, checks main survival and one replacement, compares JSONL bytes before/after recovery, then sends manually. Traces, failure screenshots, and redacted Electron logs are in `test-results/`.
+
 ## Stop and continue (#132)
 
 Stop targets the observed `runId` through authenticated RPC. Snapshots and state updates carry a nullable `runId` and `idle`, `running`, or `stopping` status. Stop stays pending until Pi acknowledges cancellation and the prompt finishes. Duplicate Stops wait for that cancellation; stale IDs do nothing. The same Pi session accepts the next prompt. Available output, saved history, and tool edits remain; interrupted tokens may not have been saved.

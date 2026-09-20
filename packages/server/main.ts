@@ -5,6 +5,7 @@ import {
   getAgentDir,
   ModelRuntime,
   SettingsManager,
+  SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -26,6 +27,10 @@ const program = Effect.gen(function* () {
     process.env.PIDEX_SERVER_SECRET,
   );
   delete process.env.PIDEX_SERVER_SECRET;
+  const recoveryFile = process.env.PIDEX_SESSION_FILE;
+  const interrupted = process.env.PIDEX_INTERRUPTED === "1";
+  delete process.env.PIDEX_SESSION_FILE;
+  delete process.env.PIDEX_INTERRUPTED;
   const { session } = yield* Effect.acquireRelease(
     Effect.gen(function* () {
       const cwd = process.cwd();
@@ -59,6 +64,13 @@ const program = Effect.gen(function* () {
         try: () => ModelRuntime.create(),
         catch: () => new StartupError(),
       });
+      const sessionManager = yield* Effect.try({
+        try: () =>
+          recoveryFile
+            ? SessionManager.open(recoveryFile, undefined, cwd)
+            : SessionManager.create(cwd),
+        catch: () => new StartupError(),
+      });
       return yield* Effect.tryPromise({
         try: () =>
           createAgentSession({
@@ -67,6 +79,7 @@ const program = Effect.gen(function* () {
             resourceLoader,
             settingsManager,
             modelRuntime,
+            sessionManager,
             tools: ["read", "bash", "edit", "write"],
           }),
         catch: () => new StartupError(),
@@ -118,10 +131,67 @@ const program = Effect.gen(function* () {
     setupError,
     status: "idle",
     runId: null,
-    messageCount: 0,
+    messageCount: session.messages.length,
     entries: [],
-    error: "",
+    error: recoveryNotice(),
   };
+  yield* Effect.sync(() => {
+    // Read the active saved branch, including history before compaction.
+    for (const item of session.sessionManager.getBranch()) {
+      if (item.type !== "message") continue;
+      const message = item.message;
+      switch (message.role) {
+        case "user":
+        case "assistant": {
+          const text =
+            typeof message.content === "string"
+              ? message.content
+              : message.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("");
+          if (text)
+            state = applyConversationUpdate(state, {
+              _tag: "EntryUpserted",
+              entry: { id: item.id, role: message.role, text },
+            });
+          if (message.role === "assistant")
+            for (const part of message.content) {
+              if (part.type !== "toolCall") continue;
+              state = applyConversationUpdate(state, {
+                _tag: "EntryUpserted",
+                entry: {
+                  id: part.id,
+                  role: "tool",
+                  name: part.name,
+                  input: JSON.stringify(part.arguments, null, 2),
+                  result: "Interrupted before a saved result.",
+                  status: "failed",
+                },
+              });
+            }
+          break;
+        }
+        case "toolResult": {
+          const entry = state.entries.find((candidate) => candidate.id === message.toolCallId);
+          if (entry?.role === "tool")
+            state = applyConversationUpdate(state, {
+              _tag: "EntryUpserted",
+              entry: {
+                ...entry,
+                result: JSON.stringify(
+                  { content: message.content, details: message.details },
+                  null,
+                  2,
+                ),
+                status: message.isError ? "failed" : "completed",
+              },
+            });
+          break;
+        }
+      }
+    }
+  });
   const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
   let active:
     | {
@@ -415,6 +485,18 @@ const program = Effect.gen(function* () {
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
   yield* Effect.never;
+
+  function recoveryNotice() {
+    const last = session.messages.at(-1);
+    const unfinished =
+      Boolean(recoveryFile) &&
+      (last?.role === "user" ||
+        last?.role === "toolResult" ||
+        (last?.role === "assistant" && last.stopReason === "toolUse"));
+    return interrupted || unfinished
+      ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
+      : "";
+  }
 
   function finishRun() {
     active = undefined;
