@@ -7,11 +7,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 for (const preflightCompaction of [false, true]) {
-  // oxlint-disable-next-line no-empty-pattern
+  const reserveTokens = preflightCompaction ? 127800 : 200;
+  const offset = preflightCompaction ? 1 : 0;
   test(
     preflightCompaction
       ? "#132 Stop cancels preflight compaction and its pending agent turn"
       : "#132 stops with acknowledgment, preserves work, and ignores stale Stops after continuation",
+    // Playwright requires destructuring even when only testInfo is needed.
+    // oxlint-disable-next-line no-empty-pattern
     async ({}, testInfo) => {
       await using cleanup = new AsyncDisposableStack();
       const temporary = await mkdtemp(join(tmpdir(), "pidex-132-"));
@@ -31,13 +34,12 @@ for (const preflightCompaction of [false, true]) {
           defaultModel: "gpt-4.1",
           compaction: {
             enabled: true,
-            reserveTokens: preflightCompaction ? 127800 : 200,
+            reserveTokens,
             keepRecentTokens: 100,
           },
         }),
       );
       let providerRequests = 0;
-      const offset = preflightCompaction ? 1 : 0;
       const providerBodies: string[] = [];
       let cancellationRequests = 0;
       let acknowledge: (() => void) | undefined;
@@ -242,8 +244,7 @@ for (const preflightCompaction of [false, true]) {
         await expect(conversation.getByText("Contin", { exact: true })).toBeVisible();
         const later = await page.evaluate(() => window.desktop.chooseProject());
         expect(later?.id).toBe(initial?.id);
-        expect(later?.runId).not.toBe(active?.runId);
-        if (!active?.runId) throw new Error("Expected active run identity");
+        expect(later?.runId).not.toBe(active.runId);
         // Supplement UI Stop with repeated stale requests through authenticated RPC.
         await page.evaluate(async (runId) => {
           await Promise.all([window.desktop.stop(runId), window.desktop.stop(runId)]);
