@@ -121,6 +121,61 @@ test("#135 discards an unestablished locator before choosing another project", a
   expect(files[0]?.path).toContain("second-project");
 });
 
+test("#135 clears the crash notice when Restart completes in a recreated window", async ({
+  lifecycle,
+}) => {
+  const { app, page, children } = await lifecycle.launch();
+  await page.getByRole("textbox", { name: "Prompt" }).fill("Remember pear");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved pear");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const saved = await lifecycle.history();
+  const [child] = children();
+  if (!child) throw new Error("Missing child");
+  process.kill(child, "SIGKILL");
+  await expect.poll(() => alive(child)).toBe(false);
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
+  const held = app.evaluate(
+    ({ app: application }, modulePath) =>
+      new Promise<void>((resolve) => {
+        const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+          modulePath,
+        );
+        const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+        const original = prototype.emit;
+        prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+          if (event === "message" && String(args[0]).includes('"Snapshot"')) {
+            prototype.emit = original;
+            process
+              .getBuiltinModule("events")
+              .EventEmitter.prototype.once.call(application, "pidex-test-release-snapshot", () =>
+                original.apply(this, [event, ...args]),
+              );
+            resolve();
+            return true;
+          }
+          return original.apply(this, [event, ...args]);
+        };
+      }),
+    fileURLToPath(import.meta.resolve("@effect/platform-node")),
+  );
+  await page.getByRole("button", { name: "Restart", exact: true }).click();
+  await held;
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+  await expect.poll(() => app.windows().length).toBe(0);
+  await app.evaluate(({ app: application }) => application.emit("activate"));
+  const reopened = await app.firstWindow();
+  await expect(reopened.getByRole("status")).toHaveText("Disconnected");
+  await app.evaluate(({ app: application }) => application.emit("pidex-test-release-snapshot"));
+  await expect(reopened.getByRole("status")).toHaveText("Idle");
+  await expect(reopened.getByRole("button", { name: "Restart", exact: true })).toHaveCount(0);
+  await expect(reopened.getByLabel("assistant", { exact: true })).toHaveText("Saved pear");
+  expect(children()).toHaveLength(1);
+  expect(await lifecycle.history()).toEqual(saved);
+  expect(lifecycle.requests).toHaveLength(1);
+});
+
 test("#135 restores Restart after a backend crash while the window is closed", async ({
   lifecycle,
 }) => {

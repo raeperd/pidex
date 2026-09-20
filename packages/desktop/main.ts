@@ -176,6 +176,7 @@ const program = Effect.gen(function* () {
   );
   const startServer = Effect.fn(function* () {
     starting = true;
+    connectionError = "";
     return yield* Effect.gen(function* () {
       if (connectionScope) yield* Scope.close(connectionScope, Exit.void);
       const child = yield* Effect.try({

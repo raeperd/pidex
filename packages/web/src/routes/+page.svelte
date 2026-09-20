@@ -28,8 +28,11 @@
         return;
       }
       connected = update !== null;
-      if (update?._tag === "Snapshot") conversation = update.conversation;
-      else if (update && conversation) conversation = applyConversationUpdate(conversation, update);
+      if (update?._tag === "Snapshot") {
+        conversation = update.conversation;
+        crashed = false;
+      } else if (update && conversation)
+        conversation = applyConversationUpdate(conversation, update);
       if (
         pending &&
         conversation?.entries.some(
