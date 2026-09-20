@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { Socket } from "effect/unstable/socket";
 import { NodeSocket } from "@effect/platform-node";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
-import { Conversation, ConversationApi } from "../api/index.js";
+import { applyConversationUpdate, Conversation, ConversationApi } from "../api/index.js";
 import { Deferred, Effect, Exit, Layer, Schedule, Schema, Scope, Stream } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { resolve } from "node:path";
@@ -233,11 +233,13 @@ const program = Effect.gen(function* () {
                   ),
                 );
               yield* client.Subscribe().pipe(
-                Stream.runForEach((snapshot) =>
+                Stream.runForEach((update) =>
                   Effect.gen(function* () {
-                    conversation = snapshot;
-                    if (!window.isDestroyed()) window.webContents.send("conversation", snapshot);
-                    yield* Deferred.succeed(initial, snapshot);
+                    if (update._tag === "Snapshot") conversation = update.conversation;
+                    else if (conversation)
+                      conversation = applyConversationUpdate(conversation, update);
+                    if (!window.isDestroyed()) window.webContents.send("conversation", update);
+                    if (conversation) yield* Deferred.succeed(initial, conversation);
                   }),
                 ),
                 Effect.catch(() =>

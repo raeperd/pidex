@@ -6,11 +6,17 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, Schema, SubscriptionRef } from "effect";
+import { Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { createServer } from "node:http";
-import { Conversation, ConversationApi, SendError } from "../api/index.js";
+import {
+  applyConversationUpdate,
+  Conversation,
+  ConversationApi,
+  ConversationUpdate,
+  SendError,
+} from "../api/index.js";
 
 const program = Effect.gen(function* () {
   const serverSecret = yield* Schema.decodeUnknownEffect(Schema.String)(
@@ -80,14 +86,15 @@ const program = Effect.gen(function* () {
   if (!session.model || !session.sessionFile || session.isStreaming)
     return yield* new StartupError();
   const scope = yield* Effect.scope;
-  const state = yield* SubscriptionRef.make<typeof Conversation.Type>({
+  let state: typeof Conversation.Type = {
     id: session.sessionId,
     modelName: session.model.name,
     status: "idle",
     messageCount: 0,
     entries: [],
     error: "",
-  });
+  };
+  const subscribers = new Set<(update: typeof ConversationUpdate.Type) => void>();
   let messageId = "";
   yield* Effect.acquireRelease(
     Effect.sync(() =>
@@ -98,14 +105,13 @@ const program = Effect.gen(function* () {
         if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
           const delta = event.assistantMessageEvent.delta;
           Effect.runSync(
-            SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
-              ...current,
-              entries: current.entries.some((entry) => entry.id === messageId)
-                ? current.entries.map((entry) =>
-                    entry.id === messageId ? { ...entry, text: entry.text + delta } : entry,
-                  )
-                : [...current.entries, { id: messageId, role: "assistant", text: delta }],
-            })),
+            Effect.sync(() =>
+              publish({
+                _tag: "TextDelta",
+                id: messageId,
+                delta,
+              }),
+            ),
           );
         }
       }),
@@ -121,21 +127,17 @@ const program = Effect.gen(function* () {
   );
   const send = Effect.fn(function* ({ text }: { text: string }) {
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
-    const accepted = yield* SubscriptionRef.modify(
-      state,
-      (current): [boolean, typeof Conversation.Type] =>
-        current.status !== "idle"
-          ? [false, current]
-          : [
-              true,
-              {
-                ...current,
-                status: "running",
-                error: "",
-                entries: [...current.entries, { id: crypto.randomUUID(), role: "user", text }],
-              },
-            ],
-    );
+    const accepted = yield* Effect.sync(() => {
+      if (state.status !== "idle") return false;
+      publish({
+        _tag: "StateChanged",
+        status: "running",
+        messageCount: state.messageCount,
+        error: "",
+      });
+      publish({ _tag: "EntryUpserted", entry: { id: crypto.randomUUID(), role: "user", text } });
+      return true;
+    });
     if (!accepted) return yield* new SendError({ message: "Wait for the current reply." });
     yield* Effect.tryPromise({
       try: () => session.prompt(text),
@@ -145,17 +147,24 @@ const program = Effect.gen(function* () {
         }),
     }).pipe(
       Effect.catch((error) =>
-        SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
-          ...current,
-          error: error.message,
-        })),
+        Effect.sync(() =>
+          publish({
+            _tag: "StateChanged",
+            status: state.status,
+            messageCount: state.messageCount,
+            error: error.message,
+          }),
+        ),
       ),
       Effect.ensuring(
-        SubscriptionRef.update(state, (current): typeof Conversation.Type => ({
-          ...current,
-          status: "idle",
-          messageCount: session.messages.length,
-        })),
+        Effect.sync(() =>
+          publish({
+            _tag: "StateChanged",
+            status: "idle",
+            messageCount: session.messages.length,
+            error: state.error,
+          }),
+        ),
       ),
       Effect.forkIn(scope),
     );
@@ -165,7 +174,24 @@ const program = Effect.gen(function* () {
       Layer.mergeAll(
         RpcSerialization.layerNdjson,
         ConversationApi.toLayer({
-          Subscribe: () => SubscriptionRef.changes(state),
+          Subscribe: () =>
+            Stream.callback<typeof ConversationUpdate.Type>((queue) =>
+              Effect.acquireRelease(
+                Effect.sync(() => {
+                  const enqueue = (update: typeof ConversationUpdate.Type) => {
+                    Queue.offerUnsafe(queue, update);
+                  };
+                  // Capture the snapshot and register synchronously: no missing or repeated deltas.
+                  enqueue({ _tag: "Snapshot", conversation: state });
+                  subscribers.add(enqueue);
+                  return enqueue;
+                }),
+                (enqueue) =>
+                  Effect.sync(() => {
+                    subscribers.delete(enqueue);
+                  }),
+              ),
+            ),
           Send: (payload) => send(payload).pipe(Effect.uninterruptible),
         }),
       ),
@@ -189,6 +215,11 @@ const program = Effect.gen(function* () {
   if (server.address._tag !== "TcpAddress") return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: session.sessionFile });
   yield* Effect.never;
+
+  function publish(update: typeof ConversationUpdate.Type) {
+    state = applyConversationUpdate(state, update);
+    for (const enqueue of subscribers) enqueue(update);
+  }
 });
 
 class StartupError extends Schema.TaggedError<StartupError>()("StartupError", {}) {}

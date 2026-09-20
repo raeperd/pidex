@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Conversation } from "../../../api/index.js";
+  import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
   let conversation = $state<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let sending = $state(false);
@@ -9,9 +9,10 @@
   let error = $state("");
 
   onMount(() =>
-    window.desktop.subscribe((snapshot) => {
-      connected = snapshot !== null;
-      if (snapshot) conversation = snapshot;
+    window.desktop.subscribe((update) => {
+      connected = update !== null;
+      if (update?._tag === "Snapshot") conversation = update.conversation;
+      else if (update && conversation) conversation = applyConversationUpdate(conversation, update);
     }),
   );
 
@@ -33,7 +34,9 @@
     choosing = true;
     error = "";
     try {
-      conversation = await window.desktop.chooseProject();
+      const selected = await window.desktop.chooseProject();
+      // The subscription may already have delivered newer updates while IPC was pending.
+      if (!conversation) conversation = selected;
     } catch {
       error = "Could not open the project. Please try again.";
     } finally {

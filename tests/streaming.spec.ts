@@ -113,9 +113,19 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
         let armed = false;
         let release: (() => void) | undefined;
         let connections = 0;
+        const wire: string[] = [];
+        const ipc: string[] = [];
+        const contents = _electron.BrowserWindow.getAllWindows()[0]?.webContents;
+        if (!contents) throw new Error("Expected application window");
+        const originalSend = contents.send.bind(contents);
+        contents.send = (channel: string, ...args: unknown[]) => {
+          if (channel === "conversation") ipc.push(JSON.stringify(args[0]));
+          originalSend(channel, ...args);
+        };
         prototype.emit = function (event: string | symbol, ...args: unknown[]) {
           if (event === "open") connections++;
           const data = String(args[0]);
+          if (event === "message") wire.push(data);
           if (
             event === "message" &&
             armed &&
@@ -135,6 +145,7 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
           release: () => release?.(),
           isHeld: () => release !== undefined,
           connections: () => connections,
+          updates: () => ({ wire, ipc }),
         };
       },
       fileURLToPath(import.meta.resolve("@effect/platform-node")),
@@ -199,6 +210,18 @@ test("#130 streams a reply, rejects empty and busy submissions, saves history, a
     expect(history).toContain("Saved hello");
     expect(providerRequests).toBe(1);
     expect(await acknowledgement.evaluate((gate) => gate.connections())).toBe(1);
+    const updates = await acknowledgement.evaluate((gate) => gate.updates());
+    for (const messages of [updates.wire, updates.ipc]) {
+      expect(messages.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
+      const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
+      expect(deltas).toHaveLength(2);
+      expect(deltas[0]).toContain('"delta":"Saved "');
+      expect(deltas[1]).toContain('"delta":"hello"');
+      for (const delta of deltas) {
+        expect(delta).not.toContain('"entries"');
+        expect(delta).not.toContain("Write hello to note.txt");
+      }
+    }
     await page.screenshot({ path: testInfo.outputPath("reply.png") });
     await composer.fill("Remain active until Quit");
     await send.click();
