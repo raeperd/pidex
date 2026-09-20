@@ -175,7 +175,7 @@ for (const preflightCompaction of [false, true]) {
           (_electron, fixturePath) => {
             process.env.NODE_OPTIONS = `--import=${fixturePath}`;
           },
-          fileURLToPath(new URL("./fixtures/cancellation-fetch.mjs", import.meta.url)),
+          fileURLToPath(new URL("../fixtures/cancellation-fetch.mjs", import.meta.url)),
         );
         await app.evaluate(({ dialog }, projectPath) => {
           dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [projectPath] });

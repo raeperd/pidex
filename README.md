@@ -15,8 +15,14 @@ pnpm dev
 
 ## Verification
 
+Tests live under `tests/<milestone>/`, with one spec file per use case. Supporting regression scenarios stay in the same file and include the owning issue number in their test title or describe group. Shared fixtures and lifecycle support live under `tests/fixtures/` and `tests/support/`.
+
+A milestone folder records when a requirement was introduced. Keep its tests current and run all milestones in CI; add new use cases under their introducing milestone without copying existing suites.
+
 ```sh
 pnpm check
+pnpm test # Run all milestones.
+pnpm test tests/v0.0.1/ # Run one milestone.
 pnpm test --grep '#129'
 # Step through the same visible Electron scenario in Playwright Inspector:
 pnpm build && pnpm exec playwright test --grep '#129' --debug
@@ -38,13 +44,13 @@ The server gives `DefaultResourceLoader` empty in-memory settings because Pi res
 
 `pnpm test --grep '#131'` runs the dedicated draft scenario. It holds a local provider response while the real Electron composer edits `next task`, attempts keyboard submission, and verifies authenticated RPC busy rejection. Completion preserves the draft without starting another request; pressing Enter on the enabled Send button submits that exact draft.
 
-For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#131' --debug`. The fixture uses temporary Pi configuration and a local OpenAI-compatible provider, with no paid requests. Traces and screenshots are under `test-results/drafts-*`; failures also save redacted Electron logs. Existing draft and busy-rejection behavior needs no production change.
+For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#131' --debug`. The fixture uses temporary Pi configuration and a local OpenAI-compatible provider, with no paid requests. Traces and screenshots are under `test-results/v0.0.1-drafts-*`; failures also save redacted Electron logs. Existing draft and busy-rejection behavior needs no production change.
 
 ### Setup and provider failures (#138)
 
 `pnpm test --grep '#138'` runs three Electron scenarios with temporary Pi configuration: missing credentials, an unresolved default model, and a held provider response that returns HTTP 503 until Pi exhausts its stock retries. Setup failures show correction steps and disable Send while drafts remain editable. Provider failure returns to Idle with the draft unchanged and exactly four provider attempts. Assertions also exclude the fixture credential and private provider diagnostic from renderer updates and Electron logs.
 
-`pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
+`pnpm build && pnpm exec playwright test --grep '#138' --debug` opens the same scenarios for visible step-through. Screenshots, traces, and redacted failure logs are under `test-results/v0.0.1-failures-*`. No paid requests or retry-setting overrides are used. Pi 0.85.1 owns the three retries with 2/4/8-second backoff. Fix credentials with Pi's `/login` or API-key setup, or save an available default through `/model`, then restart Pidex to reload setup.
 
 ## Backend recovery
 
@@ -61,7 +67,7 @@ pnpm test --grep '#132'
 pnpm build && pnpm exec playwright test --grep '#132' --debug
 ```
 
-The isolated Electron test uses a temporary project, Pi configuration, and local OpenAI response server. A test-only Node import holds the provider response's cancellation error until the fixture releases it. It leaves Pi, stock tools, application handlers, preload, and authenticated RPC unchanged. The test checks Stopping, editable drafts, disabled Send, preserved history and `note.txt`, then continuation in the same session. A second isolated variant stops stock preflight compaction and verifies its pending turn cannot escape cancellation. Repeated authenticated Stop calls wait for acknowledgment; calls targeting the old run cannot stop the later run. `test-results/stop-run-*/` contains `stopping.png` and `trace.zip`; failures also retain a screenshot and redacted Electron log.
+The isolated Electron test uses a temporary project, Pi configuration, and local OpenAI response server. A test-only Node import holds the provider response's cancellation error until the fixture releases it. It leaves Pi, stock tools, application handlers, preload, and authenticated RPC unchanged. The test checks Stopping, editable drafts, disabled Send, preserved history and `note.txt`, then continuation in the same session. A second isolated variant stops stock preflight compaction and verifies its pending turn cannot escape cancellation. Repeated authenticated Stop calls wait for acknowledgment; calls targeting the old run cannot stop the later run. `test-results/v0.0.1-stop-run-*/` contains `stopping.png` and `trace.zip`; failures also retain a screenshot and redacted Electron log.
 
 ## Quit during work (#137)
 
@@ -72,4 +78,4 @@ pnpm test --grep '#137'
 pnpm build && pnpm exec playwright test --grep '#137' --debug
 ```
 
-The isolated tests cover connected RPC, a lost connection, and a connection lost before the run is observed. They supply native dialog results before Quit, release `Still working` after Cancel, and hold provider cancellation acknowledgment after Confirm. Each checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. None makes UI assertions after exit. Artifacts are under `test-results/quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.
+The isolated tests cover connected RPC, a lost connection, and a connection lost before the run is observed. They supply native dialog results before Quit, release `Still working` after Cancel, and hold provider cancellation acknowledgment after Confirm. Each checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. None makes UI assertions after exit. Artifacts are under `test-results/v0.0.1-quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.
