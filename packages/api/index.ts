@@ -3,11 +3,13 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
 const Entry = Schema.Union([
   Schema.Struct({
+    // User or assistant text message.
     id: Schema.String,
     role: Schema.Literals(["user", "assistant"]),
     text: Schema.String,
   }),
   Schema.Struct({
+    // Tool call with its input, result, and execution status.
     id: Schema.String,
     role: Schema.Literal("tool"),
     name: Schema.String,
