@@ -155,8 +155,13 @@
   <header class="shrink-0 border-0 border-b border-solid border-border px-6 py-3 max-[520px]:px-4">
     <h1 class="m-0 text-sm font-medium">pidex</h1>
     {#if conversation}
-      <section class="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2" aria-label="Current project">
-        <strong class="font-medium wrap-anywhere">{conversation.projectPath.split("/").filter(Boolean).at(-1) || "/"}</strong>
+      <section
+        class="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2"
+        aria-label="Current project"
+      >
+        <strong class="font-medium wrap-anywhere"
+          >{conversation.projectPath.split("/").filter(Boolean).at(-1) || "/"}</strong
+        >
         <span class="text-xs text-muted wrap-anywhere">{conversation.projectPath}</span>
       </section>
     {/if}
@@ -172,19 +177,27 @@
         tabindex="0"
         {@attach followOutput}
       >
-        <div class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] px-5 max-[520px]:px-0">
+        <div
+          class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] px-5 max-[520px]:px-0"
+        >
           {#if conversation.entries.length === 0}
             <div class="px-5 py-8 max-[520px]:px-0">
-              <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">What would you like to build?</h2>
-              <p class="max-w-[48ch] text-muted">Ask Pi to explore your project, make a change, or work through a problem.</p>
+              <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">
+                What would you like to build?
+              </h2>
+              <p class="max-w-[48ch] text-muted">
+                Ask Pi to explore your project, make a change, or work through a problem.
+              </p>
             </div>
           {/if}
           {#each conversation.entries as entry (entry.id)}
             {#if entry.role === "tool"}
               <details class="group mb-2 text-xs text-muted" data-state={entry.status}>
-                <summary class="cursor-pointer rounded-md px-3 py-2 wrap-anywhere hover:bg-raised group-open:bg-raised pointer-coarse:min-h-11"
+                <summary
+                  class="cursor-pointer rounded-md px-3 py-2 wrap-anywhere hover:bg-raised group-open:bg-raised pointer-coarse:min-h-11"
                   ><span class="font-medium text-foreground">{entry.name}</span> ·
-                  <span class="text-success group-data-[state=running]:text-focus group-data-[state=failed]:text-error"
+                  <span
+                    class="text-success group-data-[state=running]:text-focus group-data-[state=failed]:text-error"
                     >{entry.status === "running"
                       ? "Running"
                       : entry.status === "failed"
@@ -194,9 +207,13 @@
                 >
                 <div class="mx-3 mt-1 mb-3 rounded-md bg-raised px-4 py-3">
                   <h3 class="mt-0 mb-2 text-xs font-medium">Input</h3>
-                  <pre class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0" aria-label="Input">{entry.input}</pre>
+                  <pre
+                    class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0"
+                    aria-label="Input">{entry.input}</pre>
                   <h3 class="mt-0 mb-2 text-xs font-medium">Result</h3>
-                  <pre class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0" aria-label="Result">{entry.result}</pre>
+                  <pre
+                    class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0"
+                    aria-label="Result">{entry.result}</pre>
                 </div>
               </details>
             {:else if entry.role === "assistant"}
@@ -209,23 +226,34 @@
                 />
               </div>
             {:else}
-              <p class="mt-0 mr-0 mb-8 ml-auto w-fit max-w-[88%] rounded-[16px_16px_4px_16px] bg-user px-4 py-3 whitespace-pre-wrap wrap-anywhere max-[520px]:max-w-full" aria-label="user">{entry.text}</p>
+              <p
+                class="mt-0 mr-0 mb-8 ml-auto w-fit max-w-[88%] rounded-[16px_16px_4px_16px] bg-user px-4 py-3 whitespace-pre-wrap wrap-anywhere max-[520px]:max-w-full"
+                aria-label="user"
+              >
+                {entry.text}
+              </p>
             {/if}
           {/each}
         </div>
       </div>
-      <div class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] shrink-0 pt-4 pb-6">
-        <div class="notices">
+      <div
+        class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] shrink-0 pt-4 pb-6"
+      >
+        <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
           {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
           {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
           {#if crashed}
             <p role="alert">The backend stopped. Restart to recover saved history.</p>
-            <button class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted" onclick={restart} disabled={restarting}>Restart</button>
+            <button
+              class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
+              onclick={restart}
+              disabled={restarting}>Restart</button
+            >
           {/if}
           {#if error}<p role="alert">{error}</p>{/if}
         </div>
         <form
-          class="composer"
+          class="rounded-[24px] border border-solid border-border bg-surface p-5 pb-4 shadow-composer has-[textarea:focus-visible]:outline-2 has-[textarea:focus-visible]:outline-solid has-[textarea:focus-visible]:outline-focus has-[textarea:focus-visible]:outline-offset-[3px] max-[520px]:p-4"
           aria-label="Message composer"
           onsubmit={(event) => {
             event.preventDefault();
@@ -235,15 +263,23 @@
         >
           <label class="sr-only" for="prompt">Prompt</label>
           <textarea
+            class="block min-h-26 max-h-[min(30dvh,240px)] w-full field-sizing-content resize-none overflow-auto border-0 bg-transparent p-0 font-sans text-base text-foreground caret-focus placeholder:text-muted focus-visible:outline-none"
             id="prompt"
             bind:this={editor}
             bind:value={draft}
             placeholder="Ask Pi to work on your project…"></textarea>
-          <div class="toolbar">
-            <div class="metadata">
-              <span class="model">{conversation.modelName}</span>
-              <span class="status" role="status" data-active={connected && busy}>
-                <span class="dot" aria-hidden="true"></span>
+          <div class="mt-4 flex items-center gap-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
+              <span class="wrap-anywhere">{conversation.modelName}</span>
+              <span
+                class="group inline-flex items-center gap-1.5 border-0 border-l border-solid border-border pl-3 whitespace-nowrap"
+                role="status"
+                data-active={connected && busy}
+              >
+                <span
+                  class="size-[5px] rounded-[50%] bg-current group-data-[active=true]:text-focus"
+                  aria-hidden="true"
+                ></span>
                 {!connected
                   ? "Disconnected"
                   : conversation.status === "idle"
@@ -256,7 +292,7 @@
             <!-- t3code ComposerPrimaryActions.tsx at 4a560b4e4ebb37efb7f57805ba79e37f5500bdca.
                  SVGs licensed under MIT; notice distributed in /licenses/t3code.txt. -->
             <button
-              class="action send"
+              class="ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[50%] border-0 p-0 text-white shadow-action enabled:hover:brightness-[1.12] enabled:active:translate-y-px disabled:cursor-default disabled:opacity-40 [&[hidden]]:hidden max-[520px]:size-9 pointer-coarse:size-11 bg-action"
               type="submit"
               aria-label="Send"
               title="Send"
@@ -274,7 +310,7 @@
               </svg>
             </button>
             <button
-              class="action stop"
+              class="ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[50%] border-0 p-0 text-white shadow-action enabled:hover:brightness-[1.12] enabled:active:translate-y-px disabled:cursor-default disabled:opacity-40 [&[hidden]]:hidden max-[520px]:size-9 pointer-coarse:size-11 bg-stop"
               type="button"
               aria-label="Stop"
               title={conversation.status === "stopping" ? "Stopping…" : "Stop"}
@@ -297,13 +333,20 @@
       </div>
     </section>
   {:else}
-    <div class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] overflow-auto py-16">
-      <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">Start with your project</h2>
+    <div
+      class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] overflow-auto py-16"
+    >
+      <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">
+        Start with your project
+      </h2>
       <p class="max-w-[48ch] text-muted">Choose a folder to start a conversation with Pi.</p>
-      <button class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted" onclick={chooseProject} disabled={choosing}>Choose project</button>
+      <button
+        class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
+        onclick={chooseProject}
+        disabled={choosing}>Choose project</button
+      >
       {#if choosing}<p role="status">Opening project…</p>{/if}
       {#if error}<p role="alert">{error}</p>{/if}
     </div>
   {/if}
 </main>
-
