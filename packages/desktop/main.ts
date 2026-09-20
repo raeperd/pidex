@@ -67,9 +67,37 @@ const program = Effect.gen(function* () {
   let connectionScope: Scope.Closeable | undefined;
   const connections = yield* Scope.make();
   let quitting = false;
+  let currentRun: Effect.Effect<string | null, DesktopError> | undefined;
   const shutdown = Effect.gen(function* () {
     if (quitting) return;
     quitting = true;
+    // Reconcile with the backend before deciding: the watched state may be behind Send.
+    const runId = currentRun
+      ? yield* currentRun.pipe(Effect.catch(() => Effect.succeed(undefined)))
+      : undefined;
+    // A lost connection means unknown, even when the last observed state was Idle.
+    if (conversation && runId !== null) {
+      const confirmation = yield* Effect.tryPromise({
+        try: () =>
+          dialog.showMessageBox({
+            type: "question",
+            message: "Stop the current run and quit?",
+            detail: "Saved history and file changes will be kept.",
+            buttons: ["Cancel", "Quit"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          }),
+        catch: () => new DesktopError({ message: "Could not confirm Quit" }),
+      });
+      if (confirmation.response !== 1) {
+        quitting = false;
+        return;
+      }
+      // If RPC is lost, SIGTERM below still awaits the backend's Pi finalizer.
+      if (stopRun && runId)
+        yield* stopRun(runId).pipe(Effect.catch((error) => Effect.logWarning(error.message)));
+    }
     yield* Scope.close(connections, Exit.void);
     const child = server?.child;
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
@@ -114,6 +142,21 @@ const program = Effect.gen(function* () {
         submissionId?: string,
       ) => Effect.Effect<"accepted" | "uncertain", DesktopError>)
     | undefined;
+  let stopRun: ((runId: string) => Effect.Effect<void, DesktopError>) | undefined;
+  ipcMain.handle("stop-run", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const runId = yield* Schema.decodeUnknownEffect(Schema.String)(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid run identity" })),
+        );
+        if (!stopRun || quitting)
+          return yield* new DesktopError({ message: "No connected conversation" });
+        yield* stopRun(runId);
+      }),
+    ),
+  );
   ipcMain.handle("send-prompt", (event, text: unknown, submissionId: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -197,11 +240,17 @@ const program = Effect.gen(function* () {
       });
       server = { child };
       child.once("exit", () => {
-        if (server?.child !== child || quitting) return;
-        interrupted ||= conversation?.status === "running";
+        if (server?.child !== child) return;
+        if (quitting) {
+          app.quit();
+          return;
+        }
+        interrupted ||= conversation !== undefined && conversation.status !== "idle";
         crashed = true;
         connectionError = "";
         sendPrompt = undefined;
+        stopRun = undefined;
+        currentRun = undefined;
         if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
       });
       return yield* Effect.gen(function* () {
@@ -279,6 +328,29 @@ const program = Effect.gen(function* () {
                 if (update._tag === "Snapshot") {
                   conversation = update.conversation;
                   connectionError = "";
+                  currentRun = client.Subscribe().pipe(
+                    Stream.runHead,
+                    Effect.flatMap((first) =>
+                      first._tag === "Some" && first.value._tag === "Snapshot"
+                        ? Effect.succeed(first.value.conversation.runId)
+                        : Effect.fail(
+                            new DesktopError({ message: "Could not check the current run" }),
+                          ),
+                    ),
+                    Effect.mapError(
+                      () => new DesktopError({ message: "Could not check the current run" }),
+                    ),
+                  );
+                  stopRun = (runId) =>
+                    client.Stop({ runId }).pipe(
+                      Effect.mapError(
+                        (error) =>
+                          new DesktopError({
+                            message:
+                              error._tag === "StopError" ? error.message : "Could not stop the run",
+                          }),
+                      ),
+                    );
                   sendPrompt = (text, submissionId) =>
                     client.Send({ text, submissionId }).pipe(
                       Effect.map((): "accepted" => "accepted"),
@@ -302,6 +374,8 @@ const program = Effect.gen(function* () {
           Effect.ensuring(
             Effect.sync(() => {
               sendPrompt = undefined;
+              stopRun = undefined;
+              currentRun = undefined;
               if (window && !window.isDestroyed()) window.webContents.send("conversation", null);
             }),
           ),

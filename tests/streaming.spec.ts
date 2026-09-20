@@ -346,7 +346,8 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     childPid = findServer();
     if (!childPid) throw new Error("Expected an owned server process");
     await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });
-    await app.evaluate(({ app: application }) => {
+    await app.evaluate(({ app: application, dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
       setImmediate(() => application.quit());
     });
     await expect.poll(() => electronProcess.exitCode).toBe(0);

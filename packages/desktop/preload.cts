@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("desktop", {
     ipcRenderer.on("backend-crashed", listener);
     return () => ipcRenderer.removeListener("backend-crashed", listener);
   },
+
+  stop: (runId: string) => ipcRenderer.invoke("stop-run", runId),
   send: (text: string, submissionId?: string) =>
     ipcRenderer.invoke("send-prompt", text, submissionId),
   subscribe: (onChange: (value: unknown) => void) => {

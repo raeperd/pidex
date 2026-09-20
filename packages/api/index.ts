@@ -29,7 +29,8 @@ export const Conversation = Schema.Struct({
   id: Schema.String,
   modelName: Schema.String,
   setupError: Schema.NullOr(SetupError),
-  status: Schema.Literals(["idle", "running"]),
+  status: Schema.Literals(["idle", "running", "stopping"]),
+  runId: Schema.NullOr(Schema.String),
   messageCount: Schema.Number,
   entries: Schema.Array(Entry),
   error: Schema.String,
@@ -46,6 +47,7 @@ export const ConversationUpdate = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal("StateChanged"),
     status: Conversation.fields.status,
+    runId: Conversation.fields.runId,
     messageCount: Conversation.fields.messageCount,
     error: Conversation.fields.error,
   }),
@@ -60,12 +62,17 @@ export class SendError extends Schema.TaggedError<SendError>()("SendError", {
   message: Schema.String,
 }) {}
 
+export class StopError extends Schema.TaggedError<StopError>()("StopError", {
+  message: Schema.String,
+}) {}
+
 export const ConversationApi = RpcGroup.make(
   Rpc.make("Subscribe", { success: ConversationUpdate, error: SubscribeError, stream: true }),
   Rpc.make("Send", {
     payload: { text: Schema.String, submissionId: Schema.optional(Schema.String) },
     error: SendError,
   }),
+  Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),
 );
 
 export function applyConversationUpdate(
@@ -79,6 +86,7 @@ export function applyConversationUpdate(
       return {
         ...current,
         status: update.status,
+        runId: update.runId,
         messageCount: update.messageCount,
         error: update.error,
       };

@@ -92,6 +92,17 @@
     }
   }
 
+  async function stop() {
+    const runId = conversation?.runId;
+    if (!runId) return;
+    error = "";
+    try {
+      await window.desktop.stop(runId);
+    } catch {
+      error = "Could not stop the run. Check the connection and try again.";
+    }
+  }
+
   async function chooseProject() {
     choosing = true;
     error = "";
@@ -119,7 +130,13 @@
       <h2>New conversation</h2>
       <p>{conversation.modelName}</p>
       <p role="status">
-        {!connected ? "Disconnected" : conversation.status === "idle" ? "Idle" : "Running"}
+        {!connected
+          ? "Disconnected"
+          : conversation.status === "idle"
+            ? "Idle"
+            : conversation.status === "stopping"
+              ? "Stopping"
+              : "Running"}
       </p>
       {#if conversation.entries.length === 0}<p>No messages yet.</p>{/if}
       {#each conversation.entries as entry (entry.id)}
@@ -149,6 +166,11 @@
       {#if crashed}
         <p role="alert">The backend stopped. Restart to recover saved history.</p>
         <button onclick={restart} disabled={restarting}>Restart</button>
+      {/if}
+      {#if conversation.status !== "idle"}
+        <button onclick={stop} disabled={!connected || conversation.status === "stopping"}
+          >Stop</button
+        >
       {/if}
       <form
         onsubmit={(event) => {
