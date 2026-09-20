@@ -26,6 +26,8 @@ jobs:
       - run: pnpm check
       - name: Build
         run: pnpm build
+      - name: Prepare Electron
+        run: node -e 'require("electron")'
       - name: Test
         run: pnpm exec playwright test
       - uses: actions/upload-artifact@v4
