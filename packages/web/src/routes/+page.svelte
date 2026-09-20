@@ -1,52 +1,7 @@
-<script module lang="ts">
-  import { marked } from "marked";
-  import DOMPurify from "dompurify";
-
-  function createMarkdownRenderer() {
-    const cache = new Map<string, { text: string; html: string }>();
-    return (id: string, text: string) => {
-      const previous = cache.get(id);
-      if (previous?.text === text) return previous.html;
-      const html = DOMPurify.sanitize(marked.parse(text, { async: false }), {
-        ALLOWED_TAGS: [
-          "p",
-          "br",
-          "strong",
-          "em",
-          "del",
-          "blockquote",
-          "pre",
-          "code",
-          "ul",
-          "ol",
-          "li",
-          "h1",
-          "h2",
-          "h3",
-          "h4",
-          "h5",
-          "h6",
-          "hr",
-          "a",
-          "table",
-          "thead",
-          "tbody",
-          "tr",
-          "th",
-          "td",
-        ],
-        ALLOWED_ATTR: ["href", "title", "start"],
-      });
-      cache.set(id, { text, html });
-      return html;
-    };
-  }
-</script>
-
 <script lang="ts">
   import { onMount } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
-  const renderMarkdown = createMarkdownRenderer();
+  import AssistantMessage from "./AssistantMessage.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let sending = $state(false);
@@ -119,7 +74,10 @@
             <pre aria-label="Result">{entry.result}</pre>
           </details>
         {:else if entry.role === "assistant"}
-          <div aria-label="assistant">{@html renderMarkdown(entry.id, entry.text)}</div>
+          <AssistantMessage
+            text={entry.text}
+            streaming={conversation.status === "running" && entry === conversation.entries.at(-1)}
+          />
         {:else}
           <p aria-label="user">{entry.text}</p>
         {/if}

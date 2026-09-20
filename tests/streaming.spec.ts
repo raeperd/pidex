@@ -60,11 +60,19 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
       const parts = [
         "lo**\n\n```ts\nconst answer = ",
         "42;\n```\n\n[reference](https://example.",
-        'com)<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">',
+        "com)\n\nStable paragraph.\n\n**bold",
+        "*",
+        "*\n\nInline `co",
+        "de`\n\n- one\n\n- **tw",
+        "o**\n\n[late][target]",
+        "\n\n[target]: https://example.org\n\n~~strike",
+        "~",
+        '~\n\nEscaped \\*literal and some_identifier.\n\n```md\n**literal [link](url\n\nstill code\n```\n\n<script>document.title="unsafe"</script><img src="x" onerror="document.title=\'unsafe\'">\n\n[bad](javascript:alert(1))\n\n**unfinished',
       ];
       advanceMarkdown = () => {
-        chunk({ content: parts.shift() });
-        if (parts.length === 0) {
+        const part = parts.shift();
+        if (part !== undefined) chunk({ content: part });
+        else {
           chunk({}, "stop");
           response.end("data: [DONE]\n\n");
         }
@@ -228,23 +236,66 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     expect(providerRequests).toBe(1);
     expect(finish).toBeDefined();
     finish?.();
-    await expect(conversation.getByText("Saved **hel", { exact: true })).toBeVisible();
+    await expect(conversation.locator("strong")).toHaveText("hel");
+    const advance = advanceMarkdown;
+    if (!advance) throw new Error("Expected controlled Markdown response");
     await expect(conversation.getByRole("status")).toHaveText("Running");
-    advanceMarkdown?.();
+    advance();
     await expect(conversation.locator("strong")).toHaveText("hello");
     await expect(conversation.locator("pre code")).toContainText("const answer =");
-    advanceMarkdown?.();
+    advance();
     await expect(conversation.locator("pre code")).toHaveText("const answer = 42;\n");
     await expect(conversation.getByRole("link", { name: "reference" })).toHaveCount(0);
-    advanceMarkdown?.();
+    advance();
     await expect(conversation.getByRole("link", { name: "reference" })).toHaveAttribute(
       "href",
       "https://example.com",
     );
     await expect(conversation.getByText("Saved hello", { exact: true })).toBeVisible();
-    await expect(conversation.locator("strong")).toHaveText("hello");
+    await expect(conversation.locator("strong")).toHaveText(["hello", "bold"]);
+    const stableParagraph = await conversation
+      .getByText("Stable paragraph.", { exact: true })
+      .elementHandle();
+    const completedCode = await conversation.locator("pre code").elementHandle();
+    advance();
+    await expect(conversation.locator("strong")).toHaveText(["hello", "bold"]);
+    advance();
+    await expect(conversation.getByText("Inline", { exact: false }).locator("code")).toHaveText(
+      "co",
+    );
+    advance();
+    await expect(conversation.getByText("Inline", { exact: false }).locator("code")).toHaveText(
+      "code",
+    );
+    await expect(conversation.locator("li strong")).toHaveText("tw");
+    advance();
+    await expect(conversation.locator("li")).toHaveText(["one", "two"]);
+    await expect(conversation.getByRole("link", { name: "late", exact: true })).toHaveCount(0);
+    advance();
+    await expect(conversation.getByRole("link", { name: "late", exact: true })).toHaveAttribute(
+      "href",
+      "https://example.org",
+    );
+    await expect(conversation.locator("s")).toHaveText("strike");
+    advance();
+    await expect(conversation.locator("s")).toHaveText("strike");
+    advance();
+    await expect(conversation.locator("strong").last()).toHaveText("unfinished");
+    await expect(
+      conversation.getByText("Escaped *literal and some_identifier.", { exact: true }),
+    ).toBeVisible();
+    await expect(conversation.locator("pre code").last()).toHaveText(
+      "**literal [link](url\n\nstill code\n",
+    );
+    await expect(conversation.getByRole("link", { name: "bad", exact: true })).toHaveCount(0);
     await expect(conversation.locator("script, img")).toHaveCount(0);
     await expect(page).toHaveTitle("pidex");
+    // Completed blocks survive subsequent deltas without replacing their DOM.
+    expect(await stableParagraph?.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await completedCode?.evaluate((node) => node.isConnected)).toBe(true);
+    advance();
+    await expect(conversation.getByRole("status")).toHaveText("Idle");
+    await expect(conversation.getByText("**unfinished", { exact: true })).toBeVisible();
     const tool = conversation.locator("details");
     await expect(tool.locator("summary")).toHaveText("write · Completed");
     await expect(tool.getByLabel("Input")).not.toBeVisible();
@@ -275,7 +326,7 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     for (const messages of [updates.wire, updates.ipc]) {
       expect(messages.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
       const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
-      expect(deltas).toHaveLength(6);
+      expect(deltas).toHaveLength(13);
       expect(deltas[0]).toContain('"delta":"Writing "');
       expect(deltas[1]).toContain('"delta":"hello"');
       for (const delta of deltas) {
