@@ -1,0 +1,67 @@
+{
+  "UC-01": {
+    "number": 129,
+    "url": "https://github.com/raeperd/pidex/issues/129",
+    "file": ".scratch/v0.0.1/issues/01-choose-project.md"
+  },
+  "UC-02": {
+    "number": 130,
+    "url": "https://github.com/raeperd/pidex/issues/130",
+    "file": ".scratch/v0.0.1/issues/02-stream-replies.md"
+  },
+  "UC-03": {
+    "number": 131,
+    "url": "https://github.com/raeperd/pidex/issues/131",
+    "file": ".scratch/v0.0.1/issues/03-draft-while-busy.md"
+  },
+  "UC-04": {
+    "number": 132,
+    "url": "https://github.com/raeperd/pidex/issues/132",
+    "file": ".scratch/v0.0.1/issues/04-stop-and-continue.md"
+  },
+  "UC-05": {
+    "number": 133,
+    "url": "https://github.com/raeperd/pidex/issues/133",
+    "file": ".scratch/v0.0.1/issues/05-reconnect-without-replay.md"
+  },
+  "UC-06": {
+    "number": 134,
+    "url": "https://github.com/raeperd/pidex/issues/134",
+    "file": ".scratch/v0.0.1/issues/06-reopen-window.md"
+  },
+  "UC-07": {
+    "number": 135,
+    "url": "https://github.com/raeperd/pidex/issues/135",
+    "file": ".scratch/v0.0.1/issues/07-recover-backend.md"
+  },
+  "UC-08": {
+    "number": 136,
+    "url": "https://github.com/raeperd/pidex/issues/136",
+    "file": ".scratch/v0.0.1/issues/08-handle-session-files.md"
+  },
+  "UC-09": {
+    "number": 137,
+    "url": "https://github.com/raeperd/pidex/issues/137",
+    "file": ".scratch/v0.0.1/issues/09-confirm-quit.md"
+  },
+  "UC-10": {
+    "number": 138,
+    "url": "https://github.com/raeperd/pidex/issues/138",
+    "file": ".scratch/v0.0.1/issues/10-show-actionable-failures.md"
+  },
+  "UC-11": {
+    "number": 139,
+    "url": "https://github.com/raeperd/pidex/issues/139",
+    "file": ".scratch/v0.0.1/issues/11-use-stock-pi.md"
+  },
+  "UC-12": {
+    "number": 140,
+    "url": "https://github.com/raeperd/pidex/issues/140",
+    "file": ".scratch/v0.0.1/issues/12-reject-unauthorized-clients.md"
+  },
+  "UC-13": {
+    "number": 141,
+    "url": "https://github.com/raeperd/pidex/issues/141",
+    "file": ".scratch/v0.0.1/issues/13-start-fresh-after-relaunch.md"
+  }
+}
