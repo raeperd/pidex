@@ -66,9 +66,10 @@ const program = Effect.gen(function* () {
     quitting = true;
     // Reconcile with the backend before deciding: the watched state may be behind Send.
     const runId = currentRun
-      ? yield* currentRun.pipe(Effect.catch(() => Effect.succeed(conversation?.runId)))
-      : conversation?.runId;
-    if (runId) {
+      ? yield* currentRun.pipe(Effect.catch(() => Effect.succeed(undefined)))
+      : undefined;
+    // A lost connection means unknown, even when the last observed state was Idle.
+    if (conversation && runId !== null) {
       const confirmation = yield* Effect.tryPromise({
         try: () =>
           dialog.showMessageBox({
@@ -87,7 +88,7 @@ const program = Effect.gen(function* () {
         return;
       }
       // If RPC is lost, SIGTERM below still awaits the backend's Pi finalizer.
-      if (stopRun)
+      if (stopRun && runId)
         yield* stopRun(runId).pipe(Effect.catch((error) => Effect.logWarning(error.message)));
     }
     yield* Scope.close(connections, Exit.void);

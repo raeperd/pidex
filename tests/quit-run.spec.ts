@@ -6,10 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-for (const disconnected of [false, true]) {
-  const title = disconnected
-    ? "#137 confirmed Quit after RPC disconnect still awaits Pi before exiting"
-    : "#137 Cancel Quit keeps work alive; Confirm awaits cancellation before both processes exit";
+for (const connection of ["connected", "disconnected", "unobserved"]) {
+  const unobserved = connection === "unobserved";
+  const disconnected = connection !== "connected";
+  const title = unobserved
+    ? "#137 Quit confirms when RPC drops before the run is observed"
+    : disconnected
+      ? "#137 confirmed Quit after RPC disconnect still awaits Pi before exiting"
+      : "#137 Cancel Quit keeps work alive; Confirm awaits cancellation before both processes exit";
   // oxlint-disable-next-line no-empty-pattern
   test(title, async ({}, testInfo) => {
     await using cleanup = new AsyncDisposableStack();
@@ -146,11 +150,22 @@ for (const disconnected of [false, true]) {
           const prototype = NodeSocket.NodeWS.WebSocket.prototype;
           const originalEmit = prototype.emit;
           let disconnect: (() => void) | undefined;
+          let dropNextRun = false;
           prototype.emit = function (event: string | symbol, ...args: unknown[]) {
             if (event === "open") disconnect = () => this.terminate();
+            if (event === "message" && dropNextRun && String(args[0]).includes('"StateChanged"')) {
+              dropNextRun = false;
+              this.terminate();
+              return false;
+            }
             return originalEmit.apply(this, [event, ...args]);
           };
-          return { disconnect: () => disconnect?.() };
+          return {
+            disconnect: () => disconnect?.(),
+            dropNext: () => {
+              dropNextRun = true;
+            },
+          };
         },
         fileURLToPath(import.meta.resolve("@effect/platform-node")),
       );
@@ -169,11 +184,18 @@ for (const disconnected of [false, true]) {
       await expect(status).toHaveText("Idle", { timeout: 15_000 });
       const composer = page.getByRole("textbox", { name: "Prompt" });
       const send = page.getByRole("button", { name: "Send", exact: true });
+      if (unobserved) await transport.evaluate((wire) => wire.dropNext());
       await composer.fill("Write hello to note.txt");
       await send.click();
-      await expect(conversation.getByText("Working", { exact: true })).toBeVisible();
-      await expect(conversation.getByText("Partial output", { exact: true })).toBeVisible();
+      if (unobserved) {
+        await expect(status).toHaveText("Disconnected");
+        await expect.poll(() => providerRequests).toBe(2);
+      } else {
+        await expect(conversation.getByText("Working", { exact: true })).toBeVisible();
+        await expect(conversation.getByText("Partial output", { exact: true })).toBeVisible();
+      }
       const active = await page.evaluate(() => window.desktop.chooseProject());
+      expect(active?.runId === null).toBe(unobserved);
       const files = await readdir(join(agentDir, "sessions"), { recursive: true });
       const historyFile = files.find((file) => file.endsWith(".jsonl"));
       if (!historyFile) throw new Error("Expected saved history");
@@ -216,12 +238,13 @@ for (const disconnected of [false, true]) {
       expect(process.kill(ownedPid, 0)).toBe(true);
       expect(cancellationRequests).toBe(0);
       continueReply?.();
-      await expect(conversation.getByLabel("assistant").last()).toContainText("Still working");
+      if (!unobserved)
+        await expect(conversation.getByLabel("assistant").last()).toContainText("Still working");
       expect((await page.evaluate(() => window.desktop.chooseProject()))?.runId).toBe(
         active?.runId,
       );
-      await expect(status).toHaveText("Running");
-      if (disconnected) {
+      await expect(status).toHaveText(unobserved ? "Disconnected" : "Running");
+      if (connection === "disconnected") {
         await transport.evaluate((wire) => wire.disconnect());
         await expect(status).toHaveText("Disconnected");
         expect(process.kill(ownedPid, 0)).toBe(true);
