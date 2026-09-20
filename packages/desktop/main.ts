@@ -246,8 +246,8 @@ const program = Effect.gen(function* () {
           return;
         }
         interrupted ||= conversation !== undefined && conversation.status !== "idle";
+        if (!crashed) connectionError = "";
         crashed = true;
-        connectionError = "";
         sendPrompt = undefined;
         stopRun = undefined;
         currentRun = undefined;
@@ -390,7 +390,10 @@ const program = Effect.gen(function* () {
           Effect.catch((error) =>
             Effect.gen(function* () {
               if (child.exitCode === null && child.signalCode === null) {
-                connectionError = "Could not reconnect. Pi history is preserved.";
+                connectionError =
+                  error._tag === "RecoveryError"
+                    ? error.message
+                    : "Could not reconnect. Pi history is preserved.";
                 if (window && !window.isDestroyed())
                   window.webContents.send("conversation", {
                     _tag: "ConnectionError",

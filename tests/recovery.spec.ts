@@ -165,7 +165,8 @@ for (const firstTurn of [false, true]) {
 test("#136 preserves unreadable history and reports the replacement child's permission error", async ({
   lifecycle,
 }) => {
-  const { page, children } = await lifecycle.launch();
+  const { app, page: initialPage, children } = await lifecycle.launch();
+  let page = initialPage;
   await page.getByRole("textbox", { name: "Prompt" }).fill("Remember pear");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => lifecycle.requests.length).toBe(1);
@@ -189,6 +190,13 @@ test("#136 preserves unreadable history and reports the replacement child's perm
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
     expect(lifecycle.requests).toHaveLength(1);
     await expect.poll(children).toEqual([]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+    await expect.poll(() => app.windows().length).toBe(0);
+    await app.evaluate(({ app: application }) => application.emit("activate"));
+    page = await app.firstWindow();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Cannot read saved history" }),
+    ).toContainText("EACCES");
   } finally {
     await chmod(saved.path, 0o600);
     expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
