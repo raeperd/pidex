@@ -15,6 +15,10 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [2, 3, 4]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.0.9
@@ -43,17 +47,24 @@ jobs:
             echo "- pnpm cache hit: ${{ steps.node.outputs.cache-hit }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Test
-        run: pnpm exec playwright test
+        run: |
+          sysctl hw.logicalcpu hw.memsize machdep.cpu.brand_string
+          top -l 0 -s 5 -n 0 > "$RUNNER_TEMP/worker-resources.log" &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true; wait "$monitor" 2>/dev/null || true; mkdir -p test-results; cp "$RUNNER_TEMP/worker-resources.log" test-results/resources.log' EXIT
+          pnpm exec playwright test --workers=${{ matrix.workers }}
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-results-attempt-${{ github.run_attempt }}
-          path: test-results/results.json
+          name: playwright-results-${{ matrix.workers }}-workers-attempt-${{ github.run_attempt }}
+          path: |
+            test-results/results.json
+            test-results/resources.log
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: electron-failure-attempt-${{ github.run_attempt }}
+          name: electron-failure-${{ matrix.workers }}-workers-attempt-${{ github.run_attempt }}
           path: test-results/
