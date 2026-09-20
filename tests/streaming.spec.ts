@@ -275,8 +275,8 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     for (const messages of [updates.wire, updates.ipc]) {
       expect(messages.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
       const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
-      expect(deltas).toHaveLength(2);
-      expect(deltas[0]).toContain('"delta":"Saved "');
+      expect(deltas).toHaveLength(6);
+      expect(deltas[0]).toContain('"delta":"Writing "');
       expect(deltas[1]).toContain('"delta":"hello"');
       for (const delta of deltas) {
         expect(delta).not.toContain('"entries"');
