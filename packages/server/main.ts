@@ -135,8 +135,18 @@ const program = Effect.gen(function* () {
   yield* Effect.acquireRelease(
     Effect.sync(() =>
       session.subscribe((event) => {
-        if (event.type === "agent_start" && active)
-          Effect.runSync(Deferred.succeed(active.started, undefined));
+        if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
+          // Pi can start the pending turn after aborting preflight compaction.
+          const run = active;
+          if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
+          if (event.type === "compaction_start") {
+            // Pi installs the compaction controller after notifying subscribers.
+            queueMicrotask(() => {
+              if (active === run && state.status === "stopping") session.abortCompaction();
+            });
+          }
+          Effect.runSync(Deferred.succeed(run.started, undefined));
+        }
         Effect.runSync(
           Effect.sync(() => {
             switch (event.type) {
@@ -287,7 +297,7 @@ const program = Effect.gen(function* () {
       status: "stopping",
       runId,
       messageCount: state.messageCount,
-      error: state.error,
+      error: "",
     });
     return yield* Effect.gen(function* () {
       // abort() before Pi starts is a no-op. Wait for start or preflight failure.
