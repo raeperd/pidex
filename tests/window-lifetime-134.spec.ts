@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-for (const scenario of ["after completion", "during run", "after connection failure"]) {
+for (const scenario of ["after completion", "during run", "after backend crash"]) {
   const finishWhileClosed = scenario === "after completion";
   // oxlint-disable-next-line no-empty-pattern
   test(`#134 actual window close and activation ${scenario}`, async ({}, testInfo) => {
@@ -151,12 +151,10 @@ for (const scenario of ["after completion", "during run", "after connection fail
       );
       expect(findServer()).toBe(childPid);
       expect(electronProcess.exitCode).toBeNull();
-      if (scenario === "after connection failure") {
+      if (scenario === "after backend crash") {
         if (!childPid) throw new Error("Expected backend PID");
         process.kill(childPid, "SIGKILL");
-        await expect
-          .poll(() => logs.join(""))
-          .toContain("Could not reconnect. Pi history is preserved.");
+        await expect.poll(findServer).toBeUndefined();
         expect(
           await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
         ).toBe(0);
@@ -164,8 +162,11 @@ for (const scenario of ["after completion", "during run", "after connection fail
         const restoredWindow = await app.firstWindow();
         await expect(restoredWindow.getByRole("status")).toHaveText("Disconnected");
         await expect(restoredWindow.getByRole("alert")).toHaveText(
-          "Could not reconnect. Pi history is preserved.",
+          "The backend stopped. Restart to recover saved history.",
         );
+        await expect(
+          restoredWindow.getByRole("button", { name: "Restart", exact: true }),
+        ).toBeEnabled();
         expect(findServer()).toBeUndefined();
         expect(providerRequests).toBe(1);
         await restoredWindow.screenshot({ path: testInfo.outputPath("connection-error.png") });

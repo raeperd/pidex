@@ -121,6 +121,37 @@ test("#135 discards an unestablished locator before choosing another project", a
   expect(files[0]?.path).toContain("second-project");
 });
 
+test("#135 restores Restart after a backend crash while the window is closed", async ({
+  lifecycle,
+}) => {
+  const { app, page, children, process: main } = await lifecycle.launch();
+  await page.getByRole("textbox", { name: "Prompt" }).fill("Remember pear");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved pear");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const saved = await lifecycle.history();
+  const [child] = children();
+  if (!child) throw new Error("Missing child");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+  await expect.poll(() => app.windows().length).toBe(0);
+  process.kill(child, "SIGKILL");
+  await expect.poll(() => alive(child)).toBe(false);
+  expect(main.pid && alive(main.pid)).toBe(true);
+  expect(children()).toEqual([]);
+  await app.evaluate(({ app: application }) => application.emit("activate"));
+  const reopened = await app.firstWindow();
+  await expect(reopened.getByRole("alert")).toContainText("backend stopped");
+  await expect(reopened.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+  await reopened.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect(reopened.getByRole("status")).toHaveText("Idle");
+  await expect(reopened.getByLabel("assistant", { exact: true })).toHaveText("Saved pear");
+  expect(children()).toHaveLength(1);
+  expect(children()[0]).not.toBe(child);
+  expect(await lifecycle.history()).toEqual(saved);
+  expect(lifecycle.requests).toHaveLength(1);
+});
+
 function alive(pid: number) {
   try {
     process.kill(pid, 0);
