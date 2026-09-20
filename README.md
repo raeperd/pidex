@@ -56,3 +56,14 @@ pnpm build && pnpm exec playwright test --grep '#132' --debug
 ```
 
 The isolated Electron test uses a temporary project, Pi configuration, and local OpenAI response server. A test-only Node import holds the provider response's cancellation error until the fixture releases it. It leaves Pi, stock tools, application handlers, preload, and authenticated RPC unchanged. The test checks Stopping, editable drafts, disabled Send, preserved history and `note.txt`, then continuation in the same session. A second isolated variant stops stock preflight compaction and verifies its pending turn cannot escape cancellation. Repeated authenticated Stop calls wait for acknowledgment; calls targeting the old run cannot stop the later run. `test-results/stop-run-*/` contains `stopping.png` and `trace.zip`; failures also retain a screenshot and redacted Electron log.
+
+## Quit during work (#137)
+
+Quit reads the backend's current run before opening a native confirmation with Cancel as the default. Cancel leaves that run alive. Confirm waits for the same run-targeted cancellation used by Stop, then closes the RPC connection, disposes the owned backend, and exits Electron. Repeated Quit requests share the pending shutdown. An unavailable or failed run lookup requires confirmation because the last observed Idle state may be stale. If RPC is unavailable, confirmed Quit sends SIGTERM to the owned backend and waits for its Pi cancellation finalizer and process exit.
+
+```sh
+pnpm test --grep '#137'
+pnpm build && pnpm exec playwright test --grep '#137' --debug
+```
+
+The isolated tests cover connected RPC, a lost connection, and a connection lost before the run is observed. They supply native dialog results before Quit, release `Still working` after Cancel, and hold provider cancellation acknowledgment after Confirm. Each checks both PIDs while acknowledgment is held, then observes exit and preserved history/file edits from outside Electron. None makes UI assertions after exit. Artifacts are under `test-results/quit-run-*/`. For a manual native dialog check, start a run in a disposable project with `pnpm dev`, choose Quit from the application menu, cancel once, then confirm the next Quit.
