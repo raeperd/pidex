@@ -189,7 +189,13 @@ const program = Effect.gen(function* () {
         Effect.ensuring(Effect.sync(unsubscribe)),
       ),
   );
-  const send = Effect.fn(function* ({ text }: { text: string }) {
+  const send = Effect.fn(function* ({
+    text,
+    submissionId,
+  }: {
+    text: string;
+    submissionId?: string;
+  }) {
     if (state.setupError) return yield* new SendError({ message: state.setupError.message });
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
     const accepted = yield* Effect.sync(() => {
@@ -200,7 +206,15 @@ const program = Effect.gen(function* () {
         messageCount: state.messageCount,
         error: "",
       });
-      publish({ _tag: "EntryUpserted", entry: { id: crypto.randomUUID(), role: "user", text } });
+      publish({
+        _tag: "EntryUpserted",
+        entry: {
+          id: crypto.randomUUID(),
+          role: "user",
+          text,
+          ...(submissionId === undefined ? {} : { submissionId }),
+        },
+      });
       return true;
     });
     if (!accepted) return yield* new SendError({ message: "Wait for the current reply." });

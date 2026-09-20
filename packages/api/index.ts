@@ -6,6 +6,7 @@ const Entry = Schema.Union([
     // User or assistant text message.
     id: Schema.String,
     role: Schema.Literals(["user", "assistant"]),
+    submissionId: Schema.optional(Schema.String),
     text: Schema.String,
   }),
   Schema.Struct({
@@ -61,7 +62,10 @@ export class SendError extends Schema.TaggedError<SendError>()("SendError", {
 
 export const ConversationApi = RpcGroup.make(
   Rpc.make("Subscribe", { success: ConversationUpdate, error: SubscribeError, stream: true }),
-  Rpc.make("Send", { payload: { text: Schema.String }, error: SendError }),
+  Rpc.make("Send", {
+    payload: { text: Schema.String, submissionId: Schema.optional(Schema.String) },
+    error: SendError,
+  }),
 );
 
 export function applyConversationUpdate(
