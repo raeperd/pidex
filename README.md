@@ -33,3 +33,9 @@ For a manual native-dialog check, run `pnpm dev`, click Choose project, and pres
 Pi 0.85.1 resolves the configured default model and credentials from its usual files or environment. The server creates a new persistent Pi session; its JSONL file may not exist until the first assistant message. Project instructions, stock tools, retry, and compaction use Pi. External extensions, skills, templates, themes, custom system prompts, and package resources are disabled without changing user settings.
 
 The server gives `DefaultResourceLoader` empty in-memory settings because Pi resolves packages before applying its resource filters. The session itself uses the normal settings manager.
+
+### Editable drafts (#131)
+
+`pnpm test --grep '#131'` runs the dedicated draft scenario. It holds a local provider response while the real Electron composer edits `next task`, attempts keyboard submission, and verifies authenticated RPC busy rejection. Completion preserves the draft without starting another request; pressing Enter on the enabled Send button submits that exact draft.
+
+For visible step-through, run `pnpm build && pnpm exec playwright test --grep '#131' --debug`. The fixture uses temporary Pi configuration and a local OpenAI-compatible provider, with no paid requests. Traces and screenshots are under `test-results/drafts-*`; failures also save redacted Electron logs. Existing draft and busy-rejection behavior needs no production change.
