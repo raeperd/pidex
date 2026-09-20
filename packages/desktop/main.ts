@@ -267,8 +267,8 @@ const program = Effect.gen(function* () {
               ),
             ]),
           );
-          const connectionScope = yield* Effect.scope;
-          const context = yield* Layer.buildWithScope(transport, connectionScope);
+          const socketScope = yield* Effect.scope;
+          const context = yield* Layer.buildWithScope(transport, socketScope);
           const client = yield* RpcClient.make(ConversationApi).pipe(
             Effect.provideContext(context),
           );

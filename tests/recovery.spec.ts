@@ -86,6 +86,13 @@ test("#135 discards an unestablished locator before choosing another project", a
       prototype.emit = function (event: string | symbol, ...args: unknown[]) {
         if (event === "message" && drop) {
           drop = false;
+          // A dropped socket now reconnects. Crash the child before its first snapshot instead.
+          const child = process
+            .getBuiltinModule("child_process")
+            .execFileSync("pgrep", ["-P", String(process.pid), "-f", "/dist/server/main.js"], {
+              encoding: "utf8",
+            });
+          process.kill(Number(child.trim()), "SIGKILL");
           this.terminate();
           return true;
         }
