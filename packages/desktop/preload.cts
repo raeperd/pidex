@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("desktop", {
+  stop: (runId: string) => ipcRenderer.invoke("stop-run", runId),
   send: (text: string, submissionId?: string) =>
     ipcRenderer.invoke("send-prompt", text, submissionId),
   subscribe: (onChange: (value: unknown) => void) => {
