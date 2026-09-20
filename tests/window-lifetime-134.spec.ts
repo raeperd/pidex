@@ -5,9 +5,10 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-for (const finishWhileClosed of [true, false]) {
+for (const scenario of ["after completion", "during run", "after connection failure"]) {
+  const finishWhileClosed = scenario === "after completion";
   // oxlint-disable-next-line no-empty-pattern
-  test(`#134 actual window close and activation ${finishWhileClosed ? "after completion" : "during run"}`, async ({}, testInfo) => {
+  test(`#134 actual window close and activation ${scenario}`, async ({}, testInfo) => {
     await using cleanup = new AsyncDisposableStack();
     const temporary = await mkdtemp(join(tmpdir(), "pidex-134-"));
     cleanup.defer(() => rm(temporary, { recursive: true, force: true }));
@@ -24,8 +25,12 @@ for (const finishWhileClosed of [true, false]) {
       JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4.1" }),
     );
     let providerRequests = 0;
-    let finish: (() => void) | undefined;
-    let advanceMarkdown: (() => void) | undefined;
+    let finish: () => void = () => {
+      throw new Error(`Provider response is not held: ${scenario}`);
+    };
+    let advanceMarkdown: () => void = () => {
+      throw new Error(`Tool response has not started: ${scenario}`);
+    };
     const provider = createServer((request, response) => {
       providerRequests++;
       request.resume();
@@ -109,6 +114,7 @@ for (const finishWhileClosed of [true, false]) {
     const context = app.context();
     const logs: string[] = [];
     electronProcess.stderr?.on("data", (data) => logs.push(String(data)));
+    electronProcess.stdout?.on("data", (data) => logs.push(String(data)));
     let childPid: number | undefined;
     cleanup.defer(async () => {
       childPid ??= findServer();
@@ -145,7 +151,28 @@ for (const finishWhileClosed of [true, false]) {
       );
       expect(findServer()).toBe(childPid);
       expect(electronProcess.exitCode).toBeNull();
-      finish?.();
+      if (scenario === "after connection failure") {
+        if (!childPid) throw new Error("Expected backend PID");
+        process.kill(childPid, "SIGKILL");
+        await expect
+          .poll(() => logs.join(""))
+          .toContain("Could not reconnect. Pi history is preserved.");
+        expect(
+          await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+        ).toBe(0);
+        await app.evaluate(({ app: application }) => application.emit("activate"));
+        const restoredWindow = await app.firstWindow();
+        await expect(restoredWindow.getByRole("status")).toHaveText("Disconnected");
+        await expect(restoredWindow.getByRole("alert")).toHaveText(
+          "Could not reconnect. Pi history is preserved.",
+        );
+        expect(findServer()).toBeUndefined();
+        expect(providerRequests).toBe(1);
+        await restoredWindow.screenshot({ path: testInfo.outputPath("connection-error.png") });
+        await context.tracing.stop({ path: testInfo.outputPath("trace.zip") });
+        return;
+      }
+      finish();
       await expect.poll(() => providerRequests).toBe(2);
       expect(await readFile(join(project, "note.txt"), "utf8")).toBe("hello");
       const files = (await readdir(join(agentDir, "sessions"), { recursive: true })).filter(
@@ -155,8 +182,8 @@ for (const finishWhileClosed of [true, false]) {
       const file = files[0];
       if (!file) throw new Error("Expected session file");
       if (finishWhileClosed) {
-        advanceMarkdown?.();
-        finish?.();
+        advanceMarkdown();
+        finish();
         await expect
           .poll(async () =>
             (await readFile(join(agentDir, "sessions", file), "utf8")).includes(
@@ -176,9 +203,9 @@ for (const finishWhileClosed of [true, false]) {
       const restored = await reopened.evaluate(() => window.desktop.chooseProject());
       expect(restored?.id).toBe(initial?.id);
       if (!finishWhileClosed) {
-        advanceMarkdown?.();
+        advanceMarkdown();
         await expect(reopened.getByLabel("assistant").last()).toHaveText("Saved ordered");
-        finish?.();
+        finish();
         await expect(reopened.getByRole("status")).toHaveText("Idle");
         await expect(reopened.getByLabel("assistant").last()).toHaveText("Saved ordered Finished");
       }
