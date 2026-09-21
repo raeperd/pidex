@@ -208,7 +208,7 @@ for (const accepted of [true, false]) {
       childPid = findServer();
       expect(childPid).toBeTruthy();
       const composer = page.getByRole("textbox", { name: "Prompt" });
-      const send = page.getByRole("button", { name: "Send", exact: true });
+      const send = page.getByRole("button", { name: "Send", exact: true, includeHidden: true });
       await composer.fill("Write hello to note.txt");
       await fault.evaluate((gate, wasAccepted) => gate.arm(wasAccepted), accepted);
       await send.click();

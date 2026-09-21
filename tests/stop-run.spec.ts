@@ -186,7 +186,7 @@ for (const preflightCompaction of [false, true]) {
         await expect(status).toHaveText("Idle", { timeout: 15_000 });
         const initial = await page.evaluate(() => window.desktop.chooseProject());
         const composer = page.getByRole("textbox", { name: "Prompt" });
-        const send = page.getByRole("button", { name: "Send", exact: true });
+        const send = page.getByRole("button", { name: "Send", exact: true, includeHidden: true });
         if (preflightCompaction) {
           await composer.fill("Save a prior turn");
           await send.click();
@@ -208,6 +208,10 @@ for (const preflightCompaction of [false, true]) {
         await page.getByRole("button", { name: "Stop", exact: true }).click();
         await expect.poll(() => cancellationRequests).toBe(1);
         await expect(status).toHaveText("Stopping");
+        await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "Stop", exact: true }).locator("svg rect"),
+        ).toBeVisible();
         if (!active?.runId) throw new Error("Expected active run identity");
         const repeated = await page.evaluateHandle((runId) => {
           let settled = false;

@@ -9,7 +9,7 @@ test("#135 manually recovers the exact saved session after idle and busy crashes
 }) => {
   const { app, page, process: main, children } = await lifecycle.launch();
   const prompt = page.getByRole("textbox", { name: "Prompt" });
-  const send = page.getByRole("button", { name: "Send", exact: true });
+  const send = page.getByRole("button", { name: "Send", exact: true, includeHidden: true });
   await prompt.fill("Remember pear");
   await send.click();
   await expect.poll(() => lifecycle.requests.length).toBe(1);

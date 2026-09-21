@@ -117,7 +117,7 @@ test("#131 edits a busy draft, rejects a transport send, then explicitly submits
     const conversation = page.getByRole("region", { name: "Conversation" });
     await expect(conversation).toBeVisible({ timeout: 15_000 });
     const composer = page.getByRole("textbox", { name: "Prompt" });
-    const send = page.getByRole("button", { name: "Send", exact: true });
+    const send = page.getByRole("button", { name: "Send", exact: true, includeHidden: true });
     await composer.fill("first task");
     await send.click();
     await expect(conversation.getByRole("status")).toHaveText("Running");

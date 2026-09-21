@@ -29,6 +29,8 @@
   import AssistantMessage from "./AssistantMessage.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
+  let editor = $state<HTMLTextAreaElement>();
+  const busy = $derived(conversation !== null && conversation.status !== "idle");
   let sending = $state(false);
   let pending: { id: string; text: string } | undefined;
   let connected = $state(true);
@@ -237,53 +239,97 @@
       <div
         class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] shrink-0 pt-4 pb-6"
       >
-        <div class="mb-3 flex flex-wrap gap-3 text-xs text-muted">
-          <span>{conversation.modelName}</span>
-          <span role="status">
-            {!connected
-              ? "Disconnected"
-              : conversation.status === "idle"
-                ? "Idle"
-                : conversation.status === "stopping"
-                  ? "Stopping"
-                  : "Running"}
-          </span>
+        <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
+          {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
+          {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
+          {#if crashed}
+            <p role="alert">The backend stopped. Restart to recover saved history.</p>
+            <button
+              class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
+              onclick={restart}
+              disabled={restarting}>Restart</button
+            >
+          {/if}
+          {#if error}<p role="alert">{error}</p>{/if}
         </div>
-        {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
-        {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
-        {#if crashed}
-          <p role="alert">The backend stopped. Restart to recover saved history.</p>
-          <button
-            class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
-            onclick={restart}
-            disabled={restarting}>Restart</button
-          >
-        {/if}
-        {#if conversation.status !== "idle"}
-          <button
-            class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
-            onclick={stop}
-            disabled={!connected || conversation.status === "stopping"}>Stop</button
-          >
-        {/if}
         <form
-          class="flex flex-wrap items-center gap-3"
+          class="rounded-[24px] border border-solid border-border bg-surface p-5 pb-4 shadow-composer has-[textarea:focus-visible]:outline-2 has-[textarea:focus-visible]:outline-solid has-[textarea:focus-visible]:outline-focus has-[textarea:focus-visible]:outline-offset-[3px] max-[520px]:p-4"
+          aria-label="Message composer"
           onsubmit={(event) => {
             event.preventDefault();
             void send();
+            editor?.focus();
           }}
         >
-          <label for="prompt">Prompt</label>
+          <label class="sr-only" for="prompt">Prompt</label>
           <textarea
-            class="block min-h-16 w-full resize-none rounded-lg border border-solid border-border bg-surface p-3 font-sans text-base text-foreground caret-focus"
+            class="block min-h-26 max-h-[min(30dvh,240px)] w-full field-sizing-content resize-none overflow-auto border-0 bg-transparent p-0 font-sans text-base text-foreground caret-focus placeholder:text-muted focus-visible:outline-none"
             id="prompt"
-            bind:value={draft}></textarea>
-          <button
-            class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
-            disabled={!canSend}>Send</button
-          >
+            bind:this={editor}
+            bind:value={draft}
+            placeholder="Ask Pi to work on your project…"></textarea>
+          <div class="mt-4 flex items-center gap-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
+              <span class="wrap-anywhere">{conversation.modelName}</span>
+              <span
+                class="group inline-flex items-center gap-1.5 border-0 border-l border-solid border-border pl-3 whitespace-nowrap"
+                role="status"
+                data-active={connected && busy}
+              >
+                <span
+                  class="size-[5px] rounded-[50%] bg-current group-data-[active=true]:text-focus"
+                  aria-hidden="true"
+                ></span>
+                {!connected
+                  ? "Disconnected"
+                  : conversation.status === "idle"
+                    ? "Idle"
+                    : conversation.status === "stopping"
+                      ? "Stopping"
+                      : "Running"}
+              </span>
+            </div>
+            <!-- t3code ComposerPrimaryActions.tsx at 4a560b4e4ebb37efb7f57805ba79e37f5500bdca.
+                 SVGs licensed under MIT; notice distributed in /licenses/t3code.txt. -->
+            <button
+              class="ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[50%] border-0 p-0 text-white shadow-action enabled:hover:brightness-[1.12] enabled:active:translate-y-px disabled:cursor-default disabled:opacity-40 [&[hidden]]:hidden max-[520px]:size-9 pointer-coarse:size-11 bg-action"
+              type="submit"
+              aria-label="Send"
+              title="Send"
+              hidden={busy}
+              disabled={!canSend}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path
+                  d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              class="ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[50%] border-0 p-0 text-white shadow-action enabled:hover:brightness-[1.12] enabled:active:translate-y-px disabled:cursor-default disabled:opacity-40 [&[hidden]]:hidden max-[520px]:size-9 pointer-coarse:size-11 bg-stop"
+              type="button"
+              aria-label="Stop"
+              title={conversation.status === "stopping" ? "Stopping…" : "Stop"}
+              hidden={!busy}
+              disabled={!connected || conversation.status === "stopping"}
+              onclick={stop}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+              </svg>
+            </button>
+          </div>
         </form>
-        {#if error}<p role="alert">{error}</p>{/if}
       </div>
     </section>
   {:else}
