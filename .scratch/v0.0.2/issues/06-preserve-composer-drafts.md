@@ -7,6 +7,7 @@ Restore composer drafts for saved sessions and session drafts. Supplemental cont
 - Web owns editable text; Desktop extends its versioned userData metadata file with atomic writes. Use authenticated APIs and typed Effect failures. Key composer drafts by canonical project and stable Pi session identity so they survive replacement of the live `AgentSession`; map local session draft identities to saved Pi sessions without loss. Pi owns history; no transcript copies, database, or credentials.
 - Flush before switching or Quit. Failed writes keep text editable; leaving requires explicit discard. Preserve unreadable metadata and show an error. Abrupt termination guarantees only flushed text.
 - Clear only accepted text; retain later edits and rejected or uncertain submissions until reconciled. Acceptance differs from run completion; restoration never sends.
+- Draft transfer or recovery after missing Pi history causes a fresh session is outside this issue. Retain the v0.0.1 crash-recovery behavior.
 
 Blocked by: [Switch projects and sessions](05-switch-projects-and-sessions.md) for navigation and selection, and inherited Desktop metadata storage.
 
