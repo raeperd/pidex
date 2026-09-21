@@ -257,3 +257,62 @@
     <div>{@html block.html}</div>
   {/each}
 </div>
+
+<style lang="postcss">
+  @reference "../app.css";
+
+  [aria-label="assistant"] {
+    @apply text-foreground wrap-anywhere;
+  }
+  [aria-label="assistant"] :global {
+    p,
+    ul,
+    ol,
+    blockquote {
+      @apply mt-0 mb-4 max-w-[66ch];
+    }
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      @apply mx-0 mt-6 mb-2 text-base leading-[1.4] font-medium text-heading;
+    }
+    ul,
+    ol {
+      @apply pl-6;
+    }
+    li {
+      @apply mb-1;
+    }
+    a {
+      @apply text-info underline-offset-[3px];
+    }
+    blockquote {
+      @apply ml-0 border-0 border-l-2 border-solid border-border pl-4 text-muted;
+    }
+    code {
+      @apply rounded-sm bg-inline-code px-1 py-0.5 font-mono text-xs leading-[1.65] text-info;
+    }
+    pre {
+      @apply mx-0 my-4 max-w-full overflow-x-auto rounded-md bg-raised px-4 py-3;
+    }
+    pre code {
+      @apply bg-transparent p-0 text-foreground;
+    }
+    table {
+      @apply mx-0 my-4 block max-w-full border-collapse overflow-x-auto;
+    }
+    th,
+    td {
+      @apply min-w-[8rem] border-0 border-b border-solid border-border px-3 py-2 text-left wrap-normal;
+    }
+    th {
+      @apply font-medium text-muted;
+    }
+    hr {
+      @apply mx-0 my-6 border-0 border-t border-solid border-border;
+    }
+  }
+</style>

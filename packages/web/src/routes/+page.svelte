@@ -1,3 +1,28 @@
+<script module lang="ts">
+  function followOutput(viewport: HTMLElement) {
+    let following = true;
+    const onScroll = () => {
+      following = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 24;
+    };
+    const onDisclosure = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest("summary")) following = false;
+    };
+    const observer = new ResizeObserver(() => {
+      if (following) viewport.scrollTop = viewport.scrollHeight;
+    });
+    const content = viewport.firstElementChild;
+    if (content) observer.observe(content);
+    observer.observe(viewport);
+    viewport.addEventListener("scroll", onScroll);
+    viewport.addEventListener("click", onDisclosure);
+    return () => {
+      observer.disconnect();
+      viewport.removeEventListener("scroll", onScroll);
+      viewport.removeEventListener("click", onDisclosure);
+    };
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
@@ -141,8 +166,18 @@
   </header>
   {#if conversation}
     <section class="flex min-h-0 flex-1 flex-col" aria-label="Conversation">
-      <div class="min-h-0 flex-1 overflow-auto py-8">
-        <div class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)]">
+      <!-- Keyboard users must be able to scroll history. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="min-h-0 flex-1 overflow-auto py-8"
+        role="region"
+        aria-label="Messages"
+        tabindex="0"
+        {@attach followOutput}
+      >
+        <div
+          class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] px-5 max-[520px]:px-0"
+        >
           {#if conversation.entries.length === 0}
             <div class="px-5 py-8 max-[520px]:px-0">
               <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">
@@ -155,25 +190,46 @@
           {/if}
           {#each conversation.entries as entry (entry.id)}
             {#if entry.role === "tool"}
-              <details>
+              <details class="group mb-2 text-xs text-muted" data-state={entry.status}>
                 <summary
-                  >{entry.name} · {entry.status === "running"
-                    ? "Running"
-                    : entry.status === "failed"
-                      ? "Failed"
-                      : "Completed"}</summary
+                  class="cursor-pointer rounded-md px-3 py-2 wrap-anywhere hover:bg-raised group-open:bg-raised pointer-coarse:min-h-11"
+                  ><span class="font-medium text-foreground">{entry.name}</span> ·
+                  <span
+                    class="text-success group-data-[state=running]:text-focus group-data-[state=failed]:text-error"
+                    >{entry.status === "running"
+                      ? "Running"
+                      : entry.status === "failed"
+                        ? "Failed"
+                        : "Completed"}</span
+                  ></summary
                 >
-                <pre aria-label="Input">{entry.input}</pre>
-                <pre aria-label="Result">{entry.result}</pre>
+                <div class="mx-3 mt-1 mb-3 rounded-md bg-raised px-4 py-3">
+                  <h3 class="mt-0 mb-2 text-xs font-medium">Input</h3>
+                  <pre
+                    class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0"
+                    aria-label="Input">{entry.input}</pre>
+                  <h3 class="mt-0 mb-2 text-xs font-medium">Result</h3>
+                  <pre
+                    class="mt-0 mb-4 font-mono text-xs leading-[1.65] whitespace-pre-wrap text-foreground wrap-anywhere last:mb-0"
+                    aria-label="Result">{entry.result}</pre>
+                </div>
               </details>
             {:else if entry.role === "assistant"}
-              <AssistantMessage
-                text={entry.text}
-                streaming={conversation.status === "running" &&
-                  entry === conversation.entries.at(-1)}
-              />
+              <div class="mb-6 [details+&]:mt-6">
+                <div class="mb-2 text-xs font-medium text-info">Pi</div>
+                <AssistantMessage
+                  text={entry.text}
+                  streaming={conversation.status === "running" &&
+                    entry === conversation.entries.at(-1)}
+                />
+              </div>
             {:else}
-              <p aria-label="user">{entry.text}</p>
+              <p
+                class="mt-0 mr-0 mb-8 ml-auto w-fit max-w-[88%] rounded-[16px_16px_4px_16px] bg-user px-4 py-3 whitespace-pre-wrap wrap-anywhere max-[520px]:max-w-full"
+                aria-label="user"
+              >
+                {entry.text}
+              </p>
             {/if}
           {/each}
         </div>
