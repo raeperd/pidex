@@ -27,7 +27,7 @@
   import { onMount, tick } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
   import AssistantMessage from "./AssistantMessage.svelte";
-  import SavedSessions from "./SavedSessions.svelte";
+  import Sessions from "./Sessions.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let editor = $state<HTMLTextAreaElement>();
@@ -210,7 +210,7 @@
         ]}
       >
         {#key conversation.projectPath}
-          <SavedSessions
+          <Sessions
             projectPath={conversation.projectPath}
             oncurrent={async () => {
               showSessions = false;
