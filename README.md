@@ -2,7 +2,7 @@
 
 A macOS Electron app with a Svelte renderer. Choose a project using your existing Pi setup to open a fresh idle conversation. Quit closes the Pi session and its server before Electron exits. This implements [#129](https://github.com/raeperd/pidex/issues/129).
 
-The [v0.0.1 technical spec](docs/v0.0.1-tech-spec.md) defines the remaining milestone.
+Milestone descriptions hold the implementation plans: [v0.0.1 desktop workflow](https://github.com/raeperd/pidex/milestone/1) and [v0.0.2 project and session continuity](https://github.com/raeperd/pidex/milestone/2).
 
 Use Node.js 24 and pnpm 11.16.0. From the repository root:
 

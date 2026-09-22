@@ -9,7 +9,7 @@ Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementa
 ## Process
 
 1. Resolve scope and supporting skills.
-   - Read the issue, linked spec, comments, blockers, and repository instructions. Apply later user corrections and distinguish implemented behavior from the target.
+   - Read the issue, linked supporting documents, comments, blockers, and repository instructions. When the issue has a milestone, fetch its description with `gh api repos/OWNER/REPO/milestones/NUMBER` using the issue's milestone number; it is the canonical spec for milestone work. Apply later user corrections and distinguish implemented behavior from the target.
    - Before designing or changing application logic, read [pidex-effect-ts](../pidex-effect-ts/SKILL.md) and the relevant guides. Identify which changes are effectful application logic and which are pure functions or framework UI code; apply the corresponding rules in `AGENTS.md`, including for new modules.
    - Follow the implementation and TDD steps below; [pidex-review-pr](../pidex-review-pr/SKILL.md) supplies the final independent review. All workflow procedures are repository-local.
    - Use the issue and spec's approved test boundaries without requesting approval again. Use one scenario → red → minimal green → refactor, preserving already-passing behavior as regression coverage.

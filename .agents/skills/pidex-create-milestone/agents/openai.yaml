@@ -1,6 +1,6 @@
 interface:
   display_name: "Pidex Create Milestone"
-  short_description: "Plan milestone scope, acceptance coverage, and delivery"
-  default_prompt: "Use $pidex-create-milestone to plan the agreed milestone in a concise technical spec with clear scope, ownership, acceptance scenarios, and delivery rules."
+  short_description: "Create and update GitHub milestone plans with gh CLI"
+  default_prompt: "Use $pidex-create-milestone to create or update the agreed GitHub milestone with gh CLI, keeping scope, ownership, acceptance scenarios, and delivery rules in its description."
 policy:
   allow_implicit_invocation: false
