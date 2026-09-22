@@ -3,7 +3,15 @@ import { randomBytes } from "node:crypto";
 import { Socket } from "effect/unstable/socket";
 import { NodeSocket } from "@effect/platform-node";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
-import { applyConversationUpdate, Conversation, ConversationApi } from "../api/index.js";
+import {
+  applyConversationUpdate,
+  Conversation,
+  ConversationApi,
+  HistoryError,
+  ProjectPath,
+  SessionList,
+} from "../api/index.js";
+import { realpath } from "node:fs/promises";
 import {
   Cause,
   Deferred,
@@ -143,6 +151,27 @@ const program = Effect.gen(function* () {
       ) => Effect.Effect<"accepted" | "uncertain", DesktopError>)
     | undefined;
   let stopRun: ((runId: string) => Effect.Effect<void, DesktopError>) | undefined;
+  let listSessions:
+    | ((projectPath: string) => Effect.Effect<typeof SessionList.Type, HistoryError>)
+    | undefined;
+  ipcMain.handle("list-sessions", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const projectPath = yield* Schema.decodeUnknownEffect(ProjectPath)(value);
+        const unavailable = new HistoryError({
+          path: projectPath,
+          message: "Could not load saved sessions. Check the connection, then Retry.",
+        });
+        if (!listSessions || quitting) return { projectPath, sessions: [], errors: [unavailable] };
+        return yield* listSessions(projectPath).pipe(
+          Effect.catch((error) => Effect.succeed({ projectPath, sessions: [], errors: [error] })),
+        );
+        // Encode tagged errors before Electron's structured clone drops their custom fields.
+      }).pipe(Effect.flatMap(Schema.encodeEffect(SessionList))),
+    ),
+  );
   ipcMain.handle("stop-run", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -191,7 +220,10 @@ const program = Effect.gen(function* () {
           });
           const cwd = selection.filePaths[0];
           if (selection.canceled || !cwd) return null;
-          project = cwd;
+          project = yield* Effect.tryPromise({
+            try: () => realpath(cwd),
+            catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
+          });
           sessionFile = undefined;
           interrupted = false;
           return yield* startServer();
@@ -249,6 +281,7 @@ const program = Effect.gen(function* () {
         if (!crashed) connectionError = "";
         crashed = true;
         sendPrompt = undefined;
+        listSessions = undefined;
         stopRun = undefined;
         currentRun = undefined;
         if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
@@ -322,6 +355,17 @@ const program = Effect.gen(function* () {
           const client = yield* RpcClient.make(ConversationApi).pipe(
             Effect.provideContext(context),
           );
+          listSessions = (projectPath) =>
+            client.ListSessions({ projectPath }).pipe(
+              Effect.mapError((error) =>
+                error._tag === "HistoryError"
+                  ? error
+                  : new HistoryError({
+                      path: projectPath,
+                      message: "Could not load saved sessions. Check the connection, then Retry.",
+                    }),
+              ),
+            );
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
@@ -374,6 +418,7 @@ const program = Effect.gen(function* () {
           Effect.ensuring(
             Effect.sync(() => {
               sendPrompt = undefined;
+              listSessions = undefined;
               stopRun = undefined;
               currentRun = undefined;
               if (window && !window.isDestroyed()) window.webContents.send("conversation", null);

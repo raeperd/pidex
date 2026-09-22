@@ -1,8 +1,9 @@
-import type { Conversation, ConversationUpdate } from "../../api/index.js";
+import type { Conversation, ConversationUpdate, SessionList } from "../../api/index.js";
 
 declare global {
   interface Window {
     desktop: {
+      listSessions: (projectPath: string) => Promise<typeof SessionList.Encoded>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       restart: () => Promise<string | null>;
       onCrash: (onCrash: () => void) => () => void;

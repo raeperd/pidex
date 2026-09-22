@@ -10,7 +10,8 @@ import {
 import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import {
   applyConversationUpdate,
@@ -22,6 +23,9 @@ import {
   SubscribeError,
   SetupError,
   StopError,
+  HistoryError,
+  SavedSession,
+  ProjectPath,
 } from "../api/index.js";
 
 const program = Effect.gen(function* () {
@@ -155,6 +159,79 @@ const program = Effect.gen(function* () {
         }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
     );
     if (!session.sessionFile || session.isStreaming) return yield* new StartupError();
+    const listSessions = Effect.fn(function* ({ projectPath }: { projectPath: string }) {
+      const directory = session.sessionManager.getSessionDir();
+      // Keep this error factory local to discovery, its sole consumer.
+      // oxlint-disable-next-line consistent-function-scoping
+      const unreadable = (path = directory) =>
+        new HistoryError({
+          path,
+          message: `Cannot read saved history: ${path}. Check file and folder permissions or restore a valid Pi session, then Retry. Saved files have not been changed.`,
+        });
+      if (projectPath !== process.cwd())
+        return yield* new HistoryError({
+          path: projectPath,
+          message:
+            "This is not the selected project. Open the project before listing its sessions.",
+        });
+      // Pi silently skips unreadable files/directories. Inventory first so omissions are visible.
+      const files = yield* Effect.tryPromise({
+        try: () => readdir(directory),
+        catch: () => unreadable(),
+      });
+      const metadata = new Map(
+        (yield* Effect.tryPromise({
+          try: () => SessionManager.list(projectPath, directory),
+          catch: () => unreadable(),
+        })).map((info) => [info.path, info]),
+      );
+      const sessions: (typeof SavedSession.Type)[] = [];
+      const errors: HistoryError[] = [];
+      for (const filename of files.filter((file) => file.endsWith(".jsonl"))) {
+        const path = join(directory, filename);
+        const info = metadata.get(path);
+        if (!info) {
+          errors.push(unreadable(path));
+          continue;
+        }
+        yield* Effect.gen(function* () {
+          const headerPath = yield* Schema.decodeUnknownEffect(ProjectPath)(info.cwd).pipe(
+            Effect.mapError(() => unreadable(path)),
+          );
+          const cwd = yield* Effect.tryPromise({
+            try: () => realpath(headerPath),
+            catch: () => unreadable(path),
+          });
+          // Pi's encoded directory names can collide; the history header remains authoritative.
+          if (cwd !== projectPath) return;
+          const value = yield* Effect.try({
+            try: () => ({
+              projectPath,
+              sessionId: info.id,
+              sessionFile: path,
+              title: (info.name?.trim() || info.firstMessage.trim() || "Untitled session").slice(
+                0,
+                200,
+              ),
+              modified: info.modified.toISOString(),
+            }),
+            catch: () => unreadable(path),
+          });
+          const saved = yield* Schema.decodeUnknownEffect(SavedSession)(value).pipe(
+            Effect.mapError(() => unreadable(path)),
+          );
+          sessions.push(saved);
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              errors.push(error);
+            }),
+          ),
+        );
+      }
+      sessions.sort((a, b) => b.modified.localeCompare(a.modified));
+      return { projectPath, sessions, errors };
+    });
     const model = session.model;
     const setupError = yield* Effect.gen(function* () {
       const provider = session.settingsManager.getDefaultProvider();
@@ -531,6 +608,7 @@ const program = Effect.gen(function* () {
                   );
                 }),
               ),
+            ListSessions: listSessions,
             Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
             Send: (payload) => send(payload).pipe(Effect.uninterruptible),
           }),
@@ -575,6 +653,8 @@ const program = Effect.gen(function* () {
             RpcSerialization.layerNdjson,
             ConversationApi.toLayer({
               Subscribe: () => Stream.fail(error),
+              ListSessions: ({ projectPath }) =>
+                Effect.fail(new HistoryError({ path: projectPath, message: error.message })),
               Stop: () => Effect.fail(new StopError({ message: error.message })),
               Send: () => Effect.fail(new SendError({ message: error.message })),
             }),

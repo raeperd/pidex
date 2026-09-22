@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("desktop", {
+  listSessions: (projectPath: string) => ipcRenderer.invoke("list-sessions", projectPath),
   restart: () => ipcRenderer.invoke("restart-backend"),
   onCrash: (onCrash: () => void) => {
     const listener = () => onCrash();

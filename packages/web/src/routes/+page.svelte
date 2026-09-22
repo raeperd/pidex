@@ -27,6 +27,7 @@
   import { onMount } from "svelte";
   import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
   import AssistantMessage from "./AssistantMessage.svelte";
+  import SavedSessions from "./SavedSessions.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let editor = $state<HTMLTextAreaElement>();
@@ -167,6 +168,7 @@
     {/if}
   </header>
   {#if conversation}
+    {#key conversation.projectPath}<SavedSessions projectPath={conversation.projectPath} />{/key}
     <section class="flex min-h-0 flex-1 flex-col" aria-label="Conversation">
       <!-- Keyboard users must be able to scroll history. -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -175,7 +177,7 @@
         role="region"
         aria-label="Messages"
         tabindex="0"
-        {@attach followOutput}
+        {@attach conversation.entries.length > 0 ? followOutput : undefined}
       >
         <div
           class="mx-auto w-[min(768px,calc(100%_-_48px))] max-[520px]:w-[calc(100%_-_32px)] px-5 max-[520px]:px-0"
