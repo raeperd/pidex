@@ -9,3 +9,4 @@
 - Return typed Effect errors instead of throwing exceptions or exposing raw promises, except at framework boundaries.
 - Prefer real integration tests over mocks; inject dependencies at boundaries when needed.
 - Before writing commit messages or PR titles, read and follow the [commit/title convention](.agents/skills/references/commit-conventions.md).
+- Before naming domain concepts in code, APIs, UI, or documentation, read and follow the [Pidex glossary](docs/glossary.md).
