@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pidex UI preview</title>
+    <style>
+      html {
+        color-scheme: dark;
+        background: #101113;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+      }
+      @media (max-width: 520px) {
+        body {
+          padding: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <style>
+      #pidex-full-ui {
+        color-scheme: dark;
+        --ui-bg: #101113;
+        --ui-panel: #191b20;
+        --ui-text: #dedee2;
+        --ui-muted: #999ba3;
+        --ui-line: #26282d;
+        --ui-cyan: #00d7ff;
+        --ui-teal: #8abeb7;
+        --ui-yellow: #f0c674;
+        --ui-green: #b5bd68;
+        color: var(--ui-text);
+        background: var(--ui-bg);
+        text-align: left;
+        font:
+          14px/1.65 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        border: 1px solid var(--ui-line);
+        border-radius: 12px;
+        overflow: clip;
+      }
+      #pidex-full-ui * {
+        box-sizing: border-box;
+      }
+      #pidex-full-ui [hidden] {
+        display: none !important;
+      }
+      #pidex-full-ui ::selection {
+        color: #f4f6ff;
+        background: #344669;
+      }
+      #pidex-full-ui .ui-titlebar {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        min-height: 48px;
+        padding: 12px 20px;
+        background: #141517;
+        border-bottom: 1px solid var(--ui-line);
+      }
+      #pidex-full-ui .ui-lights {
+        display: flex;
+        gap: 8px;
+      }
+      #pidex-full-ui .ui-lights span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #45464b;
+      }
+      #pidex-full-ui .ui-brand {
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+      #pidex-full-ui .ui-version {
+        margin-left: auto;
+        color: var(--ui-muted);
+        font-size: 12px;
+      }
+      #pidex-full-ui .ui-project {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--ui-line);
+      }
+      #pidex-full-ui .ui-project strong {
+        font-weight: 500;
+      }
+      #pidex-full-ui .ui-path {
+        color: var(--ui-muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      #pidex-full-ui .ui-column {
+        width: calc(100% - 48px);
+        max-width: 768px;
+        margin-inline: auto;
+      }
+      #pidex-full-ui .ui-thread {
+        padding: 32px 20px 16px;
+        min-height: 420px;
+      }
+      #pidex-full-ui .ui-user {
+        width: fit-content;
+        max-width: 88%;
+        margin: 0 0 32px auto;
+        padding: 12px 16px;
+        border-radius: 16px 16px 4px 16px;
+        background: #212329;
+        color: #ececee;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #pidex-full-ui .ui-reply {
+        margin: 0 0 24px;
+      }
+      #pidex-full-ui .ui-author {
+        margin: 0 0 8px;
+        color: var(--ui-teal);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      #pidex-full-ui p {
+        margin: 0 0 16px;
+      }
+      #pidex-full-ui .ui-prose {
+        max-width: 66ch;
+      }
+      #pidex-full-ui .ui-tools {
+        margin: 20px 0 24px;
+      }
+      #pidex-full-ui details {
+        color: var(--ui-muted);
+        font-size: 12px;
+      }
+      #pidex-full-ui summary {
+        cursor: pointer;
+        padding: 8px 12px;
+        border-radius: 6px;
+        overflow-wrap: anywhere;
+      }
+      #pidex-full-ui summary::marker {
+        color: var(--ui-muted);
+      }
+      #pidex-full-ui summary:hover,
+      #pidex-full-ui details[open] > summary {
+        background: var(--ui-panel);
+      }
+      #pidex-full-ui summary:focus-visible {
+        outline: 2px solid var(--ui-cyan);
+        outline-offset: 2px;
+      }
+      #pidex-full-ui summary strong {
+        color: var(--ui-text);
+        font-weight: 500;
+      }
+      #pidex-full-ui .ui-tool-result {
+        float: right;
+        margin-left: 12px;
+        color: var(--ui-green);
+      }
+      #pidex-full-ui .ui-tool-body {
+        margin: 4px 12px 12px;
+        padding: 12px 16px;
+        background: #17191d;
+        border-radius: 6px;
+      }
+      #pidex-full-ui .ui-tool-body h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        color: var(--ui-muted);
+        font-weight: 500;
+      }
+      #pidex-full-ui pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0 0 16px;
+        color: var(--ui-text);
+      }
+      #pidex-full-ui pre:last-child {
+        margin-bottom: 0;
+      }
+      #pidex-full-ui code,
+      #pidex-full-ui pre {
+        font:
+          12px/1.65 ui-monospace,
+          "SFMono-Regular",
+          Menlo,
+          monospace;
+      }
+      #pidex-full-ui p code {
+        color: var(--ui-teal);
+        background: #1d2426;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      #pidex-full-ui .ui-result-title {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--ui-yellow);
+      }
+      #pidex-full-ui .ui-check {
+        color: var(--ui-green);
+      }
+      #pidex-full-ui .ui-run-note {
+        font-size: 12px;
+        color: var(--ui-muted);
+      }
+      #pidex-full-ui #pidex-composer-v3 {
+        padding: 8px 0 24px;
+        border-radius: 0;
+      }
+      #pidex-full-ui #pidex-composer-v3 .pc-message {
+        margin-top: 12px;
+      }
+      @media (max-width: 520px) {
+        #pidex-full-ui .ui-column {
+          width: calc(100% - 24px);
+        }
+        #pidex-full-ui .ui-project {
+          padding-inline: 16px;
+        }
+        #pidex-full-ui .ui-thread {
+          padding: 24px 8px 8px;
+        }
+        #pidex-full-ui .ui-user {
+          max-width: 100%;
+        }
+        #pidex-full-ui .ui-tool-result {
+          float: none;
+          display: block;
+          margin: 4px 0 0 12px;
+        }
+        #pidex-full-ui .ui-titlebar {
+          gap: 16px;
+          padding-inline: 16px;
+        }
+      }
+      @media (pointer: coarse) {
+        #pidex-full-ui summary {
+          min-height: 44px;
+        }
+      }
+    </style>
+    <div id="pidex-full-ui" aria-label="Pidex desktop conversation preview">
+      <header class="ui-titlebar">
+        <div class="ui-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+        <span class="ui-brand">pidex</span><span class="ui-version">v0.0.1</span>
+      </header>
+      <div class="ui-project" aria-label="Current project">
+        <strong>pidex</strong><span class="ui-path">~/Developer/pidex</span>
+      </div>
+      <main class="ui-column">
+        <section class="ui-thread" aria-label="Conversation" id="ui-thread">
+          <div class="ui-user" aria-label="Your message">
+            Add a clear empty state when a project has no messages.
+          </div>
+          <article class="ui-reply" aria-label="Pi response">
+            <div class="ui-author">Pi</div>
+            <p class="ui-prose">
+              I’ll check the conversation view and add a starting point for the first message.
+            </p>
+            <div class="ui-tools" aria-label="Tool activity">
+              <details>
+                <summary>
+                  <strong>read</strong> · packages/web/src/routes/+page.svelte
+                  <span class="ui-tool-result">Completed</span>
+                </summary>
+                <div class="ui-tool-body">
+                  <h3>Input</h3>
+                  <pre>{"path":"packages/web/src/routes/+page.svelte"}</pre>
+                  <h3>Result</h3>
+                  <pre>
+{#if messages.length === 0}
+  &lt;p&gt;No messages yet.&lt;/p&gt;
+{/if}</pre>
+                </div>
+              </details>
+              <details>
+                <summary>
+                  <strong>edit</strong> · packages/web/src/routes/+page.svelte
+                  <span class="ui-tool-result">Completed</span>
+                </summary>
+                <div class="ui-tool-body">
+                  <h3>Input</h3>
+                  <pre>
+{
+  "path": "packages/web/src/routes/+page.svelte",
+  "oldText": "&lt;p&gt;No messages yet.&lt;/p&gt;",
+  "newText": "&lt;h2&gt;What would you like to build?&lt;/h2&gt;\n&lt;p&gt;Ask Pi to explore your project or make a change.&lt;/p&gt;"
+}</pre>
+                  <h3>Result</h3>
+                  <pre>Successfully replaced text in packages/web/src/routes/+page.svelte.</pre>
+                </div>
+              </details>
+              <details>
+                <summary>
+                  <strong>bash</strong> · pnpm check <span class="ui-tool-result">Completed</span>
+                </summary>
+                <div class="ui-tool-body">
+                  <h3>Input</h3>
+                  <pre>{"command":"pnpm check"}</pre>
+                  <h3>Result</h3>
+                  <pre>
+Formatting, lint, and type checks passed.
+Exit code: 0</pre>
+                </div>
+              </details>
+            </div>
+            <h2 class="ui-result-title">Ready for the first message</h2>
+            <p class="ui-prose">
+              Added an introduction to the empty conversation. The composer stays in place, so you
+              can start typing immediately.
+            </p>
+            <p class="ui-prose">
+              Updated <code>+page.svelte</code>. <span class="ui-check">All checks passed.</span>
+            </p>
+          </article>
+        </section>
+        <!-- Send and Stop SVGs from t3code ComposerPrimaryActions.tsx, commit 4a560b4e4ebb37efb7f57805ba79e37f5500bdca.
+MIT License
+
+Copyright (c) 2026 T3 Tools Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+        <style>
+          #pidex-composer-v3 {
+            color-scheme: dark;
+            --pc-canvas: #101113;
+            --pc-surface: #131416;
+            --pc-text: #ececee;
+            --pc-muted: #999ba3;
+            --pc-border: #303237;
+            --pc-focus: #00d7ff;
+            --pc-send: #3268ed;
+            --pc-send-hover: #4279ff;
+            --pc-radius: 24px;
+            --pc-editor-height: 104px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--pc-text);
+            padding: 32px 16px 24px;
+            background: var(--pc-canvas);
+            border-radius: 12px;
+            text-align: left;
+          }
+          #pidex-composer-v3 * {
+            box-sizing: border-box;
+          }
+          #pidex-composer-v3 [hidden] {
+            display: none !important;
+          }
+          #pidex-composer-v3 ::selection {
+            color: #f4f6ff;
+            background: #344669;
+          }
+          #pidex-composer-v3 .pc-shell {
+            position: relative;
+            isolation: isolate;
+            max-width: 768px;
+            margin: 0 auto;
+          }
+          #pidex-composer-v3 .pc-main {
+            position: relative;
+            z-index: 2;
+            margin: 0;
+            padding: 20px 20px 16px;
+            background: var(--pc-surface);
+            border: 1px solid var(--pc-border);
+            border-radius: var(--pc-radius);
+            box-shadow:
+              inset 0 1px 0 #ffffff06,
+              0 12px 28px -18px #000000a6;
+          }
+          #pidex-composer-v3 .pc-main:hover {
+            border-color: #41434b;
+          }
+          #pidex-composer-v3 .pc-main:has(textarea:focus-visible) {
+            outline: 2px solid var(--pc-focus);
+            outline-offset: 3px;
+          }
+          #pidex-composer-v3 textarea {
+            display: block;
+            width: 100%;
+            height: auto;
+            min-height: var(--pc-editor-height);
+            field-sizing: content;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            resize: none;
+            color: var(--pc-text);
+            caret-color: var(--pc-focus);
+            background: transparent;
+            font: inherit;
+            font-size: 16px;
+            line-height: 1.6;
+          }
+          #pidex-composer-v3 textarea:focus-visible {
+            outline: none;
+          }
+          #pidex-composer-v3 textarea::placeholder {
+            color: var(--pc-muted);
+            opacity: 1;
+          }
+          #pidex-composer-v3 .pc-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+            min-width: 0;
+          }
+          #pidex-composer-v3 .pc-model {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            color: var(--pc-muted);
+          }
+          #pidex-composer-v3 .pc-model-name {
+            overflow-wrap: anywhere;
+          }
+          #pidex-composer-v3 .pc-model-icon {
+            color: #b7b9c1;
+            display: inline-flex;
+            flex-shrink: 0;
+          }
+          #pidex-composer-v3 .pc-divider {
+            width: 1px;
+            height: 16px;
+            background: var(--pc-border);
+          }
+          #pidex-composer-v3 .pc-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-left: auto;
+          }
+          #pidex-composer-v3 .pc-send,
+          #pidex-composer-v3 .pc-stop {
+            display: inline-flex;
+            flex-shrink: 0;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: var(--pc-send);
+            color: #fff;
+            box-shadow:
+              inset 0 1px 0 #ffffff18,
+              0 2px 4px #00000040;
+            cursor: pointer;
+          }
+          #pidex-composer-v3 .pc-stop {
+            background: #e63844;
+          }
+          #pidex-composer-v3 .pc-stop:hover:not(:disabled) {
+            background: #f14450;
+          }
+          #pidex-composer-v3 .pc-stop:disabled {
+            background: #79272f;
+            color: #d9b8bc;
+            box-shadow: none;
+            cursor: default;
+          }
+          #pidex-composer-v3 .pc-stop:focus-visible {
+            outline: 2px solid var(--pc-focus);
+            outline-offset: 4px;
+          }
+          #pidex-composer-v3 .pc-send:hover:not(:disabled) {
+            background: var(--pc-send-hover);
+          }
+          #pidex-composer-v3 .pc-send:active:not(:disabled) {
+            box-shadow: inset 0 1px 3px #00000045;
+          }
+          #pidex-composer-v3 .pc-send:focus-visible {
+            outline: 2px solid var(--pc-focus);
+            outline-offset: 4px;
+          }
+          #pidex-composer-v3 .pc-send:disabled {
+            background: #24262c;
+            color: #9498a3;
+            box-shadow: none;
+            cursor: default;
+          }
+          #pidex-composer-v3 .pc-send svg {
+            display: block;
+            width: 14px;
+            height: 14px;
+          }
+          #pidex-composer-v3 .pc-stop svg {
+            display: block;
+            width: 12px;
+            height: 12px;
+          }
+          #pidex-composer-v3 .pc-state {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--pc-muted);
+            font-size: 12px;
+            white-space: nowrap;
+          }
+          #pidex-composer-v3 .pc-state-dot {
+            width: 5px;
+            height: 5px;
+            background: currentColor;
+            border-radius: 50%;
+          }
+          #pidex-composer-v3 [data-state="Running"] .pc-state {
+            color: var(--pc-focus);
+          }
+          #pidex-composer-v3 [data-state="Stopping"] .pc-state {
+            color: #f0c674;
+          }
+          #pidex-composer-v3 .pc-message {
+            margin: 12px 22px 0;
+            color: var(--pc-muted);
+            font-size: 12px;
+          }
+          #pidex-composer-v3 .pc-icon {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+          }
+          #pidex-composer-v3 .pc-sr {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip-path: inset(50%);
+          }
+          @media (max-width: 480px) {
+            #pidex-composer-v3 {
+              padding: 24px 12px;
+            }
+            #pidex-composer-v3 .pc-main {
+              padding: 16px;
+            }
+            #pidex-composer-v3 .pc-toolbar {
+              gap: 8px;
+              flex-wrap: wrap;
+            }
+            #pidex-composer-v3 .pc-divider {
+              display: none;
+            }
+            #pidex-composer-v3 .pc-model {
+              font-size: 12px;
+            }
+            #pidex-composer-v3 .pc-actions {
+              gap: 8px;
+            }
+            #pidex-composer-v3 .pc-message {
+              margin-inline: 12px;
+            }
+            #pidex-composer-v3 .pc-send,
+            #pidex-composer-v3 .pc-stop {
+              width: 36px;
+              height: 36px;
+              min-width: 36px;
+            }
+          }
+          @media (pointer: coarse) {
+            #pidex-composer-v3 .pc-send,
+            #pidex-composer-v3 .pc-stop {
+              width: 44px;
+              height: 44px;
+              min-width: 44px;
+            }
+          }
+        </style>
+        <div id="pidex-composer-v3" aria-label="Pidex composer design">
+          <div class="pc-shell" data-state="Idle">
+            <div class="pc-main">
+              <label class="pc-sr" for="pc-draft">Message Pi</label>
+              <textarea
+                id="pc-draft"
+                placeholder="Ask Pi to work on your project…"
+                aria-describedby="pc-message"
+              >
+Add a clear empty state to the conversation view.</textarea>
+              <div class="pc-toolbar">
+                <span class="pc-model" aria-label="Current model: GPT-5.6 Luna">
+                  <span class="pc-model-name">GPT-5.6 Luna</span>
+                </span>
+                <span class="pc-divider" aria-hidden="true"></span>
+                <span class="pc-state" role="status"
+                  ><span class="pc-state-dot" aria-hidden="true"></span
+                  ><span id="pc-state-label">Idle</span></span
+                >
+                <div class="pc-actions">
+                  <button
+                    type="button"
+                    class="pc-stop"
+                    aria-label="Stop generation"
+                    id="pc-stop"
+                    hidden
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                    </svg>
+                  </button>
+                  <button type="button" class="pc-send" aria-label="Send message" id="pc-send">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path
+                        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p class="pc-message" id="pc-message" hidden></p>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.getElementById("pidex-full-ui");
+        const draft = root.querySelector("#pc-draft");
+        const send = root.querySelector("#pc-send");
+        const stop = root.querySelector("#pc-stop");
+        const notice = root.querySelector("#pc-message");
+        const thread = root.querySelector("#ui-thread");
+        let phase = "Idle";
+        let timer;
+        let activeReply;
+        let activeNote;
+        let stopped = false;
+        const previewReply =
+          "I’ll check how the empty state and composer fit in a narrow window, then adjust the spacing so the input and its controls stay readable.";
+
+        function render() {
+          const busy = phase !== "Idle";
+          root.querySelector(".pc-shell").dataset.state = phase;
+          root.querySelector("#pc-state-label").textContent = phase;
+          send.disabled = busy || !draft.value.trim();
+          send.hidden = busy;
+          stop.hidden = !busy;
+          stop.disabled = phase === "Stopping";
+          stop.setAttribute(
+            "aria-label",
+            phase === "Stopping" ? "Stopping generation" : "Stop generation",
+          );
+          notice.hidden = !(busy || stopped);
+          notice.textContent =
+            phase === "Running"
+              ? "Pi is working. You can keep drafting your next message."
+              : phase === "Stopping"
+                ? "Waiting for cancellation. Your draft is kept here."
+                : stopped
+                  ? "Stopped. File changes are kept."
+                  : "";
+        }
+
+        send.addEventListener("click", () => {
+          if (phase !== "Idle" || !draft.value.trim()) return;
+          const userMessage = document.createElement("div");
+          userMessage.className = "ui-user";
+          userMessage.setAttribute("aria-label", "Your message");
+          userMessage.textContent = draft.value;
+          const reply = document.createElement("article");
+          reply.className = "ui-reply";
+          reply.setAttribute("aria-label", "Pi response");
+          const author = document.createElement("div");
+          author.className = "ui-author";
+          author.textContent = "Pi";
+          activeReply = document.createElement("p");
+          activeReply.className = "ui-prose";
+          activeNote = document.createElement("p");
+          activeNote.className = "ui-run-note";
+          activeNote.setAttribute("role", "status");
+          activeNote.textContent = "Working…";
+          reply.append(author, activeReply, activeNote);
+          thread.append(userMessage, reply);
+          phase = "Running";
+          stopped = false;
+          draft.value = "";
+          render();
+          draft.focus();
+          let cursor = 0;
+          function streamPreview() {
+            if (phase !== "Running") return;
+            cursor += 4;
+            activeReply.textContent = previewReply.slice(0, cursor);
+            if (cursor < previewReply.length) timer = setTimeout(streamPreview, 140);
+            else
+              timer = setTimeout(() => {
+                phase = "Idle";
+                activeNote.textContent = "Finished";
+                render();
+              }, 4000);
+          }
+          streamPreview();
+        });
+
+        stop.addEventListener("click", () => {
+          if (phase !== "Running") return;
+          clearTimeout(timer);
+          phase = "Stopping";
+          activeNote.textContent = "Stopping…";
+          render();
+          // Local design preview: simulate a cancellation acknowledgment.
+          timer = setTimeout(() => {
+            phase = "Idle";
+            stopped = true;
+            activeNote.textContent = "Stopped";
+            render();
+            draft.focus();
+          }, 1600);
+        });
+        draft.addEventListener("input", render);
+        draft.value = "Also make the empty state work in a narrow window.";
+        render();
+      })();
+    </script>
+  </body>
+</html>

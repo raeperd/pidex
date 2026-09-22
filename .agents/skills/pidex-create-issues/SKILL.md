@@ -12,7 +12,7 @@ Turn agreed work into small, independently understandable issues. Default to loc
 1. Read the scope.
    - Use the conversation, accepted spec, relevant repository instructions, and current implementation. Read supplied issue references and comments before rewriting their work.
    - Distinguish a request to discuss possible issues, draft files, or publish. Respect existing authorization without repeatedly asking for approval.
-   - Read tracker and label conventions when present. Ask only for missing information that could send work to the wrong target or change its meaning.
+   - Read tracker, milestone, and label conventions when present. Ask only for missing information that could send work to the wrong target or change its meaning.
    - Completion: the intended work and output destination are known.
 
 2. Choose vertical slices and blockers.
@@ -37,6 +37,7 @@ Turn agreed work into small, independently understandable issues. Default to loc
 
 5. Publish when requested.
    - For explicit tracker creation or updates, follow [publishing](references/publishing.md) to reuse existing issues, resolve real IDs, and verify dependencies.
+   - Carry the spec's intended milestone into publication. The publishing workflow creates or reuses that milestone and assigns every in-scope issue to it; keep issue titles outcome-focused without a version prefix.
    - Completion: the requested issues are verified in the tracker, or specific failed operations are reported with successful work preserved.
 
 ## Issue template

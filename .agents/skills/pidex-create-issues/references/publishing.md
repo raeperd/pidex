@@ -9,6 +9,8 @@ Use this branch only for tracker creation or updates requested by the user. Prep
 
 2. Publish in dependency order.
    - Use the approved local text. Pass Markdown through structured arguments or a body file, preserving real newlines.
+   - Resolve the intended release milestone from the spec or approved scope. Reuse the matching open milestone; when explicit issue publication is authorized and it does not exist, create it before publishing issues. Assign every in-scope issue to that milestone.
+   - Keep issue titles outcome-focused. Use the milestone for version grouping instead of adding a version prefix such as `v0.0.1: ` to titles.
    - Apply requested or configured labels and assignment conventions; derive targets from the current project rather than personal defaults from another repository.
    - Record each returned ID/URL immediately. If interrupted, retain this mapping and re-query before retrying creation.
    - Completion: every successful write has a recorded tracker identity, and retries can avoid duplicates.

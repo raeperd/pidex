@@ -11,6 +11,7 @@ Write one implementation target from the current conversation. Keep product deci
 
 1. Establish the target.
    - Extract the goal, release scope, accepted decisions, exclusions, and requested output from the conversation. Preserve later corrections.
+   - For release-scoped work, record the intended GitHub milestone/version in the target (for example, `v0.0.1`). Treat the milestone as the release grouping and keep future issue titles outcome-focused without a version prefix.
    - Read relevant existing documents and repository instructions. Reuse the canonical spec when updating; avoid creating a parallel PRD.
    - Ask only about decisions that block a useful draft. Offer short A/B/C choices when alternatives help.
    - Completion: the output path, scope, and unresolved decisions are explicit.
@@ -38,6 +39,7 @@ Write one implementation target from the current conversation. Keep product deci
 
 5. Save and check.
    - Default to local Markdown in the repository's documentation location. A request to discuss or draft does not authorize tracker publication.
+   - Do not create GitHub milestones while drafting locally. Carry the named milestone into issue publication when the user explicitly requests tracker creation.
    - When the user requests a PR or update, include only the intended document changes and follow the repository's workflow; otherwise leave the draft local.
    - Check scope, one-to-one mappings, links, formatting, and current-versus-target claims. Report the document path and any unresolved decisions.
    - Completion: the requested artifact exists and its links and acceptance mapping are valid.
