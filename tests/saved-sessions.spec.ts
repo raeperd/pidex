@@ -41,7 +41,11 @@ test("#191 lists only the canonical project's Pi histories, newest activity firs
         new Date(index === 0 && path === alias ? 2000 : path === other ? 3000 : 1000).toISOString(),
       );
     }
+    const draft = page.getByRole("textbox", { name: "Prompt" });
+    await draft.fill("Keep this unsent draft");
     await entries.first().check();
+    await expect(list).toContainText("Your current session stays active.");
+    await list.getByText("Session details", { exact: true }).click();
     await expect(list.getByLabel("Session file", { exact: true })).toHaveText(
       expected[0]?.getSessionFile() ?? "missing session",
     );
@@ -56,6 +60,29 @@ test("#191 lists only the canonical project's Pi histories, newest activity firs
     expect(wrongProject.sessions).toHaveLength(0);
     expect(wrongProject.errors[0]?.path).toBe(path === alias ? other : project);
     expect(wrongProject.errors[0]?.message).toContain("not the selected project");
+    await expect(draft).toHaveValue("Keep this unsent draft");
+    const search = list.getByRole("searchbox", { name: "Search saved sessions" });
+    await search.fill(path === alias ? "named cli" : "other project");
+    await expect(entries).toHaveCount(1);
+    await search.fill("no matching session");
+    await expect(list).toContainText("No sessions match");
+    await expect(entries).toHaveCount(0);
+    await search.fill("");
+    await expect(entries).toHaveCount(expected.length);
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(list).toBeHidden();
+    await expect(draft).toBeInViewport();
+    await page.getByRole("button", { name: "Show sessions" }).click();
+    await expect(list).toBeVisible();
+    await expect(search).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
+    await page.screenshot({ path: info.outputPath("sessions-narrow.png") });
+    await list.getByRole("button", { name: "Current session", exact: true }).click();
+    await expect(list).toBeHidden();
+    await expect(draft).toBeFocused();
+    await expect(draft).toHaveValue("Keep this unsent draft");
+    await page.setViewportSize({ width: 1100, height: 760 });
+    await expect(list).toBeVisible();
     expect(lifecycle.requests).toHaveLength(0);
     await page.screenshot({ path: info.outputPath(path === alias ? "project.png" : "other.png") });
     await app
