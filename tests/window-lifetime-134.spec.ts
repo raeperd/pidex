@@ -166,9 +166,11 @@ for (const scenario of ["after completion", "during run", "after backend crash"]
         await app.evaluate(({ app: application }) => application.emit("activate"));
         const restoredWindow = await app.firstWindow();
         await expect(restoredWindow.getByRole("status")).toHaveText("Disconnected");
-        await expect(restoredWindow.getByRole("alert")).toHaveText(
-          "The backend stopped. Restart to recover saved history.",
-        );
+        await expect(
+          restoredWindow
+            .getByRole("region", { name: "Conversation", exact: true })
+            .getByRole("alert"),
+        ).toHaveText("The backend stopped. Restart to recover saved history.");
         await expect(
           restoredWindow.getByRole("button", { name: "Restart", exact: true }),
         ).toBeEnabled();

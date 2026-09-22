@@ -101,7 +101,13 @@ async function setup(cleanup: AsyncDisposableStack) {
     async launch(selectProject = true) {
       const app = await electron.launch({
         args: ["dist/desktop/main.js", `--user-data-dir=${home}`],
-        env: { PATH: process.env.PATH ?? "", HOME: home, TMPDIR: tmpdir() },
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: home,
+          TMPDIR: tmpdir(),
+          DISPLAY: process.env.DISPLAY ?? "",
+          XAUTHORITY: process.env.XAUTHORITY ?? "",
+        },
       });
       const processHandle = app.process();
       apps.push({ app, process: processHandle });

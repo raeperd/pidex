@@ -459,7 +459,7 @@ test("#183 opening a long tool result preserves its beginning and keeps Stop rea
   );
   response.end("data: [DONE]\n\n");
   await expect.poll(() => lifecycle.requests.length).toBe(2);
-  const tool = page.locator("details");
+  const tool = page.getByRole("region", { name: "Messages" }).locator("details");
   await expect(tool.locator("summary")).toHaveText("read · Completed");
   await tool.locator("summary").focus();
   await tool.locator("summary").press("Enter");

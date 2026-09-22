@@ -1,6 +1,33 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 
+// Paths cross a native filesystem boundary; reject embedded NULs.
+// oxlint-disable-next-line no-control-regex
+export const ProjectPath = Schema.String.check(Schema.isPattern(/^\/[^\0]*$/));
+
+const SessionLocator = Schema.Struct({
+  projectPath: ProjectPath,
+  sessionId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/)),
+  sessionFile: ProjectPath,
+});
+
+export class HistoryError extends Schema.TaggedError<HistoryError>()("HistoryError", {
+  path: ProjectPath,
+  message: Schema.String,
+}) {}
+
+export const SavedSession = Schema.Struct({
+  ...SessionLocator.fields,
+  title: Schema.String.check(Schema.isNonEmpty()),
+  modified: Schema.String.check(Schema.isPattern(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/)),
+});
+
+export const SessionList = Schema.Struct({
+  projectPath: ProjectPath,
+  sessions: Schema.Array(SavedSession),
+  errors: Schema.Array(HistoryError),
+});
+
 const Entry = Schema.Union([
   Schema.Struct({
     // User or assistant text message.
@@ -72,6 +99,11 @@ export class RecoveryError extends Schema.TaggedError<RecoveryError>()("Recovery
 }) {}
 
 export const ConversationApi = RpcGroup.make(
+  Rpc.make("ListSessions", {
+    payload: { projectPath: ProjectPath },
+    success: SessionList,
+    error: HistoryError,
+  }),
   Rpc.make("Subscribe", {
     success: ConversationUpdate,
     error: Schema.Union([SubscribeError, RecoveryError]),

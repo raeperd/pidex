@@ -286,7 +286,9 @@ test("#135 restores Restart after a backend crash while the window is closed", a
   expect(children()).toEqual([]);
   await app.evaluate(({ app: application }) => application.emit("activate"));
   const reopened = await app.firstWindow();
-  await expect(reopened.getByRole("alert")).toContainText("backend stopped");
+  await expect(
+    reopened.getByRole("region", { name: "Conversation", exact: true }).getByRole("alert"),
+  ).toContainText("backend stopped");
   await expect(reopened.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
   await reopened.getByRole("button", { name: "Restart", exact: true }).click();
   await expect(reopened.getByRole("status")).toHaveText("Idle");
