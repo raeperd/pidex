@@ -49,7 +49,7 @@ Define one milestone from the current conversation. Its GitHub description is th
 
 ## Milestone-description structure
 
-- Title and target status/version.
+- Start with a short plain-text summary. GitHub already displays the milestone title, version, and status; do not repeat them as an opening heading. Use `##` for the sections below and `###` for subsections.
 - Problem and intended outcome: one short paragraph each.
 - Use cases and acceptance scenarios: a table with issue/local ID, outcome, and scenario.
 - Implementation decisions: ownership and API decisions needed to begin implementation.
