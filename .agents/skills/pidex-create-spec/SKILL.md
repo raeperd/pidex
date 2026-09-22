@@ -35,13 +35,15 @@ Write one implementation target from the current conversation. Keep product deci
    - Define real components, controlled external boundaries, isolated fixtures, reproduction/debugging deliverables, and failure artifacts. Read project commands instead of inventing working commands.
    - Keep shared TDD and CI rules here: one scenario, behavioral failure, minimal implementation, then refactor green. Retain already-passing behavior as regression coverage.
    - Make release readiness depend on acceptance coverage and required checks, not a fixed PR count.
+   - For multi-issue work, show implementation order and parallel groups in the implementation workflow. Prefer a compact arrow sequence such as `A → (B, C, D in parallel) → E → F`; use a dependency graph when the relationships need more detail.
+   - Name the capabilities that make prerequisites necessary and any shared API or file ownership that needs coordination during parallel work. Include only real blockers; keep the order synchronized with GitHub blocking relationships when issues exist.
    - Completion: readers know what will prove the release works and how failures will be reproduced.
 
 5. Save and check.
    - Default to local Markdown in the repository's documentation location. A request to discuss or draft does not authorize tracker publication.
    - Do not create GitHub milestones while drafting locally. Carry the named milestone into issue publication when the user explicitly requests tracker creation.
    - When the user requests a PR or update, include only the intended document changes and follow the repository's workflow; otherwise leave the draft local.
-   - Check scope, one-to-one mappings, links, formatting, and current-versus-target claims. Report the document path and any unresolved decisions.
+   - Check scope, one-to-one mappings, links, formatting, current-versus-target claims, and that the implementation order covers every issue without dependency cycles. Report the document path and any unresolved decisions.
    - Completion: the requested artifact exists and its links and acceptance mapping are valid.
 
 ## New-document structure
@@ -51,7 +53,7 @@ Write one implementation target from the current conversation. Keep product deci
 - Use cases and acceptance scenarios: a table with issue/local ID, outcome, and scenario.
 - Implementation decisions: ownership and API decisions needed to begin implementation.
 - Testing decisions: coverage, controlled boundaries, debugging, and release checks.
-- Implementation workflow: the shared TDD loop and issue/PR traceability.
+- Implementation workflow: dependency order, parallel work, the shared TDD loop, and issue/PR traceability.
 - Out of scope: explicit exclusions.
 - References or open decisions: include only when needed, with the reason to consult each reference.
 

@@ -4,7 +4,7 @@ description: Implement a GitHub issue with behavior-focused TDD and small PRs, t
 disable-model-invocation: true
 ---
 
-Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, draft PR creation, review through readiness, and a final PR handoff comment unless the user narrows the request. Merge only when explicitly requested.
+Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementation, verification, commits, pushes, draft PR creation, review through readiness, and a final report to the user unless the user narrows the request. Merge only when explicitly requested.
 
 ## Process
 
@@ -46,9 +46,8 @@ Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementa
 6. Continue and report.
    - Repeat until all acceptance criteria are implemented. Rebase dependent layers after prerequisite changes, following `gh-stack`. Return affected ready PRs to draft and resume their pidex-review-pr checks using the existing records before restoring readiness.
    - Keep the issue open until all acceptance criteria pass and its implementation PRs merge. Merging requires an explicit request.
-   - Before the final report, follow [issue handoff](references/handoff.md) to publish the final PR comment or an accurate progress comment for blocked work.
-   - Report criteria, PRs in dependency order, verification/review results, readiness states, blockers, and the verified comment URL.
-   - Completion: implementation is delivered in verified ready PRs with a verified handoff comment, or remaining work and draft PRs have explicit blockers and a progress comment.
+   - Report criteria, PRs in dependency order, verification/review results, readiness states, and blockers directly to the user.
+   - Completion: implementation is delivered in verified ready PRs, or remaining work and draft PRs have explicit blockers in the final report.
 
 ## PR size
 
