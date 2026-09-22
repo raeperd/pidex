@@ -104,6 +104,28 @@ test("#191 lists only the canonical project's Pi histories, newest activity firs
   }
 });
 
+test("#191 explains an inaccessible history root before session startup and allows retry", async ({
+  lifecycle,
+}) => {
+  await using cleanup = new AsyncDisposableStack();
+  const root = join(lifecycle.home, ".pi", "agent", "sessions");
+  await mkdir(root);
+  await chmod(root, 0);
+  cleanup.defer(() => chmod(root, 0o700));
+  const { page } = await lifecycle.launch(false);
+  await page.getByRole("button", { name: "Choose project" }).click();
+  await expect(page.getByRole("alert")).toContainText(root, { timeout: 15000 });
+  await expect(page.getByRole("alert")).toContainText("permissions");
+  await expect(page.getByRole("region", { name: "Conversation" })).toHaveCount(0);
+  await chmod(root, 0o700);
+  await page.getByRole("button", { name: "Choose project" }).click();
+  await expect(page.getByRole("region", { name: "Saved sessions" })).toContainText(
+    "No saved sessions in this project.",
+    { timeout: 15000 },
+  );
+  expect(lifecycle.requests).toHaveLength(0);
+});
+
 for (const failure of ["file", "directory", "invalid metadata"]) {
   test(`#191 distinguishes empty history from unreadable ${failure} and preserves healthy Pidex history`, async ({
     lifecycle,

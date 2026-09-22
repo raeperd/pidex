@@ -141,7 +141,8 @@
       if (!conversation) conversation = selected;
       if (selected) crashed = false;
     } catch {
-      error = "Could not open the project. Please try again.";
+      // Keep a specific startup/history error delivered by the subscription.
+      error ||= "Could not open the project. Please try again.";
     } finally {
       choosing = false;
     }

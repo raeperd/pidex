@@ -128,7 +128,9 @@ const program = Effect.gen(function* () {
               ? new RecoveryError({
                   message: `Cannot read saved history: ${recoveryFile}. Check file permissions and restore a valid Pi session, then Restart. The file has not been replaced.`,
                 })
-              : new StartupError(),
+              : new RecoveryError({
+                  message: `Cannot access saved history: ${join(agentDir, "sessions")}. Check file and folder permissions, then choose the project again. Saved files have not been changed.`,
+                }),
         });
         return yield* Effect.tryPromise({
           try: () =>
