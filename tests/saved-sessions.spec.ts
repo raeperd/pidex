@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { chmod, copyFile, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { test } from "./support/lifecycle.js";
+import { alive, test } from "./support/lifecycle.js";
 
 test("#191 lists only the canonical project's Pi histories, newest activity first, without continuing", async ({
   lifecycle,
@@ -112,17 +112,27 @@ test("#191 explains an inaccessible history root before session startup and allo
   await mkdir(root);
   await chmod(root, 0);
   cleanup.defer(() => chmod(root, 0o700));
-  const { page } = await lifecycle.launch(false);
+  const { page, app, process: main, children } = await lifecycle.launch(false);
   await page.getByRole("button", { name: "Choose project" }).click();
   await expect(page.getByRole("alert")).toContainText(root, { timeout: 15000 });
   await expect(page.getByRole("alert")).toContainText("permissions");
   await expect(page.getByRole("region", { name: "Conversation" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choose project" })).toBeEnabled();
+  await expect.poll(children).toEqual([]);
   await chmod(root, 0o700);
   await page.getByRole("button", { name: "Choose project" }).click();
   await expect(page.getByRole("region", { name: "Saved sessions" })).toContainText(
     "No saved sessions in this project.",
     { timeout: 15000 },
   );
+  expect(children()).toHaveLength(1);
+  const [backend] = children();
+  if (!backend) throw new Error("Missing retry backend");
+  await app.evaluate(({ app: application }) => {
+    setImmediate(() => application.quit());
+  });
+  await expect.poll(() => main.exitCode).toBe(0);
+  await expect.poll(() => alive(backend)).toBe(false);
   expect(lifecycle.requests).toHaveLength(0);
 });
 
