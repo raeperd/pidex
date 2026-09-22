@@ -10,7 +10,7 @@ Turn agreed work into small, independently understandable issues. Default to loc
 ## Process
 
 1. Read the scope.
-   - Use the conversation, accepted spec, relevant repository instructions, and current implementation. Read supplied issue references and comments before rewriting their work.
+   - Use the conversation, relevant repository instructions, and current implementation. For milestone work, fetch the accepted description maintained by [pidex-create-milestone](../pidex-create-milestone/SKILL.md) with `gh api repos/OWNER/REPO/milestones/NUMBER`. Read supplied issue references and comments before rewriting their work.
    - Distinguish a request to discuss possible issues, draft files, or publish. Respect existing authorization without repeatedly asking for approval.
    - Read tracker, milestone, and label conventions when present. Ask only for missing information that could send work to the wrong target or change its meaning.
    - Completion: the intended work and output destination are known.
@@ -22,10 +22,10 @@ Turn agreed work into small, independently understandable issues. Default to loc
    - Completion: every use case is covered once, and each blocker names a required capability.
 
 3. Draft each issue using the two-section template below.
-   - The title and body must contain enough context to implement the outcome without reading the tech spec. Links supplement that context.
+   - The title and body must contain enough context to implement the outcome without reading the milestone description. Link the milestone for shared context.
    - Include only relevant ownership, API behavior, persistence/lifecycle constraints, and scope limits. Research a missing fact only when it could change implementation or acceptance.
    - Write observable Given/When/Then criteria with concrete starting conditions and results. Include scenario-specific controlled inputs, files, or process failures when needed; avoid private implementation assertions.
-   - Keep shared TDD procedures, CI checklists, and generic artifact rules in the spec or repository guidance. Omit redundant status, goal, and source-ID fields.
+   - Keep shared TDD procedures, CI checklists, and generic artifact rules in the milestone description or repository guidance. Omit redundant status, goal, and source-ID fields.
    - Use short bullets and one source line per paragraph. Aim for roughly 150–250 words; preserve necessary behavior over an arbitrary limit.
    - Completion: each issue has a clear outcome, sufficient local context, and testable acceptance criteria.
 
@@ -37,7 +37,7 @@ Turn agreed work into small, independently understandable issues. Default to loc
 
 5. Publish when requested.
    - For explicit tracker creation or updates, follow [publishing](references/publishing.md) to reuse existing issues, resolve real IDs, and verify dependencies.
-   - Carry the spec's intended milestone into publication. The publishing workflow creates or reuses that milestone and assigns every in-scope issue to it; keep issue titles outcome-focused without a version prefix.
+   - Carry the agreed milestone into publication. Reuse it, or create it with its agreed description through the milestone skill when issue publication requires a missing milestone. Assign every in-scope issue to it; keep issue titles outcome-focused without a version prefix.
    - Completion: the requested issues are verified in the tracker, or specific failed operations are reported with successful work preserved.
 
 ## Issue template

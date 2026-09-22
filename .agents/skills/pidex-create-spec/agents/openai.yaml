@@ -1,6 +1,0 @@
-interface:
-  display_name: "Pidex Create Spec"
-  short_description: "Draft concise specs with use-case acceptance coverage"
-  default_prompt: "Use $pidex-create-spec to turn the agreed context into a concise technical spec with clear ownership and acceptance scenarios."
-policy:
-  allow_implicit_invocation: false

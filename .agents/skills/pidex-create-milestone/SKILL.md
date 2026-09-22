@@ -1,20 +1,20 @@
 ---
-name: pidex-create-spec
-description: Turn agreed requirements into a concise technical spec with use cases and acceptance scenarios.
+name: pidex-create-milestone
+description: Create or update a GitHub milestone plan with gh CLI, keeping scope, acceptance scenarios, and delivery rules in its description.
 url: https://github.com/mattpocock/skills/blob/main/skills/engineering/to-spec/SKILL.md
 disable-model-invocation: true
 ---
 
-Write one implementation target from the current conversation. Keep product decisions and shared testing rules together in the spec.
+Define one milestone from the current conversation. Its GitHub description is the canonical plan for product decisions and shared testing rules. Use `gh` CLI to create or update it when requested; discussion or draft-only requests stay local. Keep temporary drafts under `.scratch/`, without maintaining a duplicate plan in repository docs. Use [pidex-create-issues](../pidex-create-issues/SKILL.md) for requested issue publication.
 
 ## Process
 
-1. Establish the target.
+1. Establish the milestone target.
    - Extract the goal, release scope, accepted decisions, exclusions, and requested output from the conversation. Preserve later corrections.
    - For release-scoped work, record the intended GitHub milestone/version in the target (for example, `v0.0.1`). Treat the milestone as the release grouping and keep future issue titles outcome-focused without a version prefix.
-   - Read relevant existing documents and repository instructions. Reuse the canonical spec when updating; avoid creating a parallel PRD.
+   - Resolve the repository and milestone from the request and configured context. Read the existing milestone description with `gh api`, relevant documents, and repository instructions. Reuse the matching milestone when updating.
    - Ask only about decisions that block a useful draft. Offer short A/B/C choices when alternatives help.
-   - Completion: the output path, scope, and unresolved decisions are explicit.
+   - Completion: the repository, milestone target, draft-versus-publication intent, scope, and unresolved decisions are explicit.
 
 2. Verify decision-changing facts.
    - Inspect current code and configuration before describing existing behavior. Derive the stack and tools from this project.
@@ -22,12 +22,13 @@ Write one implementation target from the current conversation. Keep product deci
    - Record a fallback only for a relevant capability gap; avoid speculative alternatives and implementation inventories.
    - Completion: each material technical claim has evidence or is clearly a proposal.
 
-3. Write the spec.
-   - Use the structure below for new documents; preserve an explicitly requested structure when editing.
+3. Write the milestone description.
+   - Use the structure below for new descriptions; preserve an explicitly requested structure when editing.
    - Use concise bullets and comparison tables. Write each paragraph or list-item paragraph on one source line and let the editor wrap it.
    - Name module responsibilities, actual process boundaries, data ownership, and API behavior, including important failure/recovery semantics. Prefer the term API.
    - Pair each use case with one acceptance scenario; edge-case variants stay under that case. Use plain outcome descriptions without mandatory user-story boilerplate.
    - Link real issue numbers when issues exist. Otherwise use temporary local IDs without creating tracker issues merely to obtain numbers.
+   - Use absolute GitHub URLs for repository files and related milestones so links work in the milestone description. Link durable architecture and glossary guidance instead of duplicating it.
    - Completion: every in-scope outcome has acceptance coverage and clear ownership.
 
 4. Specify shared testing and delivery rules.
@@ -39,16 +40,16 @@ Write one implementation target from the current conversation. Keep product deci
    - Name the capabilities that make prerequisites necessary and any shared API or file ownership that needs coordination during parallel work. Include only real blockers; keep the order synchronized with GitHub blocking relationships when issues exist.
    - Completion: readers know what will prove the release works and how failures will be reproduced.
 
-5. Save and check.
-   - Default to local Markdown in the repository's documentation location. A request to discuss or draft does not authorize tracker publication.
-   - Do not create GitHub milestones while drafting locally. Carry the named milestone into issue publication when the user explicitly requests tracker creation.
-   - When the user requests a PR or update, include only the intended document changes and follow the repository's workflow; otherwise leave the draft local.
-   - Check scope, one-to-one mappings, links, formatting, current-versus-target claims, and that the implementation order covers every issue without dependency cycles. Report the document path and any unresolved decisions.
-   - Completion: the requested artifact exists and its links and acceptance mapping are valid.
+5. Publish and check.
+   - Check scope, one-to-one mappings, links, formatting, current-versus-target claims, and that the implementation order covers every issue without dependency cycles.
+   - For requested milestone creation or updates, follow [publishing with gh CLI](references/publishing.md). Existing authorization is sufficient; do not require a separate approval or documentation PR for the description.
+   - For discussion or draft-only requests, return the draft or its `.scratch/` path without changing GitHub. A PR request alone does not authorize milestone publication.
+   - Read back published content, verify the intended changes, and report the milestone URL and unresolved decisions. Preserve a failed publication's draft and report the failure without claiming completion.
+   - Completion: the requested description is verified on GitHub, or the requested local draft is reviewable.
 
-## New-document structure
+## Milestone-description structure
 
-- Title and target status/version.
+- Start with a short plain-text summary. GitHub already displays the milestone title, version, and status; do not repeat them as an opening heading. Use `##` for the sections below and `###` for subsections.
 - Problem and intended outcome: one short paragraph each.
 - Use cases and acceptance scenarios: a table with issue/local ID, outcome, and scenario.
 - Implementation decisions: ownership and API decisions needed to begin implementation.
@@ -57,4 +58,4 @@ Write one implementation target from the current conversation. Keep product deci
 - Out of scope: explicit exclusions.
 - References or open decisions: include only when needed, with the reason to consult each reference.
 
-Keep file layouts, large code snippets, repeated rationale, and superseded decisions out of the spec unless a concrete decision requires them.
+Keep file layouts, large code snippets, repeated rationale, and superseded decisions out of the description unless a concrete decision requires them.

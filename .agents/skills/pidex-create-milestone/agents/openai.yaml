@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pidex Create Milestone"
+  short_description: "Create and update GitHub milestone plans with gh CLI"
+  default_prompt: "Use $pidex-create-milestone to create or update the agreed GitHub milestone with gh CLI, keeping scope, ownership, acceptance scenarios, and delivery rules in its description."
+policy:
+  allow_implicit_invocation: false
