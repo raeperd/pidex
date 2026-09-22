@@ -10,7 +10,7 @@ Turn agreed work into small, independently understandable issues. Default to loc
 ## Process
 
 1. Read the scope.
-   - Use the conversation, accepted spec, relevant repository instructions, and current implementation. Read supplied issue references and comments before rewriting their work.
+   - Use the conversation, accepted milestone spec from [pidex-create-milestone](../pidex-create-milestone/SKILL.md), relevant repository instructions, and current implementation. Read supplied issue references and comments before rewriting their work.
    - Distinguish a request to discuss possible issues, draft files, or publish. Respect existing authorization without repeatedly asking for approval.
    - Read tracker, milestone, and label conventions when present. Ask only for missing information that could send work to the wrong target or change its meaning.
    - Completion: the intended work and output destination are known.

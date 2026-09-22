@@ -1,15 +1,15 @@
 ---
-name: pidex-create-spec
-description: Turn agreed requirements into a concise technical spec with use cases and acceptance scenarios.
+name: pidex-create-milestone
+description: Plan a milestone from agreed requirements, capturing scope, use cases, acceptance scenarios, and delivery rules in a concise technical spec.
 url: https://github.com/mattpocock/skills/blob/main/skills/engineering/to-spec/SKILL.md
 disable-model-invocation: true
 ---
 
-Write one implementation target from the current conversation. Keep product decisions and shared testing rules together in the spec.
+Define one milestone from the current conversation and write its technical spec. Keep product decisions and shared testing rules together in the spec. This skill prepares the local milestone plan; use [pidex-create-issues](../pidex-create-issues/SKILL.md) for requested GitHub milestone and issue publication.
 
 ## Process
 
-1. Establish the target.
+1. Establish the milestone target.
    - Extract the goal, release scope, accepted decisions, exclusions, and requested output from the conversation. Preserve later corrections.
    - For release-scoped work, record the intended GitHub milestone/version in the target (for example, `v0.0.1`). Treat the milestone as the release grouping and keep future issue titles outcome-focused without a version prefix.
    - Read relevant existing documents and repository instructions. Reuse the canonical spec when updating; avoid creating a parallel PRD.
@@ -22,7 +22,7 @@ Write one implementation target from the current conversation. Keep product deci
    - Record a fallback only for a relevant capability gap; avoid speculative alternatives and implementation inventories.
    - Completion: each material technical claim has evidence or is clearly a proposal.
 
-3. Write the spec.
+3. Write the milestone's technical spec.
    - Use the structure below for new documents; preserve an explicitly requested structure when editing.
    - Use concise bullets and comparison tables. Write each paragraph or list-item paragraph on one source line and let the editor wrap it.
    - Name module responsibilities, actual process boundaries, data ownership, and API behavior, including important failure/recovery semantics. Prefer the term API.
