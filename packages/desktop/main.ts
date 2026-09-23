@@ -197,7 +197,14 @@ const program = Effect.gen(function* () {
       ),
     );
   });
-  const saveRecentProject = Effect.fn(function* (canonical: string) {
+  const openProject = Effect.fn(function* (cwd: string) {
+    const canonical = yield* Effect.tryPromise({
+      try: () => realpath(cwd),
+      catch: () =>
+        new DesktopError({
+          message: `Could not open ${cwd}. Check that the folder exists and is accessible, or Choose another folder.`,
+        }),
+    });
     const metadata = yield* loadMetadata();
     const next = {
       ...metadata,
@@ -214,16 +221,6 @@ const program = Effect.gen(function* () {
           message: "Could not save recent projects. Check storage permissions and Retry.",
         }),
     }).pipe(Effect.ensuring(Effect.promise(() => unlink(temporary).catch(() => {}))));
-  });
-  const openProject = Effect.fn(function* (cwd: string) {
-    const canonical = yield* Effect.tryPromise({
-      try: () => realpath(cwd),
-      catch: () =>
-        new DesktopError({
-          message: `Could not open ${cwd}. Check that the folder exists and is accessible, or Choose another folder.`,
-        }),
-    });
-    yield* saveRecentProject(canonical);
     project = canonical;
     sessionFile = undefined;
     interrupted = false;
