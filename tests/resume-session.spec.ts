@@ -149,12 +149,31 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
           return true;
         }
         if (event === "message" && requestId !== undefined) {
-          const data = String(args[0]);
-          if (
-            data.includes(`"requestId":${requestId}`) &&
-            data.includes('"_tag":"Exit"') &&
-            data.includes('"_tag":"Success"')
-          ) {
+          const success = String(args[0])
+            .split("\n")
+            .some((line) => {
+              if (!line.trim()) return false;
+              let response: unknown;
+              try {
+                response = JSON.parse(line);
+              } catch {
+                return false;
+              }
+              return (
+                typeof response === "object" &&
+                response !== null &&
+                "_tag" in response &&
+                response._tag === "Exit" &&
+                "requestId" in response &&
+                response.requestId === requestId &&
+                "exit" in response &&
+                typeof response.exit === "object" &&
+                response.exit !== null &&
+                "_tag" in response.exit &&
+                response.exit._tag === "Success"
+              );
+            });
+          if (success) {
             offline = true;
             requestId = undefined;
             dropped = true;
