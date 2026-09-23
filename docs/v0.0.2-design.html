@@ -1293,10 +1293,8 @@
           const group = document.createElement("section");
           group.className = "project-group";
           group.setAttribute("aria-label", `${item.name} project`);
-          const button = makeButton(
-            `${icon("folder")}${item.name}${active ? '<span class="end small">Selected</span>' : ""}`,
-            "project-button",
-            () => openProject(item.id),
+          const button = makeButton(`${icon("folder")}${item.name}`, "project-button", () =>
+            openProject(item.id),
           );
           button.dataset.project = item.id;
           button.disabled = locked;
