@@ -893,8 +893,21 @@ const program = Effect.gen(function* () {
             }),
         }).pipe(
           Effect.tapError(() =>
-            Effect.sync(() => {
-              void next.dispose();
+            Effect.gen(function* () {
+              publish({
+                _tag: "StateChanged",
+                status: "unavailable",
+                runId: null,
+                messageCount: state.messageCount,
+                error: "Session replacement failed. Restart the backend before sending.",
+              });
+              yield* Effect.tryPromise({
+                try: () => next.dispose(),
+                catch: () =>
+                  new SwitchError({ message: "Could not dispose the prepared session." }),
+              }).pipe(
+                Effect.catch(() => Effect.logWarning("Could not dispose the prepared session")),
+              );
             }),
           ),
         );
