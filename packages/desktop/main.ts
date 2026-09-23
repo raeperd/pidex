@@ -10,6 +10,7 @@ import {
   HistoryError,
   ProjectPath,
   SessionList,
+  SessionLocator,
 } from "../api/index.js";
 import { realpath } from "node:fs/promises";
 import {
@@ -72,6 +73,17 @@ const program = Effect.gen(function* () {
   let crashed = false;
   let starting = false;
   let switching = false;
+  let pendingResume: typeof SessionLocator.Type | undefined;
+  // Shared by the RPC result and subscription reconciliation in this application lifetime.
+  // oxlint-disable-next-line consistent-function-scoping
+  const matchesResume = (
+    selected: typeof Conversation.Type | undefined,
+    locator: typeof SessionLocator.Type,
+  ) =>
+    selected?.id === locator.sessionId &&
+    selected.projectPath === locator.projectPath &&
+    selected.sessionFile === locator.sessionFile &&
+    selected.status !== "unavailable";
   let interrupted = false;
   let connectionScope: Scope.Closeable | undefined;
   const connections = yield* Scope.make();
@@ -158,6 +170,11 @@ const program = Effect.gen(function* () {
   let startNewSession:
     | ((projectPath: string, sessionId: string) => Effect.Effect<string, DesktopError>)
     | undefined;
+  let resumeSession:
+    | ((
+        locator: typeof SessionLocator.Type,
+      ) => Effect.Effect<typeof Conversation.Type | "uncertain", DesktopError>)
+    | undefined;
   ipcMain.handle("new-session", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -168,7 +185,7 @@ const program = Effect.gen(function* () {
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session target" })),
         );
-        if (!startNewSession || quitting || switching)
+        if (!startNewSession || quitting || switching || pendingResume)
           return yield* new DesktopError({ message: "No connected conversation" });
         switching = true;
         yield* startNewSession(target.projectPath, target.sessionId).pipe(
@@ -184,6 +201,64 @@ const program = Effect.gen(function* () {
           ),
         );
       }),
+    ),
+  );
+  ipcMain.handle("resume-session", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const locator = yield* Schema.decodeUnknownEffect(SessionLocator)(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
+        );
+        if (!resumeSession || quitting || switching)
+          return yield* new DesktopError({ message: "No connected conversation" });
+        if (
+          pendingResume &&
+          (pendingResume.projectPath !== locator.projectPath ||
+            pendingResume.sessionId !== locator.sessionId ||
+            pendingResume.sessionFile !== locator.sessionFile)
+        )
+          return yield* new DesktopError({
+            message: "Resolve the pending resume before selecting another session.",
+          });
+        const retrying = pendingResume !== undefined;
+        pendingResume = locator;
+        switching = true;
+        const selected = yield* resumeSession(locator).pipe(
+          Effect.catch((error) =>
+            retrying ? Effect.succeed<"uncertain">("uncertain") : Effect.fail(error),
+          ),
+          Effect.tapError(() =>
+            Effect.sync(() => {
+              pendingResume = undefined;
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              switching = false;
+            }),
+          ),
+        );
+        if (selected === "uncertain" && !matchesResume(conversation, locator))
+          return {
+            conversation: null,
+            error: "Resume result is uncertain. Wait for reconnect or Retry before sending.",
+            uncertain: true,
+          };
+        pendingResume = undefined;
+        sessionFile = locator.sessionFile;
+        return {
+          conversation: selected === "uncertain" ? (conversation ?? null) : selected,
+          error: "",
+          uncertain: false,
+        };
+      }).pipe(
+        Effect.match({
+          onSuccess: (result) => result,
+          onFailure: (error) => ({ conversation: null, error: error.message, uncertain: false }),
+        }),
+      ),
     ),
   );
   ipcMain.handle("list-sessions", (event, value: unknown) =>
@@ -226,7 +301,7 @@ const program = Effect.gen(function* () {
         const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
         );
-        if (!sendPrompt || quitting || switching)
+        if (!sendPrompt || quitting || switching || pendingResume)
           return yield* new DesktopError({ message: "Choose a project first" });
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
@@ -275,7 +350,7 @@ const program = Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
         if (
-          (!crashed && conversation?.status !== "unavailable") ||
+          (!crashed && conversation?.status !== "unavailable" && !pendingResume) ||
           starting ||
           quitting ||
           !project
@@ -283,7 +358,8 @@ const program = Effect.gen(function* () {
           return;
         const child = server?.child;
         if (child && child.exitCode === null && child.signalCode === null) {
-          if (conversation?.status !== "unavailable") return;
+          if (conversation?.status !== "unavailable" && !pendingResume) return;
+          if (pendingResume) sessionFile = undefined;
           yield* Effect.callback<void, DesktopError>((resume) => {
             const onExit = () => resume(Effect.void);
             child.once("exit", onExit);
@@ -298,6 +374,7 @@ const program = Effect.gen(function* () {
             return Effect.sync(() => child.off("exit", onExit));
           });
         }
+        pendingResume = undefined;
         yield* startServer();
       }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
@@ -333,6 +410,12 @@ const program = Effect.gen(function* () {
           }),
         )(message);
         if (Exit.isFailure(decoded) || server?.child !== child) return;
+        if (
+          pendingResume &&
+          (pendingResume.sessionId !== decoded.value.sessionId ||
+            pendingResume.sessionFile !== decoded.value.sessionFile)
+        )
+          return;
         sessionFile = decoded.value.sessionFile;
         if (child.connected)
           child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
@@ -348,9 +431,11 @@ const program = Effect.gen(function* () {
         interrupted ||= conversation !== undefined && conversation.status !== "idle";
         if (!crashed) connectionError = "";
         crashed = true;
+        if (pendingResume) sessionFile = undefined;
         sendPrompt = undefined;
         listSessions = undefined;
         startNewSession = undefined;
+        resumeSession = undefined;
         stopRun = undefined;
         currentRun = undefined;
         if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
@@ -448,12 +533,26 @@ const program = Effect.gen(function* () {
                   }),
               ),
             );
+          resumeSession = (locator) =>
+            client.ResumeSession(locator).pipe(
+              Effect.catchCause((cause) => {
+                const failure = Cause.findErrorOption(cause);
+                return Option.isSome(failure) && failure.value._tag === "ResumeError"
+                  ? Effect.fail(new DesktopError({ message: failure.value.message }))
+                  : Effect.succeed<"uncertain">("uncertain");
+              }),
+            );
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
                 if (update._tag === "Snapshot") {
                   conversation = update.conversation;
-                  sessionFile = update.conversation.sessionFile;
+                  if (pendingResume) {
+                    if (matchesResume(update.conversation, pendingResume)) {
+                      sessionFile = pendingResume.sessionFile;
+                      pendingResume = undefined;
+                    }
+                  } else sessionFile = update.conversation.sessionFile;
                   connectionError = "";
                   currentRun = client.Subscribe().pipe(
                     Stream.runHead,
@@ -503,6 +602,7 @@ const program = Effect.gen(function* () {
               sendPrompt = undefined;
               listSessions = undefined;
               startNewSession = undefined;
+              resumeSession = undefined;
               stopRun = undefined;
               currentRun = undefined;
               if (window && !window.isDestroyed()) window.webContents.send("conversation", null);

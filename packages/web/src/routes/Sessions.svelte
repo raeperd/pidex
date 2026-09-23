@@ -14,19 +14,33 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { SessionList } from "../../../api/index.js";
+  import type { SessionList, SessionLocator } from "../../../api/index.js";
 
   let {
     projectPath,
+    activeId,
+    activeFile,
+    disabled,
+    onresume,
     oncurrent,
     onnew,
     canNew,
-  }: { projectPath: string; oncurrent: () => void; onnew: () => void; canNew: boolean } = $props();
+  }: {
+    projectPath: string;
+    activeId: string;
+    activeFile: string;
+    disabled: boolean;
+    onresume: (locator: typeof SessionLocator.Type) => Promise<string>;
+    oncurrent: () => void;
+    onnew: () => void;
+    canNew: boolean;
+  } = $props();
   let result = $state.raw<typeof SessionList.Encoded>();
   let loading = $state(true);
   let error = $state("");
   let selected = $state("");
   let query = $state("");
+  let resuming = $state(false);
   const session = $derived(result?.sessions.find((entry) => entry.sessionFile === selected));
   const matches = $derived(
     result?.sessions.filter((entry) =>
@@ -46,6 +60,21 @@
       error = "Could not load saved sessions. Check the connection, then Retry.";
     } finally {
       loading = false;
+    }
+  }
+
+  async function resume() {
+    if (!session || disabled || resuming) return;
+    resuming = true;
+    error = "";
+    try {
+      error = await onresume({
+        projectPath: session.projectPath,
+        sessionId: session.sessionId,
+        sessionFile: session.sessionFile,
+      });
+    } finally {
+      resuming = false;
     }
   }
 </script>
@@ -196,7 +225,15 @@
       <p class="mt-0 mb-2 truncate font-medium text-foreground" title={session.title}>
         {session.title}
       </p>
-      <p class="my-0 leading-relaxed">Viewing details only. Your current session stays active.</p>
+      {#if session.sessionId === activeId && session.sessionFile === activeFile}
+        <p class="my-0 leading-relaxed">This session is active.</p>
+      {:else}
+        <button
+          class="rounded-lg border border-solid border-border bg-raised px-3 py-2 text-xs text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
+          onclick={resume}
+          disabled={disabled || resuming}>{resuming ? "Resuming…" : "Resume session"}</button
+        >
+      {/if}
       <details class="mt-3">
         <summary class="cursor-pointer text-[11px] hover:text-foreground">Session details</summary>
         <dl class="mb-0 text-[11px] wrap-anywhere">
@@ -207,9 +244,7 @@
         </dl>
       </details>
     {:else}
-      <p class="m-0 leading-relaxed">
-        Browse saved history. Resuming sessions isn’t available yet.
-      </p>
+      <p class="m-0 leading-relaxed">Select a saved session to resume it.</p>
     {/if}
   </div>
 </section>
