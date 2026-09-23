@@ -34,6 +34,10 @@ const program = Effect.gen(function* () {
   protocol.registerSchemesAsPrivileged([
     { scheme: "pidex", privileges: { standard: true, secure: true, supportFetchAPI: true } },
   ]);
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
   yield* Effect.tryPromise({
     try: () => app.whenReady(),
     catch: () => new DesktopError({ message: "Electron could not start" }),
@@ -63,6 +67,9 @@ const program = Effect.gen(function* () {
     ),
   );
   let window: BrowserWindow | undefined;
+  app.on("second-instance", () => {
+    if (window && !window.isDestroyed()) window.focus();
+  });
   const serverSecret = yield* Effect.try({
     try: () => randomBytes(32).toString("hex"),
     catch: () => new DesktopError({ message: "Could not create server credentials" }),
@@ -208,7 +215,10 @@ const program = Effect.gen(function* () {
     const metadata = yield* loadMetadata();
     const next = {
       ...metadata,
-      recentProjects: [canonical, ...metadata.recentProjects.filter((path) => path !== canonical)],
+      recentProjects: [
+        canonical,
+        ...metadata.recentProjects.filter((path) => path !== canonical && path !== cwd),
+      ],
     };
     const temporary = `${metadataPath}.${randomUUID()}.tmp`;
     yield* Effect.tryPromise({
