@@ -13,6 +13,7 @@ declare global {
       resumeSession: (locator: typeof SessionLocator.Type) => Promise<{
         conversation: typeof Conversation.Type | null;
         error: string;
+        uncertain: boolean;
       }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       restart: () => Promise<string | null>;
