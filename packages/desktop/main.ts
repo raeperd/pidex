@@ -324,6 +324,18 @@ const program = Effect.gen(function* () {
         catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
       });
       server = { child };
+      child.on("message", (message: unknown) => {
+        const decoded = Schema.decodeUnknownExit(
+          Schema.Struct({
+            type: Schema.Literal("session-locator"),
+            sessionId: Schema.String,
+            sessionFile: ProjectPath,
+          }),
+        )(message);
+        if (Exit.isFailure(decoded) || server?.child !== child) return;
+        sessionFile = decoded.value.sessionFile;
+        child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId });
+      });
       child.once("exit", () => {
         if (server?.child !== child) return;
         if (quitting) {
@@ -438,6 +450,7 @@ const program = Effect.gen(function* () {
               Effect.gen(function* () {
                 if (update._tag === "Snapshot") {
                   conversation = update.conversation;
+                  sessionFile = update.conversation.sessionFile;
                   connectionError = "";
                   currentRun = client.Subscribe().pipe(
                     Stream.runHead,

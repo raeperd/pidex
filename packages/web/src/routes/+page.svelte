@@ -41,6 +41,7 @@
   let error = $state("");
   let showSessions = $state(false);
   let replacing = $state(false);
+  let requestedNewFrom: string | undefined;
 
   let canSend = $derived(
     !sending &&
@@ -62,6 +63,12 @@
       if (update?._tag === "Snapshot") {
         conversation = update.conversation;
         crashed = false;
+        if (requestedNewFrom && conversation.id !== requestedNewFrom) {
+          draft = "";
+          pending = undefined;
+          error = "";
+          requestedNewFrom = undefined;
+        }
       } else if (update && conversation)
         conversation = applyConversationUpdate(conversation, update);
       if (
@@ -155,17 +162,25 @@
     const selected = conversation;
     if (!selected || selected.status !== "idle" || replacing || sending) return;
     replacing = true;
+    requestedNewFrom = selected.id;
     error = "";
     try {
       await window.desktop.newSession(selected.projectPath, selected.id);
       draft = "";
       pending = undefined;
+      requestedNewFrom = undefined;
       showSessions = false;
       await tick();
       editor?.focus();
     } catch {
-      error =
-        "Could not start a new session. Check project and Pi history permissions, then Retry.";
+      if (conversation?.id !== selected.id) {
+        draft = "";
+        pending = undefined;
+        requestedNewFrom = undefined;
+      } else {
+        error =
+          "Could not start a new session. Check project and Pi history permissions, then Retry.";
+      }
     } finally {
       replacing = false;
     }

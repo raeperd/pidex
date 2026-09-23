@@ -286,6 +286,7 @@ const program = Effect.gen(function* () {
     const scope = yield* Effect.scope;
     let state: typeof Conversation.Type = {
       id: session.sessionId,
+      sessionFile: session.sessionFile,
       projectPath: process.cwd(),
       modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
       setupError,
@@ -523,11 +524,71 @@ const program = Effect.gen(function* () {
           return yield* new NewSessionError({ message: "New session was cancelled. Retry." });
         session = runtime.session;
         messageId = "";
+        const nextFile = session.sessionFile;
+        if (!nextFile) {
+          state = {
+            ...state,
+            status: "unavailable",
+            error:
+              "Pi did not provide a recovery locator. Restart the backend to recover the previous session.",
+          };
+          publish({ _tag: "Snapshot", conversation: state });
+          return yield* new NewSessionError({ message: state.error });
+        }
+        const nextId = session.sessionId;
+        yield* Effect.callback<void, NewSessionError>((resume) => {
+          const locatorError = new NewSessionError({
+            message:
+              "Could not update the recovery locator. Restart the backend to recover the previous session.",
+          });
+          const onAck = (message: unknown) => {
+            if (
+              typeof message !== "object" ||
+              message === null ||
+              !("type" in message) ||
+              message.type !== "session-locator-ack" ||
+              !("sessionId" in message) ||
+              message.sessionId !== nextId
+            )
+              return;
+            cleanup();
+            resume(Effect.void);
+          };
+          const timeout = setTimeout(() => {
+            cleanup();
+            resume(Effect.fail(locatorError));
+          }, 5000);
+          const cleanup = () => {
+            clearTimeout(timeout);
+            process.off("message", onAck);
+          };
+          process.on("message", onAck);
+          if (!process.send) {
+            cleanup();
+            resume(Effect.fail(locatorError));
+            return Effect.sync(cleanup);
+          }
+          try {
+            process.send({ type: "session-locator", sessionId: nextId, sessionFile: nextFile });
+          } catch {
+            cleanup();
+            resume(Effect.fail(locatorError));
+          }
+          return Effect.sync(cleanup);
+        }).pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              state = { ...state, status: "unavailable", error: error.message };
+              publish({ _tag: "Snapshot", conversation: state });
+            }),
+          ),
+        );
         setupError = yield* checkSetup(session).pipe(
           Effect.catch((error) => Effect.succeed(error)),
         );
         state = {
           id: session.sessionId,
+          sessionFile: nextFile,
           projectPath: cwd,
           modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
           setupError,
@@ -539,11 +600,7 @@ const program = Effect.gen(function* () {
         };
         attach();
         publish({ _tag: "Snapshot", conversation: state });
-        if (!session.sessionFile)
-          return yield* new NewSessionError({
-            message: "Pi did not provide a recovery locator. Restart the backend and Retry.",
-          });
-        return { sessionFile: session.sessionFile };
+        return { sessionFile: nextFile };
       }).pipe(
         Effect.ensuring(
           Effect.sync(() => {

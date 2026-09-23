@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { alive, test } from "./support/lifecycle.js";
 
 test("#192 starts another Pi session from an empty list and an idle session", async ({
@@ -225,4 +226,88 @@ test("#192 ignores delayed updates from the replaced session", async ({ lifecycl
   expect(lifecycle.requestBodies[0]).not.toContain("Old reply arrived late");
   lifecycle.complete("New reply");
   await expect(page.getByLabel("assistant", { exact: true })).toHaveText("New reply");
+});
+
+test("#192 recovers the new locator when its RPC acknowledgment is lost", async ({ lifecycle }) => {
+  const { app, page, children } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("Original history");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Original reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const fault = await app.evaluateHandle(
+    (_electron, modulePath) => {
+      const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+        modulePath,
+      );
+      const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+      const originalSend = prototype.send;
+      const originalEmit = prototype.emit;
+      let requestId: number | undefined;
+      let dropped = false;
+      let offline = false;
+      prototype.send = function (...args: unknown[]) {
+        const data: unknown = JSON.parse(String(args[0]));
+        if (
+          typeof data === "object" &&
+          data !== null &&
+          "tag" in data &&
+          data.tag === "NewSession" &&
+          "id" in data &&
+          typeof data.id === "number"
+        )
+          requestId = data.id;
+        return originalSend.apply(this, args);
+      };
+      prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+        const data = String(args[0]);
+        if (event === "open" && offline) {
+          this.terminate();
+          return true;
+        }
+        if (
+          event === "message" &&
+          requestId !== undefined &&
+          data.includes(`"requestId":${requestId}`) &&
+          data.includes('"_tag":"Exit"')
+        ) {
+          dropped = true;
+          offline = true;
+          requestId = undefined;
+          this.terminate();
+          return true;
+        }
+        return originalEmit.apply(this, [event, ...args]);
+      };
+      return {
+        dropped: () => dropped,
+        reconnect: () => {
+          offline = false;
+        },
+      };
+    },
+    fileURLToPath(import.meta.resolve("@effect/platform-node")),
+  );
+  await prompt.fill("Unsent old-session draft");
+  await page.getByRole("button", { name: "New session" }).click();
+  await expect.poll(() => fault.evaluate((gate) => gate.dropped())).toBe(true);
+  await expect(page.getByRole("status")).toHaveText("Disconnected");
+  const [backend] = children();
+  if (!backend) throw new Error("Missing Pi backend");
+  process.kill(backend, "SIGKILL");
+  await expect.poll(() => alive(backend)).toBe(false);
+  await fault.evaluate((gate) => gate.reconnect());
+  await page.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
+  await expect(prompt).toHaveValue("");
+  await expect(page.getByRole("alert")).toContainText("Saved history is missing");
+  await prompt.fill("New history after lost acknowledgment");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(2);
+  lifecycle.complete("New reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("New reply");
+  expect(await lifecycle.history()).toHaveLength(2);
 });
