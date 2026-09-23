@@ -111,7 +111,7 @@ test("#191 lists only the canonical project's Pi histories, newest activity firs
       content: [{ type: "text", text: "Saved reply" }],
       api: "openai-completions",
       provider: "openai",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       usage: {
         input: 1,
         output: 1,

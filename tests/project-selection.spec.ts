@@ -21,7 +21,7 @@ test("#129 #183 Cancel then choose a project with a dark idle conversation, then
   );
   await writeFile(
     join(agentDir, "settings.json"),
-    JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-5.6-luna" }),
+    JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-luna" }),
   );
   let providerRequests = 0;
   const provider = createServer((_request, response) => {
@@ -89,7 +89,7 @@ test("#129 #183 Cancel then choose a project with a dark idle conversation, then
     // Cold Pi imports can exceed five seconds on macOS CI.
     await expect(conversation).toBeVisible({ timeout: 15_000 });
     await expect(conversation.getByRole("status")).toHaveText("Idle");
-    await expect(conversation.getByText("GPT-5.6 Luna", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("GPT-6 Luna", { exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Current project" })).toContainText(project);
     await expect(
       conversation.getByRole("heading", { name: "What would you like to build?" }),
