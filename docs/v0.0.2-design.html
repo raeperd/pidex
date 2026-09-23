@@ -189,10 +189,6 @@
         color: var(--secondary);
         background: var(--hover);
       }
-      .badge.accent {
-        background: var(--accent-soft);
-        color: var(--accent-text);
-      }
       .badge.amber {
         background: var(--warning-soft);
         color: var(--warning);
@@ -324,13 +320,14 @@
         position: relative;
       }
       .topbar {
-        height: 56px;
+        height: 40px;
+        font-size: var(--xs);
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: var(--s3);
-        padding: var(--s4) var(--s8);
+        padding: var(--s2) var(--s6);
         border-bottom: 1px solid var(--line);
       }
       .breadcrumb {
@@ -784,8 +781,8 @@
           display: inline-flex;
         }
         .topbar {
-          height: 64px;
-          padding: var(--s3);
+          height: 44px;
+          padding: 0 var(--s3);
         }
         .breadcrumb {
           gap: var(--s2);
@@ -1264,7 +1261,7 @@
         main.classList.toggle("composer-centered", centered);
         main.innerHTML = centered
           ? `<button class="mobile-nav floating-nav" id="open-nav" aria-label="Open navigation" aria-expanded="false">${icon("home")}</button>`
-          : `<header class="topbar"><div class="breadcrumb"><button class="mobile-nav" id="open-nav" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#home" /></svg></button><span class="muted">${state === "recent" || state === "missing" ? "Projects" : current.name}</span><span class="muted">/</span><strong>${escapeHtml(title)}</strong></div><span class="badge ${busy() ? "amber" : "accent"}">${state === "running" ? "◌ Running" : state === "stopping" ? "◌ Stopping" : "Local"}</span></header>`;
+          : `<header class="topbar"><div class="breadcrumb"><button class="mobile-nav" id="open-nav" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#home" /></svg></button><span class="muted">${state === "recent" || state === "missing" ? "Projects" : current.name}</span><span class="muted">/</span><strong>${escapeHtml(title)}</strong></div>${busy() ? `<span class="badge amber">${state === "running" ? "◌ Running" : "◌ Stopping"}</span>` : ""}</header>`;
         document.querySelector("#open-nav").onclick = () =>
           toggleNavigation(!windowFrame.classList.contains("nav-open"));
         if (state === "recent" || state === "missing") renderConversation();
@@ -1280,7 +1277,7 @@
       function renderNavigation() {
         const onHome = unassigned();
         const locked = busy() || state === "loading";
-        navigation.innerHTML = `<button class="side-home" id="new-session" ${locked ? "disabled" : ""}>${icon("compose")}New session</button><div class="row between side-label"><span class="eyebrow">Recent projects</span><button id="add-project" aria-label="Add project" title="Add project" ${locked ? "disabled" : ""}>${icon("plus")}</button></div>`;
+        navigation.innerHTML = `<button class="side-home" id="new-session" ${locked ? "disabled" : ""}>${icon("compose")}New session</button><div class="row between side-label"><span class="eyebrow">Projects</span><button id="add-project" aria-label="Add project" title="Add project" ${locked ? "disabled" : ""}>${icon("plus")}</button></div>`;
         document.querySelector("#new-session").onclick = () =>
           navigate(() => {
             if (!onHome) {
