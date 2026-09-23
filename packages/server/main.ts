@@ -768,10 +768,12 @@ const program = Effect.gen(function* () {
     }
 
     function publish(update: typeof ConversationUpdate.Type) {
-      state = applyConversationUpdate(state, update);
+      const stamped =
+        update._tag === "Snapshot" ? update : { ...update, sessionId: session.sessionId };
+      state = applyConversationUpdate(state, stamped);
       if (subscribers.size === 0) return;
-      const bytes = Buffer.byteLength(JSON.stringify(update));
-      for (const enqueue of subscribers) enqueue(update, bytes);
+      const bytes = Buffer.byteLength(JSON.stringify(stamped));
+      for (const enqueue of subscribers) enqueue(stamped, bytes);
     }
   }).pipe(
     Effect.catchTag("RecoveryError", (error) =>

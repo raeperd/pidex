@@ -66,14 +66,20 @@ export const Conversation = Schema.Struct({
 
 export const ConversationUpdate = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Snapshot"), conversation: Conversation }),
-  Schema.Struct({ _tag: Schema.Literal("EntryUpserted"), entry: Entry }),
+  Schema.Struct({
+    _tag: Schema.Literal("EntryUpserted"),
+    sessionId: Schema.optional(Schema.String),
+    entry: Entry,
+  }),
   Schema.Struct({
     _tag: Schema.Literal("TextDelta"),
+    sessionId: Schema.optional(Schema.String),
     id: Schema.String,
     delta: Schema.String,
   }),
   Schema.Struct({
     _tag: Schema.Literal("StateChanged"),
+    sessionId: Schema.optional(Schema.String),
     status: Conversation.fields.status,
     runId: Conversation.fields.runId,
     messageCount: Conversation.fields.messageCount,
@@ -129,6 +135,8 @@ export function applyConversationUpdate(
   current: typeof Conversation.Type,
   update: typeof ConversationUpdate.Type,
 ): typeof Conversation.Type {
+  if (update._tag !== "Snapshot" && update.sessionId && update.sessionId !== current.id)
+    return current;
   switch (update._tag) {
     case "Snapshot":
       return update.conversation;
