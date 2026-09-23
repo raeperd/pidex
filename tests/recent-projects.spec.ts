@@ -150,6 +150,44 @@ test("#193 recanonicalizing a moved recent project removes its old path", async 
   expect(lifecycle.requests).toHaveLength(0);
 });
 
+test("#193 choosing another alias also removes a moved project's stale path", async ({
+  lifecycle,
+}) => {
+  const first = await lifecycle.launch();
+  await first.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => first.process.exitCode).toBe(0);
+  const moved = join(lifecycle.home, "moved-project");
+  const alias = join(lifecycle.home, "another-alias");
+  await rename(lifecycle.project, moved);
+  await symlink(moved, lifecycle.project);
+  await symlink(moved, alias);
+
+  const second = await lifecycle.launch(false);
+  await second.app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+  }, alias);
+  await second.page.getByRole("button", { name: "Choose project" }).click();
+  await expect(second.page.getByRole("region", { name: "Saved sessions" })).toBeVisible({
+    timeout: 15000,
+  });
+  await second.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => second.process.exitCode).toBe(0);
+
+  const third = await lifecycle.launch(false);
+  const recent = third.page.getByRole("region", { name: "Recent projects" });
+  await expect(recent.getByRole("button")).toHaveCount(1);
+  await expect(recent.getByRole("button", { name: moved })).toBeVisible();
+  await third.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => third.process.exitCode).toBe(0);
+  expect(lifecycle.requests).toHaveLength(0);
+});
+
 test("#193 unreadable metadata is preserved and blocks project selection", async ({
   lifecycle,
 }) => {

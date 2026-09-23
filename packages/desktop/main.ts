@@ -213,12 +213,20 @@ const program = Effect.gen(function* () {
         }),
     });
     const metadata = yield* loadMetadata();
+    const recentProjects = [canonical];
+    const seen = new Set(recentProjects);
+    for (const path of metadata.recentProjects) {
+      const resolved = yield* Effect.tryPromise({
+        try: () => realpath(path),
+        catch: () => new DesktopError({ message: `Could not resolve ${path}` }),
+      }).pipe(Effect.catch(() => Effect.succeed(path)));
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      recentProjects.push(resolved);
+    }
     const next = {
       ...metadata,
-      recentProjects: [
-        canonical,
-        ...metadata.recentProjects.filter((path) => path !== canonical && path !== cwd),
-      ],
+      recentProjects,
     };
     const temporary = `${metadataPath}.${randomUUID()}.tmp`;
     yield* Effect.tryPromise({
