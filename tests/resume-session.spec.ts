@@ -87,6 +87,12 @@ test("#194 rejects a stale Resume request for the active session file", async ({
   );
   expect(result.error).toContain("missing, unreadable, or changed");
   expect(result.conversation).toBeNull();
+  await expect(first.page.getByRole("status")).toHaveText("Unavailable");
+  await expect(first.page.getByRole("button", { name: "Send" })).toBeDisabled();
+  const sendFailure = await first.page.evaluate(() =>
+    window.desktop.send("Do not recreate missing history").then(() => "", String),
+  );
+  expect(sendFailure).toContain("Wait for the current reply");
   expect(await lifecycle.history()).toHaveLength(0);
   await expect(first.page.getByRole("region", { name: "Messages" })).toContainText("Current reply");
   expect(lifecycle.requests).toHaveLength(1);

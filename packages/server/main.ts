@@ -636,6 +636,8 @@ const program = Effect.gen(function* () {
         return yield* new ResumeError({
           message: "This session belongs to another project. Open that project first.",
         });
+      const activeLocator =
+        locator.sessionId === state.id && locator.sessionFile === state.sessionFile;
       if (locator.sessionId === state.id) {
         if (locator.sessionFile !== state.sessionFile) return yield* failure;
       }
@@ -699,8 +701,7 @@ const program = Effect.gen(function* () {
           try: () => SessionManager.open(file, undefined, project),
           catch: () => failure,
         });
-        if (locator.sessionId === state.id && locator.sessionFile === state.sessionFile)
-          return state;
+        if (activeLocator) return state;
         const outcome = yield* Effect.tryPromise({
           try: () => runtime.switchSession(locator.sessionFile, { cwdOverride: project }),
           catch: () => {
@@ -807,6 +808,20 @@ const program = Effect.gen(function* () {
         publish({ _tag: "Snapshot", conversation: snapshot(true) });
         return state;
       }).pipe(
+        Effect.tapError((error) =>
+          activeLocator && error === failure
+            ? Effect.sync(() => {
+                publish({
+                  _tag: "StateChanged",
+                  status: "unavailable",
+                  runId: null,
+                  messageCount: state.messageCount,
+                  error:
+                    "The active session file is unavailable. Restart the backend before sending.",
+                });
+              })
+            : Effect.void,
+        ),
         Effect.ensuring(
           Effect.sync(() => {
             replacing = false;
