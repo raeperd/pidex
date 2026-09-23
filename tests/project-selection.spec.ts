@@ -43,7 +43,26 @@ test("#129 #183 Cancel then choose a project with a dark idle conversation, then
   if (!address || typeof address === "string") throw new Error("Provider fixture did not listen");
   await writeFile(
     join(agentDir, "models.json"),
-    JSON.stringify({ providers: { openai: { baseUrl: `http://127.0.0.1:${address.port}/v1` } } }),
+    JSON.stringify({
+      providers: {
+        openai: {
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          api: "openai-completions",
+          models: [
+            {
+              id: "gpt-6-luna",
+              name: "GPT-6 Luna",
+              api: "openai-completions",
+              reasoning: false,
+              input: ["text"],
+              contextWindow: 128000,
+              maxTokens: 4096,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            },
+          ],
+        },
+      },
+    }),
   );
   const app = await electron.launch({
     args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
