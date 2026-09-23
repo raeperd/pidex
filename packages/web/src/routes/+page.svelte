@@ -25,7 +25,11 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { applyConversationUpdate, type Conversation } from "../../../api/index.js";
+  import {
+    applyConversationUpdate,
+    type Conversation,
+    type SessionLocator,
+  } from "../../../api/index.js";
   import AssistantMessage from "./AssistantMessage.svelte";
   import Sessions from "./Sessions.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
@@ -42,10 +46,13 @@
   let showSessions = $state(false);
   let replacing = $state(false);
   let requestedNewFrom: string | undefined;
+  let resumeTarget = $state.raw<typeof SessionLocator.Type>();
+  let resumeUncertain = $state(false);
 
   let canSend = $derived(
     !sending &&
       !replacing &&
+      !resumeTarget &&
       connected &&
       conversation?.status === "idle" &&
       !conversation.setupError &&
@@ -68,6 +75,19 @@
           pending = undefined;
           error = "";
           requestedNewFrom = undefined;
+        }
+        if (
+          resumeTarget &&
+          conversation.id === resumeTarget.sessionId &&
+          conversation.projectPath === resumeTarget.projectPath &&
+          conversation.sessionFile === resumeTarget.sessionFile &&
+          conversation.status !== "unavailable"
+        ) {
+          draft = "";
+          pending = undefined;
+          resumeTarget = undefined;
+          resumeUncertain = false;
+          error = "";
         }
       } else if (update && conversation)
         conversation = applyConversationUpdate(conversation, update);
@@ -97,7 +117,15 @@
     try {
       const failure = await window.desktop.restart();
       if (failure) error = failure;
-      else crashed = false;
+      else {
+        crashed = false;
+        if (resumeTarget) {
+          resumeTarget = undefined;
+          resumeUncertain = false;
+          draft = "";
+          pending = undefined;
+        }
+      }
     } catch {
       error = "Could not restart the backend. Try Restart again.";
     } finally {
@@ -160,7 +188,7 @@
 
   async function newSession() {
     const selected = conversation;
-    if (!selected || selected.status !== "idle" || replacing || sending) return;
+    if (!selected || selected.status !== "idle" || replacing || sending || resumeTarget) return;
     replacing = true;
     requestedNewFrom = selected.id;
     error = "";
@@ -181,6 +209,47 @@
         error =
           "Could not start a new session. Check project and Pi history permissions, then Retry.";
       }
+    } finally {
+      replacing = false;
+    }
+  }
+
+  async function resumeSession(locator: typeof SessionLocator.Type) {
+    if (replacing || busy || sending) return "Wait for the current run to finish before resuming.";
+    if (
+      resumeTarget &&
+      (resumeTarget.projectPath !== locator.projectPath ||
+        resumeTarget.sessionId !== locator.sessionId ||
+        resumeTarget.sessionFile !== locator.sessionFile)
+    )
+      return "Resolve the pending resume before selecting another session.";
+    replacing = true;
+    resumeTarget = locator;
+    resumeUncertain = false;
+    try {
+      const result = await window.desktop.resumeSession(locator);
+      if (result.uncertain) {
+        resumeUncertain = Boolean(resumeTarget);
+        return resumeUncertain ? result.error : "";
+      }
+      if (result.error || !result.conversation) {
+        resumeTarget = undefined;
+        resumeUncertain = false;
+        return result.error || "Could not resume the session.";
+      }
+      conversation = result.conversation;
+      draft = "";
+      pending = undefined;
+      resumeTarget = undefined;
+      resumeUncertain = false;
+      showSessions = false;
+      await tick();
+      editor?.focus();
+      return "";
+    } catch {
+      resumeTarget = undefined;
+      resumeUncertain = false;
+      return "Could not resume the session. Check the connection, then Retry.";
     } finally {
       replacing = false;
     }
@@ -249,8 +318,20 @@
         {#key `${conversation.projectPath}:${conversation.id}`}
           <Sessions
             projectPath={conversation.projectPath}
-            canNew={connected && conversation.status === "idle" && !replacing && !sending}
+            activeId={conversation.id}
+            activeFile={conversation.sessionFile}
+            canNew={connected &&
+              conversation.status === "idle" &&
+              !replacing &&
+              !sending &&
+              !resumeTarget}
+            disabled={!connected ||
+              conversation.status !== "idle" ||
+              replacing ||
+              sending ||
+              (Boolean(resumeTarget) && !resumeUncertain)}
             onnew={newSession}
+            onresume={resumeSession}
             oncurrent={async () => {
               showSessions = false;
               await tick();
@@ -337,7 +418,7 @@
           <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
             {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
             {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
-            {#if crashed || conversation.status === "unavailable"}
+            {#if crashed || conversation.status === "unavailable" || resumeUncertain}
               {#if crashed}<p role="alert">
                   The backend stopped. Restart to recover saved history.
                 </p>{/if}

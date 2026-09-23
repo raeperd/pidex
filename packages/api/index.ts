@@ -5,7 +5,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 // oxlint-disable-next-line no-control-regex
 export const ProjectPath = Schema.String.check(Schema.isPattern(/^\/[^\0]*$/));
 
-const SessionLocator = Schema.Struct({
+export const SessionLocator = Schema.Struct({
   projectPath: ProjectPath,
   sessionId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/)),
   sessionFile: ProjectPath,
@@ -105,6 +105,10 @@ export class NewSessionError extends Schema.TaggedError<NewSessionError>()("NewS
   message: Schema.String,
 }) {}
 
+export class ResumeError extends Schema.TaggedError<ResumeError>()("ResumeError", {
+  message: Schema.String,
+}) {}
+
 export class RecoveryError extends Schema.TaggedError<RecoveryError>()("RecoveryError", {
   message: Schema.String,
 }) {}
@@ -129,6 +133,11 @@ export const ConversationApi = RpcGroup.make(
     payload: { projectPath: ProjectPath, sessionId: SessionLocator.fields.sessionId },
     success: Schema.Struct({ sessionFile: ProjectPath }),
     error: NewSessionError,
+  }),
+  Rpc.make("ResumeSession", {
+    payload: SessionLocator.fields,
+    success: Conversation,
+    error: ResumeError,
   }),
 );
 
