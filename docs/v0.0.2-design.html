@@ -890,56 +890,25 @@
           font-size: 24px;
         }
       }
-      .session-search {
+      .project-heading {
         display: flex;
         align-items: center;
         gap: var(--s1);
-        margin: var(--s2) 0;
-        color: var(--muted);
       }
-      .session-search label {
-        display: flex;
-        align-items: center;
-        gap: var(--s2);
+      .project-heading .project-button {
         min-width: 0;
-        padding: var(--s2);
-        border-radius: 6px;
+        flex: 1;
       }
-      .session-search label:focus-within {
-        background: var(--raised);
-        outline: 2px solid var(--focus);
-      }
-      .session-search input {
-        width: 100%;
-        min-width: 0;
-        border: 0;
-        padding: 0;
-        background: transparent;
-        color: var(--ink);
-        font: inherit;
-        font-size: var(--xs);
-      }
-      .session-search input:focus-visible {
-        outline: none;
-      }
-      .session-search input::placeholder {
-        color: var(--muted);
-      }
-      .session-search button {
+      .project-refresh {
         padding: var(--s1);
         width: 28px;
         min-height: 28px;
         flex-shrink: 0;
         color: var(--muted);
       }
-      .session-search .icon {
+      .project-refresh .icon {
         width: 14px;
         height: 14px;
-      }
-      .search-feedback {
-        padding: var(--s2);
-        font-size: var(--xs);
-        color: var(--muted);
       }
       ::selection {
         color: #f4f6ff;
@@ -982,10 +951,6 @@
         </symbol>
         <symbol id="stop" viewBox="0 0 24 24">
           <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
-        </symbol>
-        <symbol id="search" viewBox="0 0 24 24">
-          <circle cx="10" cy="10" r="6" />
-          <path d="m15 15 5 5" />
         </symbol>
         <symbol id="refresh" viewBox="0 0 24 24">
           <path d="M20 6v6h-6M4 18v-6h6M6 6a8 8 0 0 1 14 6M4 12a8 8 0 0 0 14 6" />
@@ -1110,7 +1075,7 @@
       </p>
       <p>
         Main already provides session search, refresh, and detail inspection. This v0.0.2 proposal
-        keeps those discovery controls and previews explicit resume, nested project navigation, and
+        keeps refresh and omits search. It previews explicit resume, nested project navigation, and
         persistent drafts. Main's details-only footer is not carried into the proposed resume flow.
       </p>
       <h3>References and decisions</h3>
@@ -1186,7 +1151,6 @@
         { id: "dotfiles", name: "dotfiles", path: "~/Projects/dotfiles", when: "Yesterday" },
         { id: "website", name: "website", path: "~/Projects/website", when: "3 days ago" },
       ];
-      const sessionQueries = {};
       const sessions = {
         pidex: [
           {
@@ -1340,7 +1304,19 @@
           button.dataset.project = item.id;
           button.disabled = locked;
           button.setAttribute("aria-pressed", String(active));
-          group.append(button);
+          const heading = document.createElement("div");
+          heading.className = "project-heading";
+          heading.append(button);
+          group.append(heading);
+          if (active && state !== "history-error") {
+            const refresh = makeButton(icon("refresh"), "project-refresh", () =>
+              announce("Sessions up to date."),
+            );
+            refresh.setAttribute("aria-label", "Refresh sessions");
+            refresh.title = "Refresh sessions";
+            refresh.disabled = locked;
+            heading.append(refresh);
+          }
           navigation.append(group);
           if (!active) continue;
           const list = document.createElement("div");
@@ -1353,10 +1329,6 @@
               '<p class="secondary small" style="padding:8px">Session history unavailable</p>';
             continue;
           }
-          list.insertAdjacentHTML(
-            "beforeend",
-            `<div class="session-search"><label>${icon("search")}<input type="search" id="session-search" aria-label="Search saved sessions in ${project}" placeholder="Search sessions" ${locked ? "disabled" : ""}></label><button id="refresh-sessions" aria-label="Refresh sessions" title="Refresh sessions" ${locked ? "disabled" : ""}>${icon("refresh")}</button></div>`,
-          );
           for (const session of sessions[project]) appendSession(session, list);
           if (state === "dense")
             for (let i = 0; i < 16; i++)
@@ -1374,36 +1346,6 @@
               "beforeend",
               '<p class="secondary small" style="padding:8px">No saved sessions yet</p>',
             );
-        }
-        const search = navigation.querySelector("#session-search");
-        if (search) {
-          const list = search.closest(".project-sessions");
-          list.insertAdjacentHTML(
-            "beforeend",
-            '<p class="search-feedback" role="status" hidden></p>',
-          );
-          search.value = sessionQueries[project] || "";
-          const filter = () => {
-            sessionQueries[project] = search.value;
-            let matches = 0;
-            for (const row of list.querySelectorAll("[data-session]")) {
-              row.hidden = !row.title.toLowerCase().includes(search.value.trim().toLowerCase());
-              if (!row.hidden) matches++;
-            }
-            const feedback = list.querySelector(".search-feedback");
-            feedback.hidden = !search.value.trim() || matches > 0;
-            feedback.textContent = `No sessions match “${search.value}”.`;
-          };
-          search.oninput = filter;
-          filter();
-          navigation.querySelector("#refresh-sessions").onclick = () => {
-            const feedback = list.querySelector(".search-feedback");
-            filter();
-            if (feedback.hidden) {
-              feedback.hidden = false;
-              feedback.textContent = "Sessions up to date.";
-            }
-          };
         }
         function appendSession(session, list) {
           const draft = drafts[`${project}/${session.id}`];
