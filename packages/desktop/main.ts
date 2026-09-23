@@ -334,7 +334,10 @@ const program = Effect.gen(function* () {
         )(message);
         if (Exit.isFailure(decoded) || server?.child !== child) return;
         sessionFile = decoded.value.sessionFile;
-        child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId });
+        if (child.connected)
+          child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
+            // A closed channel leaves the backend waiting for the acknowledgment timeout.
+          });
       });
       child.once("exit", () => {
         if (server?.child !== child) return;

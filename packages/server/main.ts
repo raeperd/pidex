@@ -541,6 +541,13 @@ const program = Effect.gen(function* () {
             message:
               "Could not update the recovery locator. Restart the backend to recover the previous session.",
           });
+          let settled = false;
+          const fail = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resume(Effect.fail(locatorError));
+          };
           const onAck = (message: unknown) => {
             if (
               typeof message !== "object" ||
@@ -551,28 +558,30 @@ const program = Effect.gen(function* () {
               message.sessionId !== nextId
             )
               return;
+            if (settled) return;
+            settled = true;
             cleanup();
             resume(Effect.void);
           };
-          const timeout = setTimeout(() => {
-            cleanup();
-            resume(Effect.fail(locatorError));
-          }, 5000);
+          const timeout = setTimeout(fail, 5000);
           const cleanup = () => {
             clearTimeout(timeout);
             process.off("message", onAck);
           };
           process.on("message", onAck);
           if (!process.send) {
-            cleanup();
-            resume(Effect.fail(locatorError));
+            fail();
             return Effect.sync(cleanup);
           }
           try {
-            process.send({ type: "session-locator", sessionId: nextId, sessionFile: nextFile });
+            process.send(
+              { type: "session-locator", sessionId: nextId, sessionFile: nextFile },
+              (error) => {
+                if (error) fail();
+              },
+            );
           } catch {
-            cleanup();
-            resume(Effect.fail(locatorError));
+            fail();
           }
           return Effect.sync(cleanup);
         }).pipe(
