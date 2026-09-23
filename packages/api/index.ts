@@ -57,7 +57,7 @@ export const Conversation = Schema.Struct({
   projectPath: Schema.String,
   modelName: Schema.String,
   setupError: Schema.NullOr(SetupError),
-  status: Schema.Literals(["idle", "running", "stopping"]),
+  status: Schema.Literals(["idle", "running", "stopping", "unavailable"]),
   runId: Schema.NullOr(Schema.String),
   messageCount: Schema.Number,
   entries: Schema.Array(Entry),
@@ -94,6 +94,10 @@ export class StopError extends Schema.TaggedError<StopError>()("StopError", {
   message: Schema.String,
 }) {}
 
+export class NewSessionError extends Schema.TaggedError<NewSessionError>()("NewSessionError", {
+  message: Schema.String,
+}) {}
+
 export class RecoveryError extends Schema.TaggedError<RecoveryError>()("RecoveryError", {
   message: Schema.String,
 }) {}
@@ -114,6 +118,11 @@ export const ConversationApi = RpcGroup.make(
     error: SendError,
   }),
   Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),
+  Rpc.make("NewSession", {
+    payload: { projectPath: ProjectPath, sessionId: SessionLocator.fields.sessionId },
+    success: Schema.Struct({ sessionFile: ProjectPath }),
+    error: NewSessionError,
+  }),
 );
 
 export function applyConversationUpdate(

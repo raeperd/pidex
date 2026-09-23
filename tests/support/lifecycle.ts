@@ -48,8 +48,11 @@ async function setup(cleanup: AsyncDisposableStack) {
     JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-luna" }),
   );
   const requests: ServerResponse[] = [];
+  const requestBodies: string[] = [];
   const provider = createServer((request, response) => {
-    request.resume();
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => requestBodies.push(Buffer.concat(chunks).toString("utf8")));
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.flushHeaders();
     requests.push(response);
@@ -96,6 +99,7 @@ async function setup(cleanup: AsyncDisposableStack) {
     home,
     project,
     requests,
+    requestBodies,
     apps,
     logs,
     async launch(selectProject = true) {

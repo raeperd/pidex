@@ -3,6 +3,7 @@ import type { Conversation, ConversationUpdate, SessionList } from "../../api/in
 declare global {
   interface Window {
     desktop: {
+      newSession: (projectPath: string, sessionId: string) => Promise<void>;
       listSessions: (projectPath: string) => Promise<typeof SessionList.Encoded>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       restart: () => Promise<string | null>;

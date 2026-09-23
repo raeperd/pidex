@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("desktop", {
+  newSession: (projectPath: string, sessionId: string) =>
+    ipcRenderer.invoke("new-session", { projectPath, sessionId }),
   listSessions: (projectPath: string) => ipcRenderer.invoke("list-sessions", projectPath),
   restart: () => ipcRenderer.invoke("restart-backend"),
   onCrash: (onCrash: () => void) => {
