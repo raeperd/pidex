@@ -61,10 +61,10 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
             }
           : { role: "assistant", content: "Stock tools finished." };
         response.write(
-          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`,
+          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-6-luna", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`,
         );
         response.write(
-          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta: {}, finish_reason: call ? "tool_calls" : "stop" }] })}\n\n`,
+          `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-6-luna", choices: [{ index: 0, delta: {}, finish_reason: call ? "tool_calls" : "stop" }] })}\n\n`,
         );
         response.end("data: [DONE]\n\n");
       });
@@ -92,8 +92,8 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
             api: "openai-completions",
             models: [
               {
-                id: "gpt-5.6-luna",
-                name: "GPT-5.6 Luna",
+                id: "gpt-6-luna",
+                name: "GPT-6 Luna",
                 api: "openai-completions",
                 reasoning: false,
                 input: ["text"],
@@ -158,7 +158,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
       const conversation = page.getByRole("region", { name: "Conversation" });
       await expect(conversation).toBeVisible({ timeout: 15_000 });
       await expect(conversation.getByRole("status")).toHaveText("Idle");
-      await expect(conversation.getByText("GPT-5.6 Luna", { exact: true })).toBeVisible();
+      await expect(conversation.getByText("GPT-6 Luna", { exact: true })).toBeVisible();
       expect(requests).toHaveLength(0);
       // A loaded template would expand this slash command before the provider sees it.
       await page.getByRole("textbox", { name: "Prompt" }).fill("/global-prompt");
@@ -258,7 +258,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
           JSON.stringify(
             {
               defaultProvider: "openai",
-              defaultModel: "gpt-5.6-luna",
+              defaultModel: "gpt-6-luna",
               defaultProjectTrust: "always",
               packages:
                 scope === "global"

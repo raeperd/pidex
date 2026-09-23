@@ -28,7 +28,7 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
   );
   await writeFile(
     join(agentDir, "settings.json"),
-    JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-5.6-luna" }),
+    JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-luna" }),
   );
   const providerInputs: string[] = [];
   let providerRequests = 0;
@@ -40,7 +40,7 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
     response.writeHead(200, { "content-type": "text/event-stream" });
     const chunk = (delta: object, finish_reason: string | null = null) =>
       response.write(
-        `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-5.6-luna", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+        `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-6-luna", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
       );
     chunk({ role: "assistant", content: providerInputs.length === 1 ? "Saved pear" : "hello" });
     chunk({}, "stop");
@@ -66,7 +66,7 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
           api: "openai-completions",
           models: [
             {
-              id: "gpt-5.6-luna",
+              id: "gpt-6-luna",
               name: "Fixture",
               api: "openai-completions",
               reasoning: false,
