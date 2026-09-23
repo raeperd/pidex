@@ -124,13 +124,22 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
       const originalSend = prototype.send;
       const originalEmit = prototype.emit;
       let armed = false;
-      let dropping = false;
+      let requestId: number | undefined;
       let offline = false;
       let dropped = false;
       prototype.send = function (...args: unknown[]) {
-        if (armed && String(args[0]).includes('"tag":"ResumeSession"')) {
+        const data: unknown = JSON.parse(String(args[0]));
+        if (
+          armed &&
+          typeof data === "object" &&
+          data !== null &&
+          "tag" in data &&
+          data.tag === "ResumeSession" &&
+          "id" in data &&
+          typeof data.id === "number"
+        ) {
+          requestId = data.id;
           armed = false;
-          dropping = true;
         }
         return originalSend.apply(this, args);
       };
@@ -139,15 +148,19 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
           this.terminate();
           return true;
         }
-        if (event === "message" && dropping) {
+        if (event === "message" && requestId !== undefined) {
           const data = String(args[0]);
-          if (data.includes('"_tag":"Exit"') && data.includes('"_tag":"Success"')) {
+          if (
+            data.includes(`"requestId":${requestId}`) &&
+            data.includes('"_tag":"Exit"') &&
+            data.includes('"_tag":"Success"')
+          ) {
             offline = true;
-            dropping = false;
+            requestId = undefined;
             dropped = true;
             this.terminate();
+            return true;
           }
-          return true;
         }
         return originalEmit.apply(this, [event, ...args]);
       };
@@ -158,7 +171,6 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
         wasDropped: () => dropped,
         reconnect: () => {
           offline = false;
-          dropping = false;
         },
         restore: () => {
           prototype.send = originalSend;
