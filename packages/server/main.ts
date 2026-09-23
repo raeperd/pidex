@@ -638,7 +638,6 @@ const program = Effect.gen(function* () {
         });
       if (locator.sessionId === state.id) {
         if (locator.sessionFile !== state.sessionFile) return yield* failure;
-        if (!replacing && state.status === "idle") return state;
       }
       if (replacing || active || state.status !== "idle" || session.isStreaming)
         return yield* new ResumeError({
@@ -700,6 +699,8 @@ const program = Effect.gen(function* () {
           try: () => SessionManager.open(file, undefined, project),
           catch: () => failure,
         });
+        if (locator.sessionId === state.id && locator.sessionFile === state.sessionFile)
+          return state;
         const outcome = yield* Effect.tryPromise({
           try: () => runtime.switchSession(locator.sessionFile, { cwdOverride: project }),
           catch: () => {
