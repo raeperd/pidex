@@ -48,6 +48,7 @@
   let requestedNewFrom: string | undefined;
   let resumeTarget = $state.raw<typeof SessionLocator.Type>();
   let resumeUncertain = $state(false);
+  let recentProjects = $state.raw<readonly string[]>([]);
 
   let canSend = $derived(
     !sending &&
@@ -110,6 +111,20 @@
       connected = false;
     }),
   );
+
+  onMount(() => {
+    void loadRecentProjects();
+  });
+
+  async function loadRecentProjects() {
+    try {
+      const recent = await window.desktop.recentProjects();
+      recentProjects = recent.projects;
+      if (recent.error) error = recent.error;
+    } catch {
+      error = "Could not load recent projects. Check the metadata file and reopen the app.";
+    }
+  }
 
   async function restart() {
     restarting = true;
@@ -177,10 +192,35 @@
       const selected = await window.desktop.chooseProject();
       // The subscription may already have delivered newer updates while IPC was pending.
       if (!conversation) conversation = selected;
-      if (selected) crashed = false;
-    } catch {
+      if (selected) {
+        crashed = false;
+        await loadRecentProjects();
+      }
+    } catch (cause) {
       // Keep a specific startup/history error delivered by the subscription.
-      error ||= "Could not open the project. Please try again.";
+      error ||=
+        cause instanceof Error &&
+        /recent projects|metadata|Choose another folder/i.test(cause.message)
+          ? cause.message
+          : "Could not open the project. Please try again.";
+    } finally {
+      choosing = false;
+    }
+  }
+
+  async function openRecentProject(projectPath: string) {
+    choosing = true;
+    error = "";
+    try {
+      const selected = await window.desktop.openRecentProject(projectPath);
+      if (!conversation) conversation = selected;
+      crashed = false;
+      await loadRecentProjects();
+    } catch (cause) {
+      error ||=
+        cause instanceof Error
+          ? cause.message
+          : "Could not open the project. Choose another folder.";
     } finally {
       choosing = false;
     }
@@ -526,6 +566,27 @@
         onclick={chooseProject}
         disabled={choosing}>Choose project</button
       >
+      {#if recentProjects.length}
+        <section class="mt-8" aria-label="Recent projects">
+          <h3 class="mb-3 text-sm font-medium">Recent projects</h3>
+          <ul class="m-0 list-none space-y-2 p-0">
+            {#each recentProjects as path (path)}
+              <li>
+                <button
+                  class="w-full cursor-pointer rounded-lg border border-solid border-border bg-raised px-4 py-2 text-left text-sm text-foreground disabled:cursor-default disabled:text-muted"
+                  onclick={() => openRecentProject(path)}
+                  disabled={choosing}
+                  aria-label={path}
+                  title={path}
+                  >{path.split("/").filter(Boolean).at(-1) || "/"}<span
+                    class="block truncate text-xs text-muted">{path}</span
+                  ></button
+                >
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
       {#if choosing}<p role="status">Opening project…</p>{/if}
       {#if error}<p role="alert">{error}</p>{/if}
     </div>

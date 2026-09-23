@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Socket } from "effect/unstable/socket";
 import { NodeSocket } from "@effect/platform-node";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
@@ -9,10 +9,11 @@ import {
   ConversationApi,
   HistoryError,
   ProjectPath,
+  RecentProjects,
   SessionList,
   SessionLocator,
 } from "../api/index.js";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import {
   Cause,
   Deferred,
@@ -26,7 +27,7 @@ import {
   Stream,
 } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const program = Effect.gen(function* () {
@@ -155,6 +156,79 @@ const program = Effect.gen(function* () {
     Effect.runFork(shutdown);
   });
   let choosing = false;
+  const metadataPath = join(app.getPath("userData"), "metadata.json");
+  const Metadata = Schema.Struct({
+    version: Schema.Literal(1),
+    recentProjects: Schema.Array(ProjectPath),
+    sessionDrafts: Schema.optional(Schema.Unknown),
+  });
+  const loadMetadata = Effect.fn(function* () {
+    const contents = yield* Effect.tryPromise({
+      try: async () => {
+        try {
+          return await readFile(metadataPath, "utf8");
+        } catch (cause) {
+          if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return null;
+          throw cause;
+        }
+      },
+      catch: () =>
+        new DesktopError({
+          message: `Could not read recent projects at ${metadataPath}. Check file permissions and Retry.`,
+        }),
+    });
+    if (contents === null) {
+      const recentProjects: string[] = [];
+      return { version: 1, recentProjects };
+    }
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(contents),
+      catch: () =>
+        new DesktopError({
+          message: `Recent projects metadata at ${metadataPath} is unreadable. Restore the file and Retry.`,
+        }),
+    });
+    return yield* Schema.decodeUnknownEffect(Metadata)(parsed).pipe(
+      Effect.mapError(
+        () =>
+          new DesktopError({
+            message: `Recent projects metadata at ${metadataPath} is unreadable. Restore the file and Retry.`,
+          }),
+      ),
+    );
+  });
+  const saveRecentProject = Effect.fn(function* (canonical: string) {
+    const metadata = yield* loadMetadata();
+    const next = {
+      ...metadata,
+      recentProjects: [canonical, ...metadata.recentProjects.filter((path) => path !== canonical)],
+    };
+    const temporary = `${metadataPath}.${randomUUID()}.tmp`;
+    yield* Effect.tryPromise({
+      try: async () => {
+        await writeFile(temporary, JSON.stringify(next), { mode: 0o600 });
+        await rename(temporary, metadataPath);
+      },
+      catch: () =>
+        new DesktopError({
+          message: "Could not save recent projects. Check storage permissions and Retry.",
+        }),
+    }).pipe(Effect.ensuring(Effect.promise(() => unlink(temporary).catch(() => {}))));
+  });
+  const openProject = Effect.fn(function* (cwd: string) {
+    const canonical = yield* Effect.tryPromise({
+      try: () => realpath(cwd),
+      catch: () =>
+        new DesktopError({
+          message: `Could not open ${cwd}. Check that the folder exists and is accessible, or Choose another folder.`,
+        }),
+    });
+    yield* saveRecentProject(canonical);
+    project = canonical;
+    sessionFile = undefined;
+    interrupted = false;
+    return yield* startServer();
+  });
   let conversation: typeof Conversation.Type | undefined;
   let connectionError = "";
   let sendPrompt:
@@ -327,14 +401,44 @@ const program = Effect.gen(function* () {
           });
           const cwd = selection.filePaths[0];
           if (selection.canceled || !cwd) return null;
-          project = yield* Effect.tryPromise({
-            try: () => realpath(cwd),
-            catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
-          });
-          sessionFile = undefined;
-          interrupted = false;
-          return yield* startServer();
+          return yield* openProject(cwd);
         }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              choosing = false;
+            }),
+          ),
+        );
+      }),
+    ),
+  );
+  ipcMain.handle("recent-projects", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        return yield* loadMetadata().pipe(
+          Effect.map((metadata) => ({ projects: metadata.recentProjects, error: "" })),
+          Effect.catch((error) => Effect.succeed({ projects: [], error: error.message })),
+        );
+      }).pipe(Effect.flatMap(Schema.encodeEffect(RecentProjects))),
+    ),
+  );
+  ipcMain.handle("open-recent-project", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const path = yield* Schema.decodeUnknownEffect(ProjectPath)(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid project path" })),
+        );
+        if (conversation || choosing || quitting)
+          return yield* new DesktopError({ message: "Project selection is unavailable" });
+        const metadata = yield* loadMetadata();
+        if (!metadata.recentProjects.includes(path))
+          return yield* new DesktopError({ message: "Project is not in recent projects" });
+        choosing = true;
+        return yield* openProject(path).pipe(
           Effect.ensuring(
             Effect.sync(() => {
               choosing = false;
