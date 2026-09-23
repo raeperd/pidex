@@ -74,6 +74,31 @@ test("#193 reopens a recent project after relaunch without sending a prompt", as
   await expect.poll(() => second.process.exitCode).toBe(0);
 });
 
+test("#193 opens a recent project before resuming its saved session", async ({ lifecycle }) => {
+  const first = await lifecycle.launch();
+  await first.page.getByRole("textbox", { name: "Prompt" }).fill("Remember this project");
+  await first.page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("I remember this project.");
+  await expect(first.page.getByRole("status")).toHaveText("Idle");
+  await first.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => first.process.exitCode).toBe(0);
+
+  const second = await lifecycle.launch(false);
+  const recent = second.page.getByRole("region", { name: "Recent projects" });
+  await recent.getByRole("button", { name: lifecycle.project }).click();
+  const sessions = second.page.getByRole("region", { name: "Saved sessions" });
+  await expect(sessions.getByRole("radio")).toHaveCount(1);
+  await sessions.getByRole("radio").check();
+  await sessions.getByRole("button", { name: "Resume session" }).click();
+  await expect(second.page.getByRole("region", { name: "Messages" })).toContainText(
+    "I remember this project.",
+  );
+  expect(lifecycle.requests).toHaveLength(1);
+});
+
 test("#193 canonical aliases share one recent entry and cancelling the picker changes nothing", async ({
   lifecycle,
 }) => {
