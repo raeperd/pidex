@@ -28,6 +28,11 @@ export const SessionList = Schema.Struct({
   errors: Schema.Array(HistoryError),
 });
 
+export const RecentProjects = Schema.Struct({
+  projects: Schema.Array(ProjectPath),
+  error: Schema.String,
+});
+
 const Entry = Schema.Union([
   Schema.Struct({
     // User or assistant text message.
