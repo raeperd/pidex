@@ -2,6 +2,8 @@
 
 A macOS Electron app with a Svelte renderer. Choose a project using your existing Pi setup to open a fresh idle conversation. Quit closes the Pi session and its server before Electron exits.
 
+Open the [v0.0.2 HTML design](docs/v0.0.2-design.html) in a browser to explore recent projects, saved sessions, and composer drafts. The standalone prototype includes 14 preview states and design references. It uses sample data and makes no agent requests.
+
 Use Node.js 24 and pnpm 11.16.0. From the repository root:
 
 ```sh
