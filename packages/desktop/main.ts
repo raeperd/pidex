@@ -165,6 +165,7 @@ const program = Effect.gen(function* () {
     Effect.runFork(shutdown);
   });
   let choosing = false;
+  let pickedProject: string | undefined;
   const metadataPath = join(app.getPath("userData"), "metadata.json");
   const Metadata = Schema.Struct({
     version: Schema.Literal(1),
@@ -278,6 +279,8 @@ const program = Effect.gen(function* () {
     | undefined;
   ipcMain.handle("switch-project", (event, value: unknown) =>
     Effect.runPromise(
+      // Validate, serialize, and reconcile the selected project at this IPC boundary.
+      // oxlint-disable-next-line complexity
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
@@ -290,15 +293,28 @@ const program = Effect.gen(function* () {
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid project target" })),
         );
-        if (
-          !switchProject ||
-          quitting ||
-          switching ||
-          pendingResume ||
-          pendingSwitch ||
-          !conversation
-        )
+        if (!switchProject || quitting || switching || pendingResume || !conversation)
           return yield* new DesktopError({ message: "Project selection is unavailable" });
+        if (pendingSwitch && pendingSwitch !== target.projectPath)
+          return yield* new DesktopError({
+            message: "Resolve the pending switch before selecting another project.",
+          });
+        if (pickedProject !== target.projectPath) {
+          const metadata = yield* loadMetadata();
+          if (!metadata.recentProjects.includes(target.projectPath))
+            return yield* new DesktopError({
+              message: "Choose this folder or select it from recent projects first.",
+            });
+        }
+        const retrying = pendingSwitch !== undefined;
+        if (
+          retrying &&
+          conversation.projectPath === target.projectPath &&
+          conversation.status === "idle"
+        ) {
+          pendingSwitch = undefined;
+          return { conversation, error: "", uncertain: false };
+        }
         if (
           conversation.projectPath !== target.currentProjectPath ||
           conversation.id !== target.currentSessionId
@@ -313,6 +329,9 @@ const program = Effect.gen(function* () {
           target.currentProjectPath,
           target.currentSessionId,
         ).pipe(
+          Effect.catch((error) =>
+            retrying ? Effect.succeed<"uncertain">("uncertain") : Effect.fail(error),
+          ),
           Effect.tapError(() =>
             Effect.sync(() => {
               pendingSwitch = undefined;
@@ -340,6 +359,7 @@ const program = Effect.gen(function* () {
           };
         pendingSwitch = undefined;
         pendingSwitchLocator = undefined;
+        pickedProject = undefined;
         project = current.projectPath;
         sessionFile = current.sessionFile;
         yield* rememberProject(current.projectPath);
@@ -352,6 +372,30 @@ const program = Effect.gen(function* () {
       ),
     ),
   );
+  ipcMain.handle("pick-project", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const activeWindow = window;
+        if (!activeWindow || quitting || switching || choosing) return null;
+        const selection = yield* Effect.tryPromise({
+          try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
+          catch: () => new DesktopError({ message: "Could not choose a project" }),
+        });
+        const path = selection.filePaths[0];
+        if (selection.canceled || !path) return null;
+        pickedProject = yield* Effect.tryPromise({
+          try: () => realpath(path),
+          catch: () =>
+            new DesktopError({
+              message: "Could not open that folder. Check its location and Retry.",
+            }),
+        });
+        return pickedProject;
+      }),
+    ),
+  );
   ipcMain.handle("new-session", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -362,7 +406,7 @@ const program = Effect.gen(function* () {
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session target" })),
         );
-        if (!startNewSession || quitting || switching || pendingResume)
+        if (!startNewSession || quitting || switching || pendingResume || pendingSwitch)
           return yield* new DesktopError({ message: "No connected conversation" });
         switching = true;
         yield* startNewSession(target.projectPath, target.sessionId).pipe(
@@ -388,7 +432,7 @@ const program = Effect.gen(function* () {
         const locator = yield* Schema.decodeUnknownEffect(SessionLocator)(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
         );
-        if (!resumeSession || quitting || switching)
+        if (!resumeSession || quitting || switching || pendingSwitch)
           return yield* new DesktopError({ message: "No connected conversation" });
         if (
           pendingResume &&
