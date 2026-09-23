@@ -1,0 +1,1647 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pidex · v0.0.2 design</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #101113;
+        --sidebar: #131416;
+        --surface: #101113;
+        --white: #ffffff;
+        --raised: #191b20;
+        --accent-text: #8ab4ff;
+        --hover: #212329;
+        --line: #303237;
+        --ink: #ececee;
+        --secondary: #b0b5bf;
+        --muted: #999ba3;
+        /* Match origin/main app.css at aa34f44; extra colors support v0.0.2 states. */
+        --accent: #3268ed;
+        --focus: #00d7ff;
+        --stop: #e63844;
+        --info: #8abeb7;
+        --heading: #f0c674;
+        --success: #b5bd68;
+        --user: #212329;
+        --inline-code: #1d2426;
+        --shadow-composer: inset 0 1px 0 #ffffff04, 0 8px 24px #00000014;
+        --shadow-action: inset 0 1px 1px #ffffff30, 0 2px 4px #00000030;
+        --accent-hover: #1e56d6;
+        --accent-soft: #263652;
+        --warning: #f0c57e;
+        --warning-soft: #382f20;
+        --danger: #e18b8b;
+        --danger-soft: #3b2628;
+        --s1: 4px;
+        --s2: 8px;
+        --s3: 12px;
+        --s4: 16px;
+        --s6: 24px;
+        --s8: 32px;
+        --s12: 48px;
+        --s16: 64px;
+        --xs: 12px;
+        --sm: 14px;
+        --base: 16px;
+        --lg: 20px;
+        --xl: 24px;
+        --radius: 8px;
+        --radius-lg: 16px;
+        --shadow: 0 12px 40px #00000030, 0 2px 6px #00000020;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: var(--sm);
+        line-height: 1.6;
+        color: var(--ink);
+        background: var(--canvas);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      button,
+      select,
+      textarea {
+        font: inherit;
+        color: inherit;
+      }
+      button,
+      select {
+        cursor: pointer;
+      }
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--s2);
+        border: 0;
+        background: transparent;
+        border-radius: var(--radius);
+        padding: var(--s2) var(--s3);
+        min-height: 36px;
+        text-align: left;
+      }
+      button:hover:not(:disabled) {
+        background: var(--hover);
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+      }
+      a {
+        color: var(--accent-text);
+        text-underline-offset: 3px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: var(--xl);
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -0.8px;
+      }
+      h2 {
+        font-size: var(--lg);
+        font-weight: 600;
+      }
+      h3 {
+        font-size: var(--base);
+        font-weight: 600;
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: var(--xs);
+      }
+      code {
+        color: var(--info);
+        padding: 2px var(--s1);
+        background: var(--inline-code);
+        border-radius: var(--s1);
+        overflow-wrap: anywhere;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .secondary {
+        color: var(--secondary);
+      }
+      .small {
+        font-size: var(--xs);
+      }
+      .eyebrow {
+        font-size: var(--xs);
+        font-weight: 600;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+        color: var(--secondary);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: var(--s2);
+      }
+      .between {
+        justify-content: space-between;
+      }
+      .icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .primary {
+        background: var(--accent);
+        color: var(--white);
+        font-weight: 500;
+      }
+      .primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      .outline {
+        border: 1px solid var(--line);
+        background: var(--raised);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--s1);
+        padding: 2px var(--s2);
+        border-radius: var(--s1);
+        font-size: var(--xs);
+        white-space: nowrap;
+        color: var(--secondary);
+        background: var(--hover);
+      }
+      .badge.amber {
+        background: var(--warning-soft);
+        color: var(--warning);
+      }
+      .review {
+        min-height: 72px;
+        padding: var(--s4) var(--s8);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s4);
+      }
+      .review-title {
+        font-weight: 600;
+      }
+      .review-title span {
+        color: var(--secondary);
+        font-weight: 400;
+        margin-left: var(--s3);
+      }
+      .review-controls {
+        display: flex;
+        align-items: center;
+        gap: var(--s3);
+      }
+      select {
+        max-width: 230px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: var(--s2);
+      }
+      .window {
+        display: flex;
+        height: calc(100dvh - 124px);
+        min-height: 560px;
+        max-width: 1600px;
+        margin: 0 var(--s6);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow);
+      }
+      .sidebar {
+        width: 256px;
+        flex-shrink: 0;
+        background: var(--sidebar);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+      .brand {
+        height: 44px;
+        flex-shrink: 0;
+        padding: var(--s1) 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: var(--xs);
+        font-weight: 500;
+      }
+      .side-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 var(--s3) var(--s6);
+      }
+      .side-home {
+        justify-content: flex-start;
+        width: 100%;
+        color: var(--secondary);
+        margin-bottom: var(--s6);
+      }
+      .side-label {
+        padding: 0 var(--s3);
+        margin-bottom: var(--s2);
+      }
+      .project-button {
+        width: 100%;
+        justify-content: flex-start;
+        font-weight: 500;
+      }
+      .project-button .end {
+        margin-left: auto;
+      }
+      .project-path {
+        padding: 0 var(--s3);
+        overflow-wrap: anywhere;
+        margin: 0 0 var(--s4);
+      }
+      .new-button {
+        width: 100%;
+        justify-content: flex-start;
+        margin: var(--s2) 0 var(--s6);
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .session-button {
+        width: 100%;
+        display: block;
+        margin-bottom: var(--s1);
+        padding: var(--s3);
+      }
+      .session-button[aria-current="page"] {
+        background: var(--accent-soft);
+        color: var(--ink);
+      }
+      .session-title {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+      }
+      .session-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--s2);
+        margin-top: var(--s1);
+        font-size: var(--xs);
+        color: var(--secondary);
+      }
+      .main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+      .topbar {
+        height: 40px;
+        font-size: var(--xs);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s3);
+        padding: var(--s2) var(--s6);
+        border-bottom: 1px solid var(--line);
+      }
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: var(--s3);
+        min-width: 0;
+      }
+      .breadcrumb strong {
+        font-weight: 500;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .mobile-nav {
+        display: none;
+      }
+      .content {
+        overflow: auto;
+        min-height: 0;
+        flex: 1;
+      }
+      .landing {
+        width: min(100%, 720px);
+        margin: 0 auto;
+        padding: var(--s16) var(--s8);
+      }
+      .landing > p {
+        margin-top: var(--s3);
+        color: var(--secondary);
+        font-size: var(--base);
+        max-width: 55ch;
+      }
+      .landing-heading {
+        margin: var(--s12) 0 var(--s4);
+      }
+      .project-list {
+        border-top: 1px solid var(--line);
+      }
+      .project-row {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: var(--s4);
+        border-radius: 0;
+        padding: var(--s6) var(--s2);
+        border-bottom: 1px solid var(--line);
+      }
+      .folder-tile {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--raised);
+        color: var(--secondary);
+        flex-shrink: 0;
+      }
+      .project-row .description {
+        min-width: 0;
+        flex: 1;
+      }
+      .project-row strong {
+        display: block;
+        font-size: var(--base);
+        font-weight: 500;
+      }
+      .project-row .path {
+        margin-top: var(--s1);
+        display: block;
+        color: var(--secondary);
+        overflow-wrap: anywhere;
+      }
+      .project-row .when {
+        font-size: var(--xs);
+        color: var(--muted);
+      }
+      .footnote {
+        margin-top: var(--s6);
+        font-size: var(--xs);
+        color: var(--muted);
+      }
+      .empty {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: var(--s8);
+        gap: var(--s3);
+      }
+      .empty .empty-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-lg);
+        background: var(--sidebar);
+        display: grid;
+        place-items: center;
+        margin-bottom: var(--s3);
+        color: var(--secondary);
+      }
+      .empty p {
+        color: var(--secondary);
+        max-width: 44ch;
+      }
+      .empty button {
+        margin-top: var(--s3);
+      }
+      .transcript {
+        max-width: 768px;
+        padding: var(--s8) var(--s8) var(--s12);
+        margin: auto;
+      }
+      .date-divider {
+        text-align: center;
+        font-size: var(--xs);
+        color: var(--muted);
+        margin-bottom: var(--s8);
+      }
+      .user-message {
+        width: fit-content;
+        max-width: 88%;
+        padding: var(--s3) var(--s4);
+        background: var(--user);
+        border-radius: 16px 16px 4px 16px;
+        margin: 0 0 var(--s8) auto;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+      .assistant-label {
+        color: var(--info);
+        font-size: var(--xs);
+        font-weight: 500;
+        margin-bottom: var(--s2);
+      }
+      .assistant-copy {
+        font-size: var(--sm);
+        line-height: 1.6;
+      }
+      .assistant-copy p {
+        max-width: 66ch;
+      }
+      .assistant-copy p + p {
+        margin-top: var(--s4);
+      }
+      .assistant-copy h3 {
+        color: var(--heading);
+        font-weight: 500;
+        margin: var(--s6) 0 var(--s2);
+      }
+      .assistant-copy ul {
+        padding-left: var(--s6);
+        margin: var(--s3) 0 var(--s6);
+      }
+      .tool {
+        margin: var(--s2) 0;
+        font-size: var(--xs);
+        color: var(--muted);
+      }
+      .tool summary {
+        cursor: pointer;
+        padding: var(--s2) var(--s3);
+        border-radius: 6px;
+        overflow-wrap: anywhere;
+      }
+      .tool summary:hover,
+      .tool[open] summary {
+        background: var(--raised);
+      }
+      .tool strong {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .tool-result {
+        color: var(--success);
+        float: right;
+        margin-left: var(--s3);
+      }
+      .tool-body {
+        margin: var(--s1) var(--s3) var(--s3);
+        padding: var(--s3) var(--s4);
+        background: var(--raised);
+        border-radius: 6px;
+      }
+      .tool-body h4 {
+        margin: 0 0 var(--s2);
+        font-size: var(--xs);
+        font-weight: 500;
+      }
+      .tool pre {
+        margin: 0 0 var(--s4);
+        color: var(--ink);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .tool pre:last-child {
+        margin-bottom: 0;
+      }
+      .completion {
+        margin-top: var(--s6);
+        font-size: var(--xs);
+        color: var(--secondary);
+      }
+      .composer-area {
+        padding: var(--s3) var(--s8) var(--s6);
+        flex-shrink: 0;
+        width: 100%;
+        max-width: 768px;
+        margin: auto;
+      }
+      .composer {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 20px 20px var(--s4);
+        background: var(--sidebar);
+        box-shadow: var(--shadow-composer);
+      }
+      .composer:has(textarea:focus-visible) {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+      }
+      textarea {
+        display: block;
+        width: 100%;
+        min-height: 104px;
+        max-height: min(30dvh, 240px);
+        field-sizing: content;
+        resize: none;
+        overflow: auto;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        font-size: var(--base);
+        line-height: 1.6;
+        caret-color: var(--focus);
+      }
+      textarea:focus-visible {
+        outline: none;
+      }
+      textarea::placeholder {
+        color: var(--muted);
+      }
+      .composer-bottom {
+        display: flex;
+        align-items: center;
+        gap: var(--s3);
+        margin-top: var(--s4);
+      }
+      .composer-context {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--s2) var(--s3);
+        min-width: 0;
+        color: var(--muted);
+        font-size: var(--xs);
+      }
+      .run-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: var(--s3);
+        border-left: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      .run-status::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .run-status[data-active="true"]::before {
+        background: var(--focus);
+      }
+      #submit-message {
+        margin-left: auto;
+        width: 32px;
+        height: 32px;
+        min-height: 32px;
+        padding: 0;
+        flex-shrink: 0;
+        border-radius: 50%;
+        box-shadow: var(--shadow-action);
+      }
+      #submit-message .icon {
+        width: 16px;
+        height: 16px;
+        stroke-width: 2;
+      }
+      #submit-message[data-action="stop"] {
+        background: var(--stop);
+      }
+      #submit-message:hover:not(:disabled) {
+        filter: brightness(1.12);
+      }
+      #submit-message:active:not(:disabled) {
+        transform: translateY(1px);
+      }
+      .notice {
+        padding: var(--s3) var(--s4);
+        border-radius: var(--radius);
+        background: var(--warning-soft);
+        color: var(--warning);
+        margin: var(--s4) var(--s8) 0;
+        font-size: var(--xs);
+      }
+      .notice.error {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .notice button {
+        min-height: 28px;
+        padding: var(--s1) var(--s2);
+        text-decoration: underline;
+        color: inherit;
+      }
+      .notice p {
+        margin-top: var(--s1);
+      }
+      .review-footer {
+        padding: var(--s3) var(--s8);
+        display: flex;
+        justify-content: space-between;
+        gap: var(--s4);
+        font-size: var(--xs);
+        color: var(--secondary);
+      }
+      dialog {
+        width: min(640px, calc(100vw - 32px));
+        max-height: 85dvh;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        padding: var(--s8);
+        color: var(--ink);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      dialog::backdrop {
+        background: #00000080;
+      }
+      dialog h3 {
+        margin: var(--s6) 0 var(--s2);
+      }
+      dialog p,
+      dialog li {
+        color: var(--secondary);
+        margin-top: var(--s2);
+      }
+      dialog ul {
+        padding-left: var(--s6);
+      }
+      dialog .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--s2);
+        margin-top: var(--s6);
+      }
+      .skeleton {
+        height: 12px;
+        background: var(--hover);
+        border-radius: var(--s1);
+        margin: var(--s4) 0;
+        width: 80%;
+      }
+      .skeleton:nth-child(even) {
+        width: 55%;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (min-width: 1650px) {
+        .window {
+          margin-inline: auto;
+        }
+      }
+      @media (max-width: 1000px) {
+        .sidebar {
+          width: 224px;
+        }
+        .topbar,
+        .transcript {
+          padding-inline: var(--s6);
+        }
+        .landing {
+          padding: var(--s12) var(--s6);
+        }
+        .review-title span,
+        .review-footer span:last-child {
+          display: none;
+        }
+      }
+      @media (max-width: 700px) {
+        .review {
+          padding: var(--s3);
+          flex-wrap: wrap;
+          gap: var(--s2);
+        }
+        .review-controls {
+          width: 100%;
+          justify-content: space-between;
+          gap: var(--s2);
+        }
+        .review-controls label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+        .review-controls select {
+          flex: 1;
+          min-width: 0;
+          max-width: none;
+        }
+        .review-controls button {
+          white-space: nowrap;
+        }
+        .window {
+          margin: 0;
+          border-radius: 0;
+          border-inline: 0;
+          height: calc(100dvh - 144px);
+          min-height: 480px;
+          position: relative;
+        }
+        .sidebar {
+          display: none;
+          position: absolute;
+          inset: 0 auto 0 0;
+          width: min(288px, 85%);
+          z-index: 2;
+          box-shadow: 16px 0 48px #00000060;
+        }
+        .window.nav-open .sidebar {
+          display: flex;
+        }
+        .mobile-nav {
+          display: inline-flex;
+        }
+        .topbar {
+          height: 44px;
+          padding: 0 var(--s3);
+        }
+        .breadcrumb {
+          gap: var(--s2);
+        }
+        .breadcrumb > .muted {
+          display: none;
+        }
+        .landing {
+          padding: var(--s8) var(--s6);
+        }
+        .landing h1 {
+          font-size: 24px;
+        }
+        .landing-heading {
+          margin-top: var(--s8);
+        }
+        .project-row {
+          gap: var(--s3);
+          padding-block: var(--s4);
+        }
+        .project-row .when {
+          display: none;
+        }
+        .transcript {
+          padding: var(--s6) var(--s4);
+        }
+        .user-message {
+          max-width: 100%;
+        }
+        .composer-area {
+          padding: var(--s3) var(--s4);
+        }
+        .notice {
+          margin-inline: var(--s4);
+        }
+        .review-footer {
+          padding: var(--s2) var(--s3);
+        }
+      }
+      .project-button[aria-pressed="true"] {
+        background: var(--hover);
+      }
+      .project-sessions {
+        margin: var(--s1) 0 var(--s3) var(--s6);
+        padding-left: var(--s2);
+        border-left: 1px solid var(--line);
+      }
+      .project-sessions .session-button {
+        padding: var(--s2);
+      }
+      .start-panel .project-name {
+        text-decoration: underline dotted;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 5px;
+        color: var(--accent-text);
+        overflow-wrap: anywhere;
+      }
+      .side-label button {
+        padding: var(--s1);
+        min-height: 28px;
+        width: 28px;
+      }
+      .floating-nav {
+        position: absolute;
+        top: var(--s3);
+        left: var(--s3);
+        z-index: 1;
+      }
+      .start-content {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .start-panel {
+        width: min(100%, 768px);
+        padding: var(--s12) var(--s8);
+        margin-top: -72px;
+      }
+      .start-panel h1 {
+        font-size: 24px;
+        font-weight: 500;
+        text-align: center;
+        margin-bottom: var(--s8);
+      }
+      .start-panel .composer-area {
+        padding: 0;
+      }
+
+      #composer-project {
+        background: transparent;
+        border: none;
+        padding: var(--s1);
+        max-width: 180px;
+        font-size: var(--xs);
+      }
+      @media (max-width: 700px) {
+        .start-panel {
+          padding: var(--s8) var(--s4);
+          margin-top: -32px;
+        }
+        .start-panel h1 {
+          font-size: 24px;
+        }
+      }
+      .project-heading {
+        display: flex;
+        align-items: center;
+        gap: var(--s1);
+      }
+      .project-heading .project-button {
+        min-width: 0;
+        flex: 1;
+      }
+      .project-refresh {
+        padding: var(--s1);
+        width: 28px;
+        min-height: 28px;
+        flex-shrink: 0;
+        color: var(--muted);
+      }
+      .project-refresh .icon {
+        width: 14px;
+        height: 14px;
+      }
+      ::selection {
+        color: #f4f6ff;
+        background: #344669;
+      }
+      @media (max-width: 520px) {
+        .composer {
+          padding: var(--s4);
+        }
+        #submit-message {
+          width: 36px;
+          height: 36px;
+          min-height: 36px;
+        }
+        .tool-result {
+          float: none;
+          display: block;
+          margin: var(--s1) 0 0;
+        }
+      }
+      @media (pointer: coarse) {
+        #submit-message {
+          width: 44px;
+          height: 44px;
+          min-height: 44px;
+        }
+        .tool summary {
+          min-height: 44px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+      <defs>
+        <symbol id="folder" viewBox="0 0 24 24"><path d="M3 7V5h6l2 2h10v13H3Z" /></symbol>
+        <symbol id="compose" viewBox="0 0 24 24">
+          <path d="M12 5H6a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-6" />
+          <path d="m15 4 3-3 4 4-3 3-9 9-5 1 1-5Z M15 4l4 4" />
+        </symbol>
+        <symbol id="stop" viewBox="0 0 24 24">
+          <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="refresh" viewBox="0 0 24 24">
+          <path d="M20 6v6h-6M4 18v-6h6M6 6a8 8 0 0 1 14 6M4 12a8 8 0 0 0 14 6" />
+        </symbol>
+        <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+        <symbol id="arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></symbol>
+        <symbol id="send" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6" /></symbol>
+        <symbol id="home" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="3" />
+          <path d="M9 4v16" />
+        </symbol>
+        <symbol id="chat" viewBox="0 0 24 24">
+          <path d="M20 15a3 3 0 0 1-3 3H9l-5 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z" />
+          <path d="M8 8h8M8 12h5" />
+        </symbol>
+        <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      </defs>
+    </svg>
+    <header class="review">
+      <div class="review-title">Pidex <span>/</span> v0.0.2 <span>Returning to work</span></div>
+      <div class="review-controls">
+        <label for="scenario">Preview state</label>
+        <select id="scenario">
+          <option value="recent">01 · Recent projects</option>
+          <option value="sessions">02 · Saved sessions</option>
+          <option value="resumed">03 · Resumed session</option>
+          <option value="new">04 · New session</option>
+          <option value="running">05 · Running</option>
+          <option value="stopping">06 · Stopping</option>
+          <option value="loading">07 · Loading history</option>
+          <option value="empty">08 · Empty project</option>
+          <option value="missing">09 · Missing project</option>
+          <option value="unreadable">10 · Unreadable session</option>
+          <option value="switch-error">11 · Switch failed</option>
+          <option value="draft-error">12 · Draft save failed</option>
+          <option value="dense">13 · Long session list</option>
+          <option value="history-error">14 · History unavailable</option>
+        </select>
+        <button id="notes-button" class="outline">Design notes</button>
+      </div>
+    </header>
+    <div class="window" id="window">
+      <aside class="sidebar" aria-label="Project and session navigation">
+        <div class="brand">
+          pidex<button class="mobile-nav" id="close-nav" aria-label="Close navigation">×</button>
+        </div>
+        <nav class="side-body" id="navigation"></nav>
+      </aside>
+      <main class="main" id="main"></main>
+    </div>
+    <footer class="review-footer">
+      <span>Interactive design prototype · Sample data · No agent requests</span
+      ><span>Choose a state above, or follow the flow inside the window.</span>
+    </footer>
+    <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+    <dialog id="notes" aria-labelledby="notes-title">
+      <div class="row between">
+        <h2 id="notes-title">Returning to work</h2>
+        <button data-close aria-label="Close design notes">×</button>
+      </div>
+      <p>
+        A developer opens a project, chooses a saved session, and continues with the right history
+        and unsent text. The primary action is Resume, then Send.
+      </p>
+      <h3>Direction</h3>
+      <p>
+        The current Pidex palette, cyan focus rings, and blue actions. A 256px sidebar keeps
+        sessions close; conversation text stays within 768px. System typography, two weights, three
+        text tones, 8px controls, 16px composition surfaces establish hierarchy. The composer
+        follows main with a 24px radius, a circular blue Send action, a red Stop action, and
+        read-only model and run status.
+      </p>
+      <h3>Behavior and scope</h3>
+      <ul>
+        <li>
+          Launch shows a centered composer with recent projects in the sidebar. Selecting a project
+          keeps the other projects visible and nests its sessions directly beneath that project. The
+          composer starts a new session; selecting an existing session explicitly opens its history.
+          Sessions are ordered by latest activity.
+        </li>
+        <li>
+          Only one session runs. Navigation is disabled through Running and Stopping. A failed
+          destination load keeps Send disabled until Retry succeeds.
+        </li>
+        <li>
+          Draft labels belong to each session. New sessions get an identity before their first send.
+          Drafts remain editable during a run.
+        </li>
+        <li>
+          The demo stores only sample composer drafts in browser storage. Sending simulates
+          acceptance and a run. Reload returns to recent projects. Native folder selection, Pi
+          history, atomic disk writes, and lifecycle guarantees belong to the implementation.
+        </li>
+        <li>
+          The state picker is a review tool outside the app. It can reset a simulation. No rename,
+          model picker, terminal, file tree, or concurrent agents are proposed.
+        </li>
+      </ul>
+      <h3>Milestone coverage</h3>
+      <p>
+        <a href="https://github.com/raeperd/pidex/milestone/2">v0.0.2</a>: #193 recent and missing
+        projects; #191 lists, empty and unreadable history; #194 resume and load failure; #192 new
+        session; #195 running, stopping and failed switching; #196 isolated drafts and save failure
+        with explicit discard.
+      </p>
+      <h3>Current repository baseline</h3>
+      <p>
+        Aligned with origin/main at
+        <a href="https://github.com/raeperd/pidex/commit/aa34f44c10c7e8e722b3131f4840cf7456d0c27a"
+          >aa34f44</a
+        >, fetched September 23, 2026. The palette comes from
+        <a
+          href="https://github.com/raeperd/pidex/blob/aa34f44c10c7e8e722b3131f4840cf7456d0c27a/packages/web/src/app.css"
+          >app.css</a
+        >; the composer and transcript follow
+        <a
+          href="https://github.com/raeperd/pidex/blob/aa34f44c10c7e8e722b3131f4840cf7456d0c27a/docs/design/v0.0.1-ui-preview.html"
+          >the existing v0.0.1 preview</a
+        >
+        and the implemented Svelte components. The configured model is represented by sample text,
+        not a model picker.
+      </p>
+      <p>
+        Main already provides session search, refresh, and detail inspection. This v0.0.2 proposal
+        keeps refresh and omits search. It previews explicit resume, nested project navigation, and
+        persistent drafts. Main's details-only footer is not carried into the proposed resume flow.
+      </p>
+      <h3>References and decisions</h3>
+      <ul>
+        <li>
+          <a
+            href="https://github.com/pingdotgg/t3code/blob/aff9318bf46beaf05cc7155b428d3f0b8711efd2/docs/user/thread-sidebar.md"
+            >T3 Code thread workflow</a
+          >: separate tasks have separate conversations; tool output expands in place. Pidex keeps
+          explicit resume and milestone-defined activity ordering.
+        </li>
+        <li>
+          <a
+            href="https://github.com/pingdotgg/t3code/blob/aff9318bf46beaf05cc7155b428d3f0b8711efd2/apps/web/src/composerDraftStore.test.ts#L203"
+            >T3 Code draft persistence tests</a
+          >: restore unsent text to its conversation. Fresh main snapshot inspected 2026-09-22 at
+          12:22 UTC, commit aff9318bf46beaf05cc7155b428d3f0b8711efd2. Source inspection only;
+          upstream tests were not run.
+        </li>
+        <li>
+          <a href="https://mobbin.com/screens/aab5456d-9a40-4bbe-a676-5e66bf1f7e05"
+            >Cursor on Mobbin</a
+          >: a narrow, quiet sidebar and a bounded composer give the task room.
+        </li>
+        <li>
+          <a href="https://mobbin.com/screens/66d10150-9b13-4062-b96f-84e50ec10fc1"
+            >Claude on Mobbin</a
+          >: readable conversation measure and a persistent follow-up composer. The conversation
+          measure and composer placement inform this dark-mode design.
+        </li>
+        <li>
+          <a
+            href="https://github.com/raeperd/pidex/blob/2571ee5/docs/improvements/architecture-review.html"
+            >Previous repository HTML</a
+          >: preserve the self-contained, browser-reviewable artifact format. This proposal uses
+          local CSS and no external assets.
+        </li>
+      </ul>
+      <div class="actions"><button class="primary" data-close>Back to design</button></div>
+    </dialog>
+    <dialog id="folder-dialog" aria-labelledby="folder-title">
+      <h2 id="folder-title">Add project</h2>
+      <p>
+        The desktop app opens the macOS folder picker here. For this prototype, choose the sample
+        project to preview a project with no saved sessions.
+      </p>
+      <div class="project-row">
+        <span class="folder-tile"
+          ><svg class="icon" aria-hidden="true"><use href="#folder" /></svg
+        ></span>
+        <div><strong>website</strong><span class="mono secondary">~/Projects/website</span></div>
+      </div>
+      <div class="actions">
+        <button data-close>Cancel</button
+        ><button class="primary" id="choose-sample">Open sample project</button>
+      </div>
+    </dialog>
+    <dialog id="discard-dialog" aria-labelledby="discard-title">
+      <h2 id="discard-title">This draft hasn't been saved</h2>
+      <p>
+        Your text is still here. Stay to copy it or retry saving. Discarding lets you leave this
+        session and removes its unsaved text.
+      </p>
+      <div class="actions">
+        <button data-close>Keep editing</button
+        ><button class="outline" id="discard">Discard draft and leave</button>
+      </div>
+    </dialog>
+    <script>
+      // This is a standalone UI simulation, not application persistence or a Pi client.
+      const projects = [
+        { id: "pidex", name: "pidex", path: "~/Projects/pidex", when: "Just now" },
+        { id: "dotfiles", name: "dotfiles", path: "~/Projects/dotfiles", when: "Yesterday" },
+        { id: "website", name: "website", path: "~/Projects/website", when: "3 days ago" },
+      ];
+      const sessions = {
+        pidex: [
+          {
+            id: "restore",
+            title: "Restore composer drafts",
+            time: "12 min ago",
+            preview: "Keep unsent text when switching sessions.",
+          },
+          {
+            id: "history",
+            title: "List saved sessions",
+            time: "1 hr ago",
+            preview: "Show the saved sessions for the selected project.",
+          },
+          {
+            id: "navigation",
+            title: "Project navigation",
+            time: "Yesterday",
+            preview: "Add recent projects to the launch screen.",
+          },
+          {
+            id: "unreadable",
+            title: "Session from Sep 19",
+            time: "Sep 19",
+            preview: "This session could not be read.",
+            unreadable: true,
+          },
+        ],
+        dotfiles: [
+          {
+            id: "shell",
+            title: "Simplify shell startup",
+            time: "Yesterday",
+            preview: "Find what is slowing down my shell startup.",
+          },
+        ],
+        website: [],
+      };
+      let project = "pidex";
+      let selected = null;
+      let state = "recent";
+      let timer;
+      let pendingNavigation;
+      let storageFailed = false;
+      let stopped = false;
+      const drafts = readDrafts();
+      const main = document.querySelector("#main");
+      const navigation = document.querySelector("#navigation");
+      const scenario = document.querySelector("#scenario");
+      const windowFrame = document.querySelector("#window");
+      const notes = document.querySelector("#notes");
+      document.querySelector("#notes-button").onclick = () => notes.showModal();
+      document
+        .querySelectorAll("[data-close]")
+        .forEach((button) => (button.onclick = () => button.closest("dialog").close()));
+      document.querySelector("#close-nav").onclick = () => toggleNavigation(false);
+      document.querySelector("#choose-sample").onclick = () => {
+        document.querySelector("#folder-dialog").close();
+        openProject("website");
+      };
+      document.querySelector("#discard").onclick = () => {
+        drafts[draftKey()] = "";
+        storageFailed = false;
+        document.querySelector("#discard-dialog").close();
+        saveDrafts();
+        const destination = pendingNavigation;
+        pendingNavigation = undefined;
+        state = "resumed";
+        destination?.();
+      };
+      scenario.onchange = () => {
+        toggleNavigation(false);
+        clearTimeout(timer);
+        stopped = false;
+        project = scenario.value === "empty" ? "website" : "pidex";
+        selected = null;
+        state = scenario.value;
+        if (
+          [
+            "resumed",
+            "running",
+            "stopping",
+            "switch-error",
+            "draft-error",
+            "loading",
+            "dense",
+          ].includes(state)
+        )
+          selected = "restore";
+        if (state === "unreadable") selected = "unreadable";
+        if (state === "new") ensureNewSession();
+        if (state === "draft-error" && !drafts[draftKey()])
+          drafts[draftKey()] = "Also preserve drafts when I close and reopen the window.";
+        render();
+      };
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") toggleNavigation(false);
+      });
+      render();
+
+      function render() {
+        scenario.value = state;
+        renderNavigation();
+        const current = projects.find((item) => item.id === project);
+        const session = currentSession();
+        const title =
+          state === "recent" || state === "missing"
+            ? "Your workspace"
+            : session?.title || current.name;
+        const centered = !selected || (selected === "new" && !session?.sent);
+        main.classList.toggle("composer-centered", centered);
+        main.innerHTML = centered
+          ? `<button class="mobile-nav floating-nav" id="open-nav" aria-label="Open navigation" aria-expanded="false">${icon("home")}</button>`
+          : `<header class="topbar"><div class="breadcrumb"><button class="mobile-nav" id="open-nav" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#home" /></svg></button><span class="muted">${state === "recent" || state === "missing" ? "Projects" : current.name}</span><span class="muted">/</span><strong>${escapeHtml(title)}</strong></div>${busy() ? `<span class="badge amber">${state === "running" ? "◌ Running" : "◌ Stopping"}</span>` : ""}</header>`;
+        document.querySelector("#open-nav").onclick = () =>
+          toggleNavigation(!windowFrame.classList.contains("nav-open"));
+        if (state === "recent" || state === "missing") renderConversation();
+        else if (state === "history-error") renderHistoryError();
+        else if (state === "loading") renderLoading();
+        else if (!selected) renderConversation();
+        else if (state === "unreadable") renderUnreadable();
+        else renderConversation();
+        document.querySelector("#announcement").textContent =
+          `${title}. ${state.replaceAll("-", " ")}.`;
+      }
+
+      function renderNavigation() {
+        const onHome = unassigned();
+        const locked = busy() || state === "loading";
+        navigation.innerHTML = `<button class="side-home" id="new-session" ${locked ? "disabled" : ""}>${icon("compose")}New session</button><div class="row between side-label"><span class="eyebrow">Projects</span><button id="add-project" aria-label="Add project" title="Add project" ${locked ? "disabled" : ""}>${icon("plus")}</button></div>`;
+        document.querySelector("#new-session").onclick = () =>
+          navigate(() => {
+            if (!onHome) {
+              ensureNewSession();
+              state = "new";
+            }
+            render();
+            focusComposer();
+          });
+        document.querySelector("#add-project").onclick = openFolder;
+        for (const item of projects) {
+          const active = !onHome && item.id === project;
+          const group = document.createElement("section");
+          group.className = "project-group";
+          group.setAttribute("aria-label", `${item.name} project`);
+          const button = makeButton(`${icon("folder")}${item.name}`, "project-button", () =>
+            openProject(item.id),
+          );
+          button.dataset.project = item.id;
+          button.disabled = locked;
+          button.setAttribute("aria-pressed", String(active));
+          const heading = document.createElement("div");
+          heading.className = "project-heading";
+          heading.append(button);
+          group.append(heading);
+          if (active && state !== "history-error") {
+            const refresh = makeButton(icon("refresh"), "project-refresh", () =>
+              announce("Sessions up to date."),
+            );
+            refresh.setAttribute("aria-label", "Refresh sessions");
+            refresh.title = "Refresh sessions";
+            refresh.disabled = locked;
+            heading.append(refresh);
+          }
+          navigation.append(group);
+          if (!active) continue;
+          const list = document.createElement("div");
+          list.className = "project-sessions";
+          list.setAttribute("role", "group");
+          list.setAttribute("aria-label", `${item.name} sessions`);
+          group.append(list);
+          if (state === "history-error") {
+            list.innerHTML =
+              '<p class="secondary small" style="padding:8px">Session history unavailable</p>';
+            continue;
+          }
+          for (const session of sessions[project]) appendSession(session, list);
+          if (state === "dense")
+            for (let i = 0; i < 16; i++)
+              appendSession(
+                {
+                  id: `long-${i}`,
+                  title: `Investigate reconnect behavior when a project directory becomes unavailable during a session ${i + 1}`,
+                  time: `Sep ${18 - i}`,
+                  preview: "Keep the current draft while reconnecting.",
+                },
+                list,
+              );
+          if (!sessions[project].length)
+            list.insertAdjacentHTML(
+              "beforeend",
+              '<p class="secondary small" style="padding:8px">No saved sessions yet</p>',
+            );
+        }
+        function appendSession(session, list) {
+          const draft = drafts[`${project}/${session.id}`];
+          const button = makeButton(
+            `<span class="session-title">${escapeHtml(session.title)}</span><span class="session-meta"><span>${session.unreadable ? "! Unreadable" : session.time}</span><span>${draft ? "Draft" : ""}</span></span>`,
+            "session-button",
+            () => openSession(session),
+          );
+          button.title = session.title;
+          button.dataset.session = session.id;
+          if (selected === session.id) button.setAttribute("aria-current", "page");
+          button.disabled = locked;
+          list.append(button);
+        }
+      }
+
+      function renderConversation() {
+        const fresh = !selected || (currentSession()?.id === "new" && !currentSession()?.sent);
+        if (state === "missing")
+          main.insertAdjacentHTML(
+            "beforeend",
+            '<div class="notice error" role="alert"><strong>Could not find website</strong><p>Restore ~/Projects/website, then retry. The project stays in your recent list.</p><button id="retry-project">Retry</button><span id="project-error-status" role="status"></span></div>',
+          );
+        if (busy())
+          main.insertAdjacentHTML(
+            "beforeend",
+            `<div class="notice" role="status">${state === "running" ? "This session is running. Stop it before switching projects or sessions." : "Waiting for the current run to stop. You can keep editing your next message."}</div>`,
+          );
+        if (state === "switch-error")
+          main.insertAdjacentHTML(
+            "beforeend",
+            '<div class="notice error" role="alert"><strong>Could not finish switching sessions.</strong><p>The destination has not been confirmed. Your draft is safe; sending is paused.</p><button id="retry-switch">Retry loading session</button></div>',
+          );
+        if (state === "draft-error" || storageFailed)
+          main.insertAdjacentHTML(
+            "beforeend",
+            '<div class="notice error" role="alert"><strong>Draft could not be saved.</strong><p>Keep editing or copy your text. Retry saving before you leave this session.</p><button id="retry-draft">Retry saving</button></div>',
+          );
+        main.insertAdjacentHTML(
+          "beforeend",
+          fresh
+            ? `<div class="content start-content"><section class="start-panel"><h1>${unassigned() ? "What are we working on?" : `What should we build in <span class="project-name">${escapeHtml(project)}</span>?`}</h1></section></div>`
+            : `<div class="content" id="conversation"><article class="transcript" aria-label="Saved conversation"><div class="date-divider">Today · 10:42 AM</div><div class="user-message">${escapeHtml(currentSession()?.sent || currentSession()?.preview || "Keep unsent text when switching sessions.")}</div><div class="assistant-label">Pi</div><div class="assistant-copy"><p>${project === "dotfiles" ? "I'll inspect the shell startup files and check which commands add work to every new terminal." : "I'll trace how the selected project and session are restored, then check where the composer keeps its unsent text."}</p><details class="tool"><summary><strong>read</strong> · project and session lifecycle <span class="tool-result">Completed</span></summary><div class="tool-body"><h4>Input</h4><pre>Read project selection and session lifecycle</pre><h4>Result</h4><pre>3 files inspected. Composer drafts are scoped to their project and session.</pre></div></details><p>${busy() ? "I'm checking how a draft is restored when you return to a session." : "The draft should belong to the session, so returning to it restores exactly what you were writing."}</p>${busy() ? '<div class="completion">◌ ' + (state === "stopping" ? "Stopping the current run…" : "Working…") + "</div>" : '<h3>Keep each draft with its session</h3><ul><li>Keep a separate draft for each project and session.</li><li>Restore text without submitting it.</li><li>Clear accepted text after Send, keeping any newer edits.</li></ul><p>I can add the persistence and switching behavior next.</p><div class="completion">✓ ' + (stopped ? "Stopped" : "Finished") + ' <span class="muted">· 18 seconds</span></div>'}</div></article></div>`,
+        );
+        main.insertAdjacentHTML(
+          "beforeend",
+          `<div class="composer-area"><form class="composer" id="composer" aria-label="Message composer"><label class="sr-only" for="prompt">Message for ${escapeHtml(currentSession()?.title || "new session")}</label><textarea id="prompt" placeholder="${fresh ? "Ask Pi to work on your project…" : "Continue this session…"}"></textarea><div class="composer-bottom"><div class="composer-context"><span class="small secondary row">${icon("folder")}${fresh ? `<label class="sr-only" for="composer-project">Project</label><select id="composer-project"><option value="" ${unassigned() ? "selected" : ""} disabled>Select project</option>${projects.map((item) => `<option value="${item.id}" ${!unassigned() && item.id === project ? "selected" : ""}>${item.name}</option>`).join("")}</select>` : project}</span><span>GPT-6 Luna</span><span class="run-status" id="run-status" role="status" data-active="${busy()}">${state === "running" ? "Running" : state === "stopping" ? "Stopping" : "Idle"}</span></div><button class="primary" type="submit" id="submit-message" data-action="${busy() ? "stop" : "send"}" aria-label="${busy() ? "Stop" : "Send"}" title="${state === "stopping" ? "Stopping…" : busy() ? "Stop" : "Send"}">${icon(busy() ? "stop" : "send")}</button></div></form></div>`,
+        );
+        if (fresh)
+          document.querySelector(".start-panel").append(document.querySelector(".composer-area"));
+        const projectPicker = document.querySelector("#composer-project");
+        if (projectPicker) projectPicker.onchange = () => openProject(projectPicker.value);
+        const retryProject = document.querySelector("#retry-project");
+        if (retryProject)
+          retryProject.onclick = () =>
+            (document.querySelector("#project-error-status").textContent =
+              "Still missing. Restore the project directory and retry.");
+        const prompt = document.querySelector("#prompt");
+        prompt.value = drafts[draftKey()] || "";
+        prompt.oninput = () => {
+          drafts[draftKey()] = prompt.value;
+          const saved = state !== "draft-error" && saveDrafts();
+          if (!saved)
+            announce("Draft could not be saved. Keep this window open and copy your text.");
+          const row = navigation.querySelector(
+            `[data-session="${selected}"] .session-meta span:last-child`,
+          );
+          if (row) row.textContent = prompt.value ? "Draft" : "";
+          updateSend();
+        };
+        prompt.onkeydown = (event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            if (!busy()) submit();
+          }
+        };
+        document.querySelector("#composer").onsubmit = (event) => {
+          event.preventDefault();
+          if (state === "running") stop();
+          else if (!busy()) submit();
+        };
+        if (state === "switch-error")
+          document.querySelector("#retry-switch").onclick = () => {
+            state = "loading";
+            render();
+            timer = setTimeout(() => {
+              state = "resumed";
+              render();
+            }, 650);
+          };
+        const retryDraft = document.querySelector("#retry-draft");
+        if (retryDraft)
+          retryDraft.onclick = () => {
+            state = fresh ? "new" : "resumed";
+            saveDrafts();
+            render();
+          };
+        updateSend();
+      }
+
+      function renderLoading() {
+        main.insertAdjacentHTML(
+          "beforeend",
+          '<div class="content" aria-busy="true"><section class="landing"><h2>Loading session history…</h2><p>Your conversation will appear here before you can send a message.</p><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></section></div>',
+        );
+      }
+
+      function renderUnreadable() {
+        main.insertAdjacentHTML(
+          "beforeend",
+          `<div class="content"><div class="empty"><div class="empty-icon">!</div><h2>This session couldn't be opened.</h2><p>The saved history is missing or unreadable. Your other sessions are available, and this session has not been replaced.</p><code>session-2026-09-19.jsonl</code><button id="retry-history" class="outline">Retry opening session</button><span id="retry-result" class="small secondary" role="status"></span></div></div>`,
+        );
+        document.querySelector("#retry-history").onclick = () =>
+          (document.querySelector("#retry-result").textContent =
+            "Still unreadable. Restore the history file, then try again.");
+      }
+
+      function renderHistoryError() {
+        main.insertAdjacentHTML(
+          "beforeend",
+          '<div class="content"><div class="empty"><div class="empty-icon">!</div><h2>Session history is unavailable.</h2><p>Pidex could not read this project’s history. Check folder permissions and retry. This is not an empty project.</p><button id="retry-list" class="outline">Retry loading history</button></div></div>',
+        );
+        document.querySelector("#retry-list").onclick = () => {
+          state = "sessions";
+          render();
+        };
+      }
+
+      function openProject(id) {
+        navigate(() => {
+          if (state === "missing" && id === "website") {
+            announce("Project still missing. Restore its directory and retry.");
+            return;
+          }
+          const pendingDraft = unassigned() ? drafts["workspace/new"] : "";
+          if (pendingDraft && !drafts[`${id}/new`]) {
+            drafts[`${id}/new`] = pendingDraft;
+            delete drafts["workspace/new"];
+            saveDrafts();
+          }
+          project = id;
+          selected = null;
+          state = sessions[id].length ? "sessions" : "empty";
+          render();
+        });
+      }
+
+      function openSession(session) {
+        navigate(() => {
+          if (!sessions[project].some((item) => item.id === session.id))
+            sessions[project].push(session);
+          selected = session.id;
+          state = session.unreadable
+            ? "unreadable"
+            : session.id === "new" && !session.sent
+              ? "new"
+              : "resumed";
+          render();
+        });
+      }
+
+      function navigate(action) {
+        if (busy() || state === "loading") return;
+        if ((state === "draft-error" || storageFailed) && drafts[draftKey()]) {
+          pendingNavigation = action;
+          document.querySelector("#discard-dialog").showModal();
+          return;
+        }
+        toggleNavigation(false);
+        action();
+      }
+
+      function openFolder() {
+        navigate(() => document.querySelector("#folder-dialog").showModal());
+      }
+
+      function ensureNewSession() {
+        if (!sessions[project].some((item) => item.id === "new"))
+          sessions[project].unshift({
+            id: "new",
+            title: "New session",
+            time: "Not sent",
+            preview: "An unsent conversation in this project.",
+          });
+        selected = "new";
+      }
+
+      function submit() {
+        stopped = false;
+        const prompt = document.querySelector("#prompt");
+        if (!prompt?.value.trim() || busy() || unassigned() || state === "switch-error") return;
+        if (!selected) ensureNewSession();
+        currentSession().sent = prompt.value;
+        if (selected === "new") {
+          const session = currentSession();
+          const previousKey = draftKey();
+          session.id = `sample-${Date.now()}`;
+          session.title = prompt.value.trim().slice(0, 64);
+          session.time = "Just now";
+          selected = session.id;
+          delete drafts[previousKey];
+        }
+        drafts[draftKey()] = "";
+        saveDrafts();
+        state = "running";
+        render();
+        focusComposer();
+        timer = setTimeout(() => {
+          state = "resumed";
+          render();
+        }, 8000);
+      }
+
+      function stop() {
+        clearTimeout(timer);
+        stopped = true;
+        state = "stopping";
+        render();
+        timer = setTimeout(() => {
+          state = "resumed";
+          render();
+        }, 1500);
+      }
+
+      function updateSend() {
+        const button = document.querySelector("#submit-message");
+        button.disabled =
+          unassigned() ||
+          state === "stopping" ||
+          state === "switch-error" ||
+          (!busy() && !document.querySelector("#prompt").value.trim());
+      }
+
+      function readDrafts() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem("pidex-v002-design-drafts") || "{}");
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+          return Object.fromEntries(
+            Object.entries(parsed).filter(([, value]) => typeof value === "string"),
+          );
+        } catch {
+          storageFailed = true;
+          return {};
+        }
+      }
+
+      function saveDrafts() {
+        try {
+          localStorage.setItem("pidex-v002-design-drafts", JSON.stringify(drafts));
+          storageFailed = false;
+          return true;
+        } catch {
+          storageFailed = true;
+          return false;
+        }
+      }
+
+      function toggleNavigation(open) {
+        const wasOpen = windowFrame.classList.contains("nav-open");
+        windowFrame.classList.toggle("nav-open", open);
+        main.inert = open;
+        document.querySelector("#open-nav")?.setAttribute("aria-expanded", String(open));
+        if (open) document.querySelector("#close-nav").focus();
+        else if (wasOpen) document.querySelector("#open-nav")?.focus();
+      }
+
+      function currentSession() {
+        return sessions[project].find((item) => item.id === selected);
+      }
+      function draftKey() {
+        return unassigned() ? "workspace/new" : `${project}/${selected || "new"}`;
+      }
+      function unassigned() {
+        return state === "recent" || state === "missing";
+      }
+      function busy() {
+        return state === "running" || state === "stopping";
+      }
+      function focusComposer() {
+        document.querySelector("#prompt")?.focus();
+      }
+      function announce(message) {
+        document.querySelector("#announcement").textContent = message;
+      }
+      function icon(name) {
+        return `<svg class="icon" aria-hidden="true"><use href="#${name}" /></svg>`;
+      }
+      function escapeHtml(value) {
+        return value.replace(
+          /[&<>"']/g,
+          (character) =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character],
+        );
+      }
+      function makeButton(html, className, onclick) {
+        const button = document.createElement("button");
+        button.className = className;
+        button.innerHTML = html;
+        button.onclick = onclick;
+        return button;
+      }
+    </script>
+  </body>
+</html>
