@@ -126,6 +126,7 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
       let armed = false;
       let dropping = false;
       let offline = false;
+      let dropped = false;
       prototype.send = function (...args: unknown[]) {
         if (armed && String(args[0]).includes('"tag":"ResumeSession"')) {
           armed = false;
@@ -143,6 +144,7 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
           if (data.includes('"_tag":"Exit"') && data.includes('"_tag":"Success"')) {
             offline = true;
             dropping = false;
+            dropped = true;
             this.terminate();
           }
           return true;
@@ -153,6 +155,7 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
         arm: () => {
           armed = true;
         },
+        wasDropped: () => dropped,
         reconnect: () => {
           offline = false;
           dropping = false;
@@ -173,7 +176,18 @@ test("#194 reconciles a lost Resume acknowledgment before enabling Send or recov
   await composer.fill("Draft for the previous session");
   await fault.evaluate((gate) => gate.arm());
   await list.getByRole("button", { name: "Resume session" }).click();
-  await expect(list.getByRole("alert")).toContainText("uncertain");
+  await expect.poll(() => fault.evaluate((gate) => gate.wasDropped())).toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await list.getByRole("alert").allTextContents()).some((text) =>
+          text.includes("uncertain"),
+        ) ||
+        (await second.page.getByRole("region", { name: "Messages" }).innerText()).includes(
+          "Saved session context",
+        ),
+    )
+    .toBe(true);
   // A matching snapshot may already have confirmed the new selection before the RPC fault.
   const draftBeforeReconnect = await composer.inputValue();
   expect(["", "Draft for the previous session"]).toContain(draftBeforeReconnect);
