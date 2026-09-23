@@ -498,6 +498,7 @@ const program = Effect.gen(function* () {
         new BrowserWindow({
           width: 960,
           height: 720,
+          show: process.env.PIDEX_TEST_HEADLESS !== "1",
           backgroundColor: "#101113",
           webPreferences: {
             preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)),
