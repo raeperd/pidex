@@ -114,6 +114,10 @@ export class ResumeError extends Schema.TaggedError<ResumeError>()("ResumeError"
   message: Schema.String,
 }) {}
 
+export class SwitchError extends Schema.TaggedError<SwitchError>()("SwitchError", {
+  message: Schema.String,
+}) {}
+
 export class RecoveryError extends Schema.TaggedError<RecoveryError>()("RecoveryError", {
   message: Schema.String,
 }) {}
@@ -130,7 +134,12 @@ export const ConversationApi = RpcGroup.make(
     stream: true,
   }),
   Rpc.make("Send", {
-    payload: { text: Schema.String, submissionId: Schema.optional(Schema.String) },
+    payload: {
+      projectPath: ProjectPath,
+      sessionId: SessionLocator.fields.sessionId,
+      text: Schema.String,
+      submissionId: Schema.optional(Schema.String),
+    },
     error: SendError,
   }),
   Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),
@@ -143,6 +152,15 @@ export const ConversationApi = RpcGroup.make(
     payload: SessionLocator.fields,
     success: Conversation,
     error: ResumeError,
+  }),
+  Rpc.make("SwitchProject", {
+    payload: {
+      projectPath: ProjectPath,
+      currentProjectPath: ProjectPath,
+      currentSessionId: SessionLocator.fields.sessionId,
+    },
+    success: Conversation,
+    error: SwitchError,
   }),
 );
 

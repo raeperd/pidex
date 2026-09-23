@@ -16,6 +16,15 @@ declare global {
         error: string;
         uncertain: boolean;
       }>;
+      switchProject: (
+        projectPath: string,
+        currentProjectPath: string,
+        currentSessionId: string,
+      ) => Promise<{
+        conversation: typeof Conversation.Type | null;
+        error: string;
+        uncertain: boolean;
+      }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       recentProjects: () => Promise<typeof RecentProjects.Type>;
       openRecentProject: (projectPath: string) => Promise<typeof Conversation.Type>;

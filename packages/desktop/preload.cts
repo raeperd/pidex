@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("desktop", {
     ipcRenderer.invoke("new-session", { projectPath, sessionId }),
   listSessions: (projectPath: string) => ipcRenderer.invoke("list-sessions", projectPath),
   resumeSession: (locator: unknown) => ipcRenderer.invoke("resume-session", locator),
+  switchProject: (projectPath: string, currentProjectPath: string, currentSessionId: string) =>
+    ipcRenderer.invoke("switch-project", { projectPath, currentProjectPath, currentSessionId }),
   restart: () => ipcRenderer.invoke("restart-backend"),
   onCrash: (onCrash: () => void) => {
     const listener = () => onCrash();
