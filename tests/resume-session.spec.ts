@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { chmod, readFile, realpath, rm } from "node:fs/promises";
 import { alive, test } from "./support/lifecycle.js";
+import { fileURLToPath } from "node:url";
 
 test("#194 resumes saved Pi history after relaunch and appends follow-up context", async ({
   lifecycle,
@@ -64,6 +65,194 @@ test("#194 resumes saved Pi history after relaunch and appends follow-up context
   expect(after).toContain("What did I ask you to remember?");
   expect(await lifecycle.history()).toHaveLength(1);
   await second.page.screenshot({ path: info.outputPath("resumed.png") });
+});
+
+test("#194 reconciles a lost Resume acknowledgment before enabling Send or recovery", async ({
+  lifecycle,
+}, info) => {
+  const first = await lifecycle.launch();
+  await first.page.getByRole("textbox", { name: "Prompt" }).fill("Saved session context");
+  await first.page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved answer");
+  await expect(first.page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved session");
+  await first.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => first.process.exitCode).toBe(0);
+
+  const second = await lifecycle.launch(false);
+  const fault = await second.app.evaluateHandle(
+    (_electron, modulePath) => {
+      const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+        modulePath,
+      );
+      const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+      const originalSend = prototype.send;
+      const originalEmit = prototype.emit;
+      let armed = false;
+      let dropping = false;
+      let offline = false;
+      prototype.send = function (...args: unknown[]) {
+        if (armed && String(args[0]).includes('"tag":"ResumeSession"')) {
+          armed = false;
+          dropping = true;
+        }
+        return originalSend.apply(this, args);
+      };
+      prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+        if (event === "open" && offline) {
+          this.terminate();
+          return true;
+        }
+        if (event === "message" && dropping) {
+          const data = String(args[0]);
+          if (data.includes('"_tag":"Exit"') && data.includes('"_tag":"Success"')) {
+            offline = true;
+            dropping = false;
+            this.terminate();
+          }
+          return true;
+        }
+        return originalEmit.apply(this, [event, ...args]);
+      };
+      return {
+        arm: () => {
+          armed = true;
+        },
+        reconnect: () => {
+          offline = false;
+          dropping = false;
+        },
+        restore: () => {
+          prototype.send = originalSend;
+          prototype.emit = originalEmit;
+        },
+      };
+    },
+    fileURLToPath(import.meta.resolve("@effect/platform-node")),
+  );
+  await second.page.getByRole("button", { name: "Choose project" }).click();
+  const list = second.page.getByRole("region", { name: "Saved sessions" });
+  await expect(list.getByRole("radio")).toHaveCount(1);
+  await list.getByRole("radio").check();
+  const composer = second.page.getByRole("textbox", { name: "Prompt" });
+  await composer.fill("Draft for the previous session");
+  await fault.evaluate((gate) => gate.arm());
+  await list.getByRole("button", { name: "Resume session" }).click();
+  await expect(list.getByRole("alert")).toContainText("uncertain");
+  // A matching snapshot may already have confirmed the new selection before the RPC fault.
+  const draftBeforeReconnect = await composer.inputValue();
+  expect(["", "Draft for the previous session"]).toContain(draftBeforeReconnect);
+  await expect(second.page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await fault.evaluate((gate) => gate.reconnect());
+  await expect(second.page.getByRole("region", { name: "Messages" })).toContainText(
+    "Saved session context",
+  );
+  await expect(composer).toHaveValue("");
+  expect(lifecycle.requests).toHaveLength(1);
+  expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
+  await second.page.screenshot({ path: info.outputPath("reconciled-resume.png") });
+
+  const [pid] = second.children();
+  if (!pid) throw new Error("Missing Pi server");
+  process.kill(pid, "SIGKILL");
+  await expect(second.page.getByRole("button", { name: "Restart" })).toBeVisible();
+  await second.page.getByRole("button", { name: "Restart" }).click();
+  await expect(second.page.getByRole("region", { name: "Messages" })).toContainText(
+    "Saved session context",
+  );
+  expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
+  await fault.evaluate((gate) => gate.restore());
+  await second.app.evaluate(({ app, dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => second.process.exitCode).toBe(0);
+});
+
+test("#194 Restart resolves an uncertain Resume when the file is no longer available", async ({
+  lifecycle,
+}, info) => {
+  const first = await lifecycle.launch();
+  await first.page.getByRole("textbox", { name: "Prompt" }).fill("History to restore");
+  await first.page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved answer");
+  await expect(first.page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved session");
+  await first.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => first.process.exitCode).toBe(0);
+
+  const second = await lifecycle.launch(false);
+  const fault = await second.app.evaluateHandle(
+    (_electron, modulePath) => {
+      const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+        modulePath,
+      );
+      const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+      const originalSend = prototype.send;
+      const originalEmit = prototype.emit;
+      let armed = false;
+      let offline = false;
+      prototype.send = function (...args: unknown[]) {
+        if (armed && String(args[0]).includes('"tag":"ResumeSession"')) {
+          armed = false;
+          offline = true;
+          this.terminate();
+          return;
+        }
+        return originalSend.apply(this, args);
+      };
+      prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+        if (event === "open" && offline) {
+          this.terminate();
+          return true;
+        }
+        return originalEmit.apply(this, [event, ...args]);
+      };
+      return {
+        arm: () => {
+          armed = true;
+        },
+        restore: () => {
+          prototype.send = originalSend;
+          prototype.emit = originalEmit;
+        },
+      };
+    },
+    fileURLToPath(import.meta.resolve("@effect/platform-node")),
+  );
+  await second.page.getByRole("button", { name: "Choose project" }).click();
+  const list = second.page.getByRole("region", { name: "Saved sessions" });
+  await expect(list.getByRole("radio")).toHaveCount(1);
+  await list.getByRole("radio").check();
+  const composer = second.page.getByRole("textbox", { name: "Prompt" });
+  await composer.fill("Draft for old selection");
+  await fault.evaluate((gate) => gate.arm());
+  await list.getByRole("button", { name: "Resume session" }).click();
+  await expect(second.page.getByRole("button", { name: "Restart" })).toBeVisible();
+  await expect(second.page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await rm(saved.path);
+  await fault.evaluate((gate) => gate.restore());
+  await second.page.getByRole("button", { name: "Restart" }).click();
+  await expect(second.page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+  await expect(composer).toHaveValue("");
+  await expect(second.page.getByRole("region", { name: "Messages" })).not.toContainText(
+    "History to restore",
+  );
+  expect(lifecycle.requests).toHaveLength(1);
+  await second.page.screenshot({ path: info.outputPath("uncertain-restart.png") });
+  await second.app.evaluate(({ app, dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => second.process.exitCode).toBe(0);
 });
 
 for (const failure of ["missing", "unreadable"] as const)
