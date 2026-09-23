@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
-import { chmod, readFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { chmod, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { alive, test } from "./support/lifecycle.js";
 
 test("#192 starts another Pi session from an empty list and an idle session", async ({
@@ -108,4 +108,69 @@ test("#192 keeps the current session and recovery history when preparation fails
   lifecycle.complete("Recovered");
   await expect(page.getByLabel("assistant", { exact: true }).last()).toHaveText("Recovered");
   expect(await lifecycle.history()).toHaveLength(1);
+});
+
+test("#192 reloads Pi setup when a fresh session replaces an idle session", async ({
+  lifecycle,
+}) => {
+  const auth = join(lifecycle.home, ".pi", "agent", "auth.json");
+  await writeFile(auth, "{}");
+  const { page } = await lifecycle.launch();
+  await expect(page.getByRole("alert")).toContainText("authentication is unavailable");
+  await writeFile(auth, JSON.stringify({ openai: { type: "api_key", key: "fixture-key" } }));
+  await page.getByRole("button", { name: "New session" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("Fresh credentials");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Authenticated");
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("Authenticated");
+});
+
+test("#192 serializes simultaneous New session and Send against one selected session", async ({
+  lifecycle,
+}) => {
+  const { page } = await lifecycle.launch();
+  const selected = await page.evaluate(
+    () =>
+      new Promise<{ projectPath: string; id: string }>((resolve) => {
+        const unsubscribe = window.desktop.subscribe((value) => {
+          if (value?._tag !== "Snapshot") return;
+          unsubscribe();
+          resolve(value.conversation);
+        });
+      }),
+  );
+  const results = await page.evaluate(
+    ({ projectPath, id }) =>
+      Promise.allSettled([
+        window.desktop.newSession(projectPath, id),
+        window.desktop.send("Racing prompt", crypto.randomUUID()),
+      ]),
+    selected,
+  );
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  if (results[1]?.status === "fulfilled") {
+    await expect.poll(() => lifecycle.requests.length).toBe(1);
+    lifecycle.complete("Original session won");
+    await expect(page.getByLabel("assistant", { exact: true })).toHaveText("Original session won");
+    await expect(page.getByRole("status")).toHaveText("Idle");
+    expect(await lifecycle.history()).toHaveLength(1);
+  } else {
+    const current = await page.evaluate(
+      () =>
+        new Promise<{ id: string; entryCount: number }>((resolve) => {
+          const unsubscribe = window.desktop.subscribe((value) => {
+            if (value?._tag !== "Snapshot") return;
+            unsubscribe();
+            resolve({ id: value.conversation.id, entryCount: value.conversation.entries.length });
+          });
+        }),
+    );
+    expect(current.id).not.toBe(selected.id);
+    expect(current.entryCount).toBe(0);
+    expect(lifecycle.requests).toHaveLength(0);
+  }
 });

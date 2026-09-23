@@ -255,10 +255,10 @@ const program = Effect.gen(function* () {
       return { projectPath, sessions, errors };
     });
     const model = session.model;
-    const setupError = yield* Effect.gen(function* () {
-      const provider = session.settingsManager.getDefaultProvider();
-      const modelId = session.settingsManager.getDefaultModel();
-      if (provider && modelId && !session.modelRuntime.getModel(provider, modelId)) {
+    const checkSetup = Effect.fn(function* (target: typeof session) {
+      const provider = target.settingsManager.getDefaultProvider();
+      const modelId = target.settingsManager.getDefaultModel();
+      if (provider && modelId && !target.modelRuntime.getModel(provider, modelId)) {
         return yield* new SetupError({
           reason: "model",
           message:
@@ -270,15 +270,19 @@ const program = Effect.gen(function* () {
         message:
           "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
       });
-      if (!model) return yield* authenticationError;
+      const candidateModel = target.model;
+      if (!candidateModel) return yield* authenticationError;
       const auth = yield* Effect.tryPromise({
-        try: () => session.modelRuntime.getAuth(model),
+        try: () => target.modelRuntime.getAuth(candidateModel),
         catch: () => authenticationError,
       });
       // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
       if (!auth) return yield* authenticationError;
       return null;
-    }).pipe(Effect.catch((error) => Effect.succeed(error)));
+    });
+    let setupError = yield* checkSetup(session).pipe(
+      Effect.catch((error) => Effect.succeed(error)),
+    );
     const scope = yield* Effect.scope;
     let state: typeof Conversation.Type = {
       id: session.sessionId,
@@ -519,10 +523,13 @@ const program = Effect.gen(function* () {
           return yield* new NewSessionError({ message: "New session was cancelled. Retry." });
         session = runtime.session;
         messageId = "";
+        setupError = yield* checkSetup(session).pipe(
+          Effect.catch((error) => Effect.succeed(error)),
+        );
         state = {
           id: session.sessionId,
           projectPath: cwd,
-          modelName: session.model?.name ?? "Setup required",
+          modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
           setupError,
           status: "idle",
           runId: null,
