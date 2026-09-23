@@ -189,16 +189,27 @@ test("#192 ignores delayed updates from the replaced session", async ({ lifecycl
       }),
   );
   await page.getByRole("button", { name: "New session" }).click();
-  const received = page.evaluate(
-    () =>
+  await page.evaluate(
+    (oldSessionId) =>
+      new Promise<void>((resolve) => {
+        const unsubscribe = window.desktop.subscribe((value) => {
+          if (value?._tag !== "Snapshot" || value.conversation.id === oldSessionId) return;
+          unsubscribe();
+          resolve();
+        });
+      }),
+    old,
+  );
+  await page.evaluate(() => {
+    (window as typeof window & { oldUpdateReceived?: Promise<void> }).oldUpdateReceived =
       new Promise<void>((resolve) => {
         const unsubscribe = window.desktop.subscribe((value) => {
           if (value?._tag !== "StateChanged" || value.runId !== "old-run") return;
           unsubscribe();
           resolve();
         });
-      }),
-  );
+      });
+  });
   await app.evaluate(({ BrowserWindow }, sessionId) => {
     const window = BrowserWindow.getAllWindows()[0];
     window?.webContents.send("conversation", {
@@ -215,7 +226,9 @@ test("#192 ignores delayed updates from the replaced session", async ({ lifecycl
       error: "",
     });
   }, old);
-  await received;
+  await page.evaluate(
+    () => (window as typeof window & { oldUpdateReceived?: Promise<void> }).oldUpdateReceived,
+  );
   await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveText("Idle");
   const prompt = page.getByRole("textbox", { name: "Prompt" });
