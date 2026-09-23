@@ -67,6 +67,31 @@ test("#194 resumes saved Pi history after relaunch and appends follow-up context
   await second.page.screenshot({ path: info.outputPath("resumed.png") });
 });
 
+test("#194 rejects a stale Resume request for the active session file", async ({ lifecycle }) => {
+  const first = await lifecycle.launch();
+  await first.page.getByRole("textbox", { name: "Prompt" }).fill("Current context");
+  await first.page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Current reply");
+  await expect(first.page.getByRole("status")).toHaveText("Idle");
+  const listed = await first.page.evaluate(
+    (projectPath) => window.desktop.listSessions(projectPath),
+    await realpath(lifecycle.project),
+  );
+  const locator = listed.sessions[0];
+  if (!locator) throw new Error("Missing active session locator");
+  await rm(locator.sessionFile);
+  const result = await first.page.evaluate(
+    (target) => window.desktop.resumeSession(target),
+    locator,
+  );
+  expect(result.error).toContain("missing, unreadable, or changed");
+  expect(result.conversation).toBeNull();
+  expect(await lifecycle.history()).toHaveLength(0);
+  await expect(first.page.getByRole("region", { name: "Messages" })).toContainText("Current reply");
+  expect(lifecycle.requests).toHaveLength(1);
+});
+
 test("#194 reconciles a lost Resume acknowledgment before enabling Send or recovery", async ({
   lifecycle,
 }, info) => {
