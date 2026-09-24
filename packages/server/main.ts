@@ -899,11 +899,12 @@ const program = Effect.gen(function* () {
           Effect.tapError(() =>
             Effect.gen(function* () {
               publish({
-                _tag: "StateChanged",
-                status: "unavailable",
-                runId: null,
-                messageCount: state.messageCount,
-                error: "Session replacement failed. Restart the backend before sending.",
+                _tag: "Snapshot",
+                conversation: {
+                  ...snapshot(true),
+                  status: "unavailable",
+                  error: "Session replacement failed. Restart the backend before sending.",
+                },
               });
               yield* Effect.tryPromise({
                 try: () => next.dispose(),
@@ -922,11 +923,12 @@ const program = Effect.gen(function* () {
         const nextFile = session.sessionFile;
         if (!nextFile) {
           publish({
-            _tag: "StateChanged",
-            status: "unavailable",
-            runId: null,
-            messageCount: state.messageCount,
-            error: "Pi did not provide a recovery locator. Restart the backend before sending.",
+            _tag: "Snapshot",
+            conversation: {
+              ...snapshot(true),
+              status: "unavailable",
+              error: "Pi did not provide a recovery locator. Restart the backend before sending.",
+            },
           });
           return yield* new SwitchError({
             message: "Pi did not provide a recovery locator. Restart the backend before sending.",
@@ -989,11 +991,8 @@ const program = Effect.gen(function* () {
           Effect.tapError((error) =>
             Effect.sync(() => {
               publish({
-                _tag: "StateChanged",
-                status: "unavailable",
-                runId: null,
-                messageCount: state.messageCount,
-                error: error.message,
+                _tag: "Snapshot",
+                conversation: { ...snapshot(true), status: "unavailable", error: error.message },
               });
             }),
           ),
