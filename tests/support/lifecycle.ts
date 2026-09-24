@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test as base } from "@playwright/test";
+import { testHeadlessFlag } from "./headless.js";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
@@ -48,8 +49,11 @@ async function setup(cleanup: AsyncDisposableStack) {
     JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-luna" }),
   );
   const requests: ServerResponse[] = [];
+  const requestBodies: string[] = [];
   const provider = createServer((request, response) => {
-    request.resume();
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => requestBodies.push(Buffer.concat(chunks).toString("utf8")));
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.flushHeaders();
     requests.push(response);
@@ -96,6 +100,7 @@ async function setup(cleanup: AsyncDisposableStack) {
     home,
     project,
     requests,
+    requestBodies,
     apps,
     logs,
     async launch(selectProject = true) {
@@ -107,6 +112,7 @@ async function setup(cleanup: AsyncDisposableStack) {
           TMPDIR: tmpdir(),
           DISPLAY: process.env.DISPLAY ?? "",
           XAUTHORITY: process.env.XAUTHORITY ?? "",
+          PIDEX_TEST_HEADLESS: testHeadlessFlag,
         },
       });
       const processHandle = app.process();

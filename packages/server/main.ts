@@ -1,6 +1,8 @@
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import {
   createAgentSession,
+  createAgentSessionRuntime,
+  type CreateAgentSessionRuntimeResult,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
@@ -10,7 +12,8 @@ import {
 import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { access, readFile, readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import {
@@ -24,6 +27,7 @@ import {
   SetupError,
   StopError,
   HistoryError,
+  NewSessionError,
   SavedSession,
   ProjectPath,
 } from "../api/index.js";
@@ -85,39 +89,63 @@ const program = Effect.gen(function* () {
       return Boolean(recoveryFile) && recoveryContents === undefined;
     });
 
-    const { session } = yield* Effect.acquireRelease(
+    let prepared: CreateAgentSessionRuntimeResult | undefined;
+    const cwd = process.cwd();
+    const agentDir = getAgentDir();
+    const createRuntime = async ({
+      cwd: runtimeCwd,
+      agentDir: runtimeAgentDir,
+      sessionManager,
+    }: {
+      cwd: string;
+      agentDir: string;
+      sessionManager: SessionManager;
+    }): Promise<CreateAgentSessionRuntimeResult> => {
+      if (prepared) {
+        const result = prepared;
+        prepared = undefined;
+        return result;
+      }
+      const resourceLoader = new DefaultResourceLoader({
+        cwd: runtimeCwd,
+        agentDir: runtimeAgentDir,
+        // Package resolution reads raw settings, before the no-* filters run.
+        settingsManager: SettingsManager.inMemory(),
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        systemPrompt: "",
+        systemPromptOverride: () => undefined,
+        appendSystemPrompt: [],
+      });
+      await resourceLoader.reload();
+      const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
+      const modelRuntime = await ModelRuntime.create();
+      const result = await createAgentSession({
+        cwd: runtimeCwd,
+        agentDir: runtimeAgentDir,
+        resourceLoader,
+        settingsManager,
+        modelRuntime,
+        sessionManager,
+        tools: ["read", "bash", "edit", "write"],
+      });
+      return {
+        ...result,
+        services: {
+          cwd: runtimeCwd,
+          agentDir: runtimeAgentDir,
+          resourceLoader,
+          settingsManager,
+          modelRuntime,
+          diagnostics: [],
+        },
+        diagnostics: [],
+      };
+    };
+    const runtime = yield* Effect.acquireRelease(
       Effect.gen(function* () {
-        const cwd = process.cwd();
-        const agentDir = getAgentDir();
-        const resourceLoader = yield* Effect.try({
-          try: () =>
-            new DefaultResourceLoader({
-              cwd,
-              agentDir,
-              // Package resolution reads raw settings, before the no-* filters run.
-              settingsManager: SettingsManager.inMemory(),
-              noExtensions: true,
-              noSkills: true,
-              noPromptTemplates: true,
-              noThemes: true,
-              systemPrompt: "",
-              systemPromptOverride: () => undefined,
-              appendSystemPrompt: [],
-            }),
-          catch: () => new StartupError(),
-        });
-        yield* Effect.tryPromise({
-          try: () => resourceLoader.reload(),
-          catch: () => new StartupError(),
-        });
-        const settingsManager = yield* Effect.try({
-          try: () => SettingsManager.create(cwd, agentDir),
-          catch: () => new StartupError(),
-        });
-        const modelRuntime = yield* Effect.tryPromise({
-          try: () => ModelRuntime.create(),
-          catch: () => new StartupError(),
-        });
         const sessionManager = yield* Effect.try({
           try: () =>
             recoveryFile && !recoveryMissing
@@ -133,33 +161,25 @@ const program = Effect.gen(function* () {
                 }),
         });
         return yield* Effect.tryPromise({
-          try: () =>
-            createAgentSession({
-              cwd,
-              agentDir,
-              resourceLoader,
-              settingsManager,
-              modelRuntime,
-              sessionManager,
-              tools: ["read", "bash", "edit", "write"],
-            }),
+          try: () => createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager }),
           catch: () => new StartupError(),
         });
       }),
-      ({ session: acquired }) =>
+      (acquired) =>
         Effect.gen(function* () {
-          yield* Effect.try({
+          yield* Effect.tryPromise({
             try: () => acquired.dispose(),
             catch: () => new ShutdownError(),
           });
           yield* Effect.tryPromise({
-            try: () => acquired.settingsManager.flush(),
+            try: () => acquired.session.settingsManager.flush(),
             catch: () => new ShutdownError(),
           });
-          const errors = yield* Effect.sync(() => acquired.settingsManager.drainErrors());
+          const errors = yield* Effect.sync(() => acquired.session.settingsManager.drainErrors());
           if (errors.length > 0) return yield* new ShutdownError();
         }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
     );
+    let session = runtime.session;
     if (!session.sessionFile || session.isStreaming) return yield* new StartupError();
     const listSessions = Effect.fn(function* ({ projectPath }: { projectPath: string }) {
       const directory = session.sessionManager.getSessionDir();
@@ -200,12 +220,12 @@ const program = Effect.gen(function* () {
           const headerPath = yield* Schema.decodeUnknownEffect(ProjectPath)(info.cwd).pipe(
             Effect.mapError(() => unreadable(path)),
           );
-          const cwd = yield* Effect.tryPromise({
+          const canonicalPath = yield* Effect.tryPromise({
             try: () => realpath(headerPath),
             catch: () => unreadable(path),
           });
           // Pi's encoded directory names can collide; the history header remains authoritative.
-          if (cwd !== projectPath) return;
+          if (canonicalPath !== projectPath) return;
           const value = yield* Effect.try({
             try: () => ({
               projectPath,
@@ -235,10 +255,10 @@ const program = Effect.gen(function* () {
       return { projectPath, sessions, errors };
     });
     const model = session.model;
-    const setupError = yield* Effect.gen(function* () {
-      const provider = session.settingsManager.getDefaultProvider();
-      const modelId = session.settingsManager.getDefaultModel();
-      if (provider && modelId && !session.modelRuntime.getModel(provider, modelId)) {
+    const checkSetup = Effect.fn(function* (target: typeof session) {
+      const provider = target.settingsManager.getDefaultProvider();
+      const modelId = target.settingsManager.getDefaultModel();
+      if (provider && modelId && !target.modelRuntime.getModel(provider, modelId)) {
         return yield* new SetupError({
           reason: "model",
           message:
@@ -250,18 +270,23 @@ const program = Effect.gen(function* () {
         message:
           "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
       });
-      if (!model) return yield* authenticationError;
+      const candidateModel = target.model;
+      if (!candidateModel) return yield* authenticationError;
       const auth = yield* Effect.tryPromise({
-        try: () => session.modelRuntime.getAuth(model),
+        try: () => target.modelRuntime.getAuth(candidateModel),
         catch: () => authenticationError,
       });
       // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
       if (!auth) return yield* authenticationError;
       return null;
-    }).pipe(Effect.catch((error) => Effect.succeed(error)));
+    });
+    let setupError = yield* checkSetup(session).pipe(
+      Effect.catch((error) => Effect.succeed(error)),
+    );
     const scope = yield* Effect.scope;
     let state: typeof Conversation.Type = {
       id: session.sessionId,
+      sessionFile: session.sessionFile,
       projectPath: process.cwd(),
       modelName: setupError ? "Setup required" : (model?.name ?? "Setup required"),
       setupError,
@@ -341,94 +366,260 @@ const program = Effect.gen(function* () {
         }
       | undefined;
     let messageId = "";
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        session.subscribe((event) => {
-          if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
-            // Pi can start the pending turn after aborting preflight compaction.
-            const run = active;
-            if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
-            if (event.type === "compaction_start") {
-              // Pi installs the compaction controller after notifying subscribers.
-              queueMicrotask(() => {
-                if (active === run && state.status === "stopping") session.abortCompaction();
-              });
-            }
-            Effect.runSync(Deferred.succeed(run.started, undefined));
-          }
-          Effect.runSync(
-            Effect.sync(() => {
-              switch (event.type) {
-                case "message_end":
-                  // Pi can remove failed replies while compacting or retrying.
-                  // Only a later completed assistant attempt replaces this outcome.
-                  if (active && event.message.role === "assistant")
-                    active.failed = event.message.stopReason === "error";
-                  return;
-                case "compaction_end":
-                  if (active && !event.aborted && event.errorMessage) active.failed = true;
-                  return;
-                case "message_start":
-                  if (event.message.role === "assistant") messageId = crypto.randomUUID();
-                  return;
-                case "message_update":
-                  if (event.assistantMessageEvent.type !== "text_delta") return;
-                  publish({
-                    _tag: "TextDelta",
-                    id: messageId,
-                    delta: event.assistantMessageEvent.delta,
-                  });
-                  return;
-                case "tool_execution_start":
-                  publish({
-                    _tag: "EntryUpserted",
-                    entry: {
-                      id: event.toolCallId,
-                      role: "tool",
-                      name: event.toolName,
-                      input: JSON.stringify(event.args, null, 2),
-                      result: "",
-                      status: "running",
-                    },
-                  });
-                  return;
-                case "tool_execution_update":
-                case "tool_execution_end": {
-                  const entry = state.entries.find((item) => item.id === event.toolCallId);
-                  if (entry?.role !== "tool") return;
-                  publish({
-                    _tag: "EntryUpserted",
-                    entry: {
-                      ...entry,
-                      result: JSON.stringify(
-                        event.type === "tool_execution_end" ? event.result : event.partialResult,
-                        null,
-                        2,
-                      ),
-                      status:
-                        event.type === "tool_execution_update"
-                          ? "running"
-                          : event.isError
-                            ? "failed"
-                            : "completed",
-                    },
-                  });
-                  return;
-                }
+    // oxlint-disable-next-line consistent-function-scoping
+    let unsubscribe = () => {};
+    let replacing = false;
+    const attach = yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const subscribeCurrent = () => {
+          const boundSession = session;
+          unsubscribe = boundSession.subscribe((event) => {
+            if (replacing || boundSession !== session) return;
+            if ((event.type === "agent_start" || event.type === "compaction_start") && active) {
+              // Pi can start the pending turn after aborting preflight compaction.
+              const run = active;
+              if (event.type === "agent_start" && state.status === "stopping")
+                session.agent.abort();
+              if (event.type === "compaction_start") {
+                // Pi installs the compaction controller after notifying subscribers.
+                queueMicrotask(() => {
+                  if (active === run && state.status === "stopping") session.abortCompaction();
+                });
               }
-            }),
-          );
-        }),
-      ),
-      (unsubscribe) =>
+              Effect.runSync(Deferred.succeed(run.started, undefined));
+            }
+            Effect.runSync(
+              Effect.sync(() => {
+                switch (event.type) {
+                  case "message_end":
+                    // Pi can remove failed replies while compacting or retrying.
+                    // Only a later completed assistant attempt replaces this outcome.
+                    if (active && event.message.role === "assistant")
+                      active.failed = event.message.stopReason === "error";
+                    return;
+                  case "compaction_end":
+                    if (active && !event.aborted && event.errorMessage) active.failed = true;
+                    return;
+                  case "message_start":
+                    if (event.message.role === "assistant") messageId = crypto.randomUUID();
+                    return;
+                  case "message_update":
+                    if (event.assistantMessageEvent.type !== "text_delta") return;
+                    publish({
+                      _tag: "TextDelta",
+                      id: messageId,
+                      delta: event.assistantMessageEvent.delta,
+                    });
+                    return;
+                  case "tool_execution_start":
+                    publish({
+                      _tag: "EntryUpserted",
+                      entry: {
+                        id: event.toolCallId,
+                        role: "tool",
+                        name: event.toolName,
+                        input: JSON.stringify(event.args, null, 2),
+                        result: "",
+                        status: "running",
+                      },
+                    });
+                    return;
+                  case "tool_execution_update":
+                  case "tool_execution_end": {
+                    const entry = state.entries.find((item) => item.id === event.toolCallId);
+                    if (entry?.role !== "tool") return;
+                    publish({
+                      _tag: "EntryUpserted",
+                      entry: {
+                        ...entry,
+                        result: JSON.stringify(
+                          event.type === "tool_execution_end" ? event.result : event.partialResult,
+                          null,
+                          2,
+                        ),
+                        status:
+                          event.type === "tool_execution_update"
+                            ? "running"
+                            : event.isError
+                              ? "failed"
+                              : "completed",
+                      },
+                    });
+                    return;
+                  }
+                }
+              }),
+            );
+          });
+        };
+        subscribeCurrent();
+        return subscribeCurrent;
+      }),
+      () =>
         Effect.tryPromise({
           try: () => session.abort(),
           catch: () => new ShutdownError(),
         }).pipe(
           Effect.catch(() => Effect.logError("Could not cancel Pi during shutdown")),
-          Effect.ensuring(Effect.sync(unsubscribe)),
+          Effect.ensuring(Effect.sync(() => unsubscribe())),
         ),
     );
+    runtime.setBeforeSessionInvalidate(() => unsubscribe());
+    const newSession = Effect.fn(function* ({
+      projectPath,
+      sessionId,
+    }: {
+      projectPath: string;
+      sessionId: string;
+    }) {
+      if (projectPath !== cwd || sessionId !== session.sessionId)
+        return yield* new NewSessionError({
+          message: "The selected session changed. Refresh and try again.",
+        });
+      if (replacing || state.status !== "idle" || active)
+        return yield* new NewSessionError({
+          message: "Wait for the current reply or Stop to finish.",
+        });
+      replacing = true;
+      return yield* Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () => access(session.sessionManager.getSessionDir(), constants.W_OK),
+          catch: () =>
+            new NewSessionError({
+              message: "Pi history is not writable. Check folder permissions, then Retry.",
+            }),
+        });
+        const next = yield* Effect.tryPromise({
+          try: () =>
+            createRuntime({
+              cwd,
+              agentDir,
+              sessionManager: SessionManager.create(cwd, session.sessionManager.getSessionDir()),
+            }),
+          catch: () =>
+            new NewSessionError({
+              message:
+                "Could not prepare a new session. Check project and Pi history permissions, then Retry.",
+            }),
+        });
+        prepared = next;
+        const outcome = yield* Effect.tryPromise({
+          try: () => runtime.newSession(),
+          catch: () => {
+            publish({
+              _tag: "StateChanged",
+              status: "unavailable",
+              runId: null,
+              messageCount: state.messageCount,
+              error:
+                "Session replacement failed. Restart the backend to recover the previous session.",
+            });
+            return new NewSessionError({
+              message:
+                "Could not start a new session. Restart the backend to recover the previous session.",
+            });
+          },
+        });
+        if (outcome.cancelled)
+          return yield* new NewSessionError({ message: "New session was cancelled. Retry." });
+        session = runtime.session;
+        messageId = "";
+        const nextFile = session.sessionFile;
+        if (!nextFile) {
+          state = {
+            ...state,
+            status: "unavailable",
+            error:
+              "Pi did not provide a recovery locator. Restart the backend to recover the previous session.",
+          };
+          publish({ _tag: "Snapshot", conversation: state });
+          return yield* new NewSessionError({ message: state.error });
+        }
+        const nextId = session.sessionId;
+        yield* Effect.callback<void, NewSessionError>((resume) => {
+          const locatorError = new NewSessionError({
+            message:
+              "Could not update the recovery locator. Restart the backend to recover the previous session.",
+          });
+          let settled = false;
+          const fail = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resume(Effect.fail(locatorError));
+          };
+          const onAck = (message: unknown) => {
+            if (
+              typeof message !== "object" ||
+              message === null ||
+              !("type" in message) ||
+              message.type !== "session-locator-ack" ||
+              !("sessionId" in message) ||
+              message.sessionId !== nextId
+            )
+              return;
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resume(Effect.void);
+          };
+          const timeout = setTimeout(fail, 5000);
+          const cleanup = () => {
+            clearTimeout(timeout);
+            process.off("message", onAck);
+          };
+          process.on("message", onAck);
+          if (!process.send) {
+            fail();
+            return Effect.sync(cleanup);
+          }
+          try {
+            process.send(
+              { type: "session-locator", sessionId: nextId, sessionFile: nextFile },
+              (error) => {
+                if (error) fail();
+              },
+            );
+          } catch {
+            fail();
+          }
+          return Effect.sync(cleanup);
+        }).pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              state = { ...state, status: "unavailable", error: error.message };
+              publish({ _tag: "Snapshot", conversation: state });
+            }),
+          ),
+        );
+        setupError = yield* checkSetup(session).pipe(
+          Effect.catch((error) => Effect.succeed(error)),
+        );
+        state = {
+          id: session.sessionId,
+          sessionFile: nextFile,
+          projectPath: cwd,
+          modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
+          setupError,
+          status: "idle",
+          runId: null,
+          messageCount: 0,
+          entries: [],
+          error: "",
+        };
+        attach();
+        publish({ _tag: "Snapshot", conversation: state });
+        return { sessionFile: nextFile };
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            replacing = false;
+            prepared?.session.dispose();
+            prepared = undefined;
+          }),
+        ),
+      );
+    });
     const send = Effect.fn(function* ({
       text,
       submissionId,
@@ -438,7 +629,7 @@ const program = Effect.gen(function* () {
     }) {
       if (state.setupError) return yield* new SendError({ message: state.setupError.message });
       if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
-      if (state.status !== "idle")
+      if (replacing || state.status !== "idle")
         return yield* new SendError({ message: "Wait for the current reply." });
       const run = {
         id: crypto.randomUUID(),
@@ -611,6 +802,7 @@ const program = Effect.gen(function* () {
                 }),
               ),
             ListSessions: listSessions,
+            NewSession: (payload) => newSession(payload).pipe(Effect.uninterruptible),
             Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
             Send: (payload) => send(payload).pipe(Effect.uninterruptible),
           }),
@@ -642,10 +834,12 @@ const program = Effect.gen(function* () {
     }
 
     function publish(update: typeof ConversationUpdate.Type) {
-      state = applyConversationUpdate(state, update);
+      const stamped =
+        update._tag === "Snapshot" ? update : { ...update, sessionId: session.sessionId };
+      state = applyConversationUpdate(state, stamped);
       if (subscribers.size === 0) return;
-      const bytes = Buffer.byteLength(JSON.stringify(update));
-      for (const enqueue of subscribers) enqueue(update, bytes);
+      const bytes = Buffer.byteLength(JSON.stringify(stamped));
+      for (const enqueue of subscribers) enqueue(stamped, bytes);
     }
   }).pipe(
     Effect.catchTag("RecoveryError", (error) =>
@@ -659,6 +853,7 @@ const program = Effect.gen(function* () {
                 Effect.fail(new HistoryError({ path: projectPath, message: error.message })),
               Stop: () => Effect.fail(new StopError({ message: error.message })),
               Send: () => Effect.fail(new SendError({ message: error.message })),
+              NewSession: () => Effect.fail(new NewSessionError({ message: error.message })),
             }),
           ),
         ),

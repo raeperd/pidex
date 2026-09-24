@@ -54,10 +54,11 @@ export class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
 
 export const Conversation = Schema.Struct({
   id: Schema.String,
+  sessionFile: ProjectPath,
   projectPath: Schema.String,
   modelName: Schema.String,
   setupError: Schema.NullOr(SetupError),
-  status: Schema.Literals(["idle", "running", "stopping"]),
+  status: Schema.Literals(["idle", "running", "stopping", "unavailable"]),
   runId: Schema.NullOr(Schema.String),
   messageCount: Schema.Number,
   entries: Schema.Array(Entry),
@@ -66,14 +67,20 @@ export const Conversation = Schema.Struct({
 
 export const ConversationUpdate = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Snapshot"), conversation: Conversation }),
-  Schema.Struct({ _tag: Schema.Literal("EntryUpserted"), entry: Entry }),
+  Schema.Struct({
+    _tag: Schema.Literal("EntryUpserted"),
+    sessionId: Schema.optional(Schema.String),
+    entry: Entry,
+  }),
   Schema.Struct({
     _tag: Schema.Literal("TextDelta"),
+    sessionId: Schema.optional(Schema.String),
     id: Schema.String,
     delta: Schema.String,
   }),
   Schema.Struct({
     _tag: Schema.Literal("StateChanged"),
+    sessionId: Schema.optional(Schema.String),
     status: Conversation.fields.status,
     runId: Conversation.fields.runId,
     messageCount: Conversation.fields.messageCount,
@@ -91,6 +98,10 @@ export class SendError extends Schema.TaggedError<SendError>()("SendError", {
 }) {}
 
 export class StopError extends Schema.TaggedError<StopError>()("StopError", {
+  message: Schema.String,
+}) {}
+
+export class NewSessionError extends Schema.TaggedError<NewSessionError>()("NewSessionError", {
   message: Schema.String,
 }) {}
 
@@ -114,12 +125,19 @@ export const ConversationApi = RpcGroup.make(
     error: SendError,
   }),
   Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),
+  Rpc.make("NewSession", {
+    payload: { projectPath: ProjectPath, sessionId: SessionLocator.fields.sessionId },
+    success: Schema.Struct({ sessionFile: ProjectPath }),
+    error: NewSessionError,
+  }),
 );
 
 export function applyConversationUpdate(
   current: typeof Conversation.Type,
   update: typeof ConversationUpdate.Type,
 ): typeof Conversation.Type {
+  if (update._tag !== "Snapshot" && update.sessionId && update.sessionId !== current.id)
+    return current;
   switch (update._tag) {
     case "Snapshot":
       return update.conversation;

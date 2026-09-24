@@ -31,7 +31,7 @@
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
   let editor = $state<HTMLTextAreaElement>();
-  const busy = $derived(conversation !== null && conversation.status !== "idle");
+  const busy = $derived(conversation?.status === "running" || conversation?.status === "stopping");
   let sending = $state(false);
   let pending: { id: string; text: string } | undefined;
   let connected = $state(true);
@@ -40,9 +40,12 @@
   let restarting = $state(false);
   let error = $state("");
   let showSessions = $state(false);
+  let replacing = $state(false);
+  let requestedNewFrom: string | undefined;
 
   let canSend = $derived(
     !sending &&
+      !replacing &&
       connected &&
       conversation?.status === "idle" &&
       !conversation.setupError &&
@@ -60,6 +63,12 @@
       if (update?._tag === "Snapshot") {
         conversation = update.conversation;
         crashed = false;
+        if (requestedNewFrom && conversation.id !== requestedNewFrom) {
+          draft = "";
+          pending = undefined;
+          error = "";
+          requestedNewFrom = undefined;
+        }
       } else if (update && conversation)
         conversation = applyConversationUpdate(conversation, update);
       if (
@@ -148,6 +157,34 @@
       choosing = false;
     }
   }
+
+  async function newSession() {
+    const selected = conversation;
+    if (!selected || selected.status !== "idle" || replacing || sending) return;
+    replacing = true;
+    requestedNewFrom = selected.id;
+    error = "";
+    try {
+      await window.desktop.newSession(selected.projectPath, selected.id);
+      draft = "";
+      pending = undefined;
+      requestedNewFrom = undefined;
+      showSessions = false;
+      await tick();
+      editor?.focus();
+    } catch {
+      if (conversation?.id !== selected.id) {
+        draft = "";
+        pending = undefined;
+        requestedNewFrom = undefined;
+      } else {
+        error =
+          "Could not start a new session. Check project and Pi history permissions, then Retry.";
+      }
+    } finally {
+      replacing = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -209,9 +246,11 @@
           !showSessions && "max-[799px]:hidden",
         ]}
       >
-        {#key conversation.projectPath}
+        {#key `${conversation.projectPath}:${conversation.id}`}
           <Sessions
             projectPath={conversation.projectPath}
+            canNew={connected && conversation.status === "idle" && !replacing && !sending}
+            onnew={newSession}
             oncurrent={async () => {
               showSessions = false;
               await tick();
@@ -298,8 +337,10 @@
           <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
             {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
             {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
-            {#if crashed}
-              <p role="alert">The backend stopped. Restart to recover saved history.</p>
+            {#if crashed || conversation.status === "unavailable"}
+              {#if crashed}<p role="alert">
+                  The backend stopped. Restart to recover saved history.
+                </p>{/if}
               <button
                 class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
                 onclick={restart}
@@ -340,9 +381,11 @@
                     ? "Disconnected"
                     : conversation.status === "idle"
                       ? "Idle"
-                      : conversation.status === "stopping"
-                        ? "Stopping"
-                        : "Running"}
+                      : conversation.status === "unavailable"
+                        ? "Unavailable"
+                        : conversation.status === "stopping"
+                          ? "Stopping"
+                          : "Running"}
                 </span>
               </div>
               <!-- t3code ComposerPrimaryActions.tsx at 4a560b4e4ebb37efb7f57805ba79e37f5500bdca.

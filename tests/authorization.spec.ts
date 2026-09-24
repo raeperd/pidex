@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { testHeadlessFlag } from "./support/headless.js";
 import { NodeSocket } from "@effect/platform-node";
 import { Schema } from "effect";
 import { once } from "node:events";
@@ -82,7 +83,12 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
   );
   const app = await electron.launch({
     args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
-    env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: temporary,
+      TMPDIR: tmpdir(),
+      PIDEX_TEST_HEADLESS: testHeadlessFlag,
+    },
   });
   cleanup.defer(() => app.close());
   const logs = { stdout: "", stderr: "", renderer: "" };
