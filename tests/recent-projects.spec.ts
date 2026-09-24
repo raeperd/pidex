@@ -13,6 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { testHeadlessFlag } from "./support/headless.js";
 import { test } from "./support/lifecycle.js";
 
 test("#193 a second app process cannot overwrite the same recent-project metadata", async ({
@@ -20,10 +21,18 @@ test("#193 a second app process cannot overwrite the same recent-project metadat
 }) => {
   await using cleanup = new AsyncDisposableStack();
   const first = await lifecycle.launch(false);
+  expect(
+    await first.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()),
+  ).toBe(testHeadlessFlag !== "1");
   const binary: unknown = createRequire(import.meta.url)("electron");
   if (typeof binary !== "string") throw new Error("Electron binary is unavailable");
   const second = spawn(binary, ["dist/desktop/main.js", `--user-data-dir=${lifecycle.home}`], {
-    env: { PATH: process.env.PATH ?? "", HOME: lifecycle.home, TMPDIR: tmpdir() },
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: lifecycle.home,
+      TMPDIR: tmpdir(),
+      PIDEX_TEST_HEADLESS: testHeadlessFlag,
+    },
   });
   cleanup.defer(() => {
     if (second.exitCode === null) second.kill("SIGKILL");
