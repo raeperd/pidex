@@ -15,6 +15,12 @@ pnpm dev
 
 ## Verification
 
+Playwright acceptance tests hide the Electron window by default while still exercising the real app and renderer. Set `PIDEX_TEST_HEADLESS=0` to show it during a test run:
+
+```sh
+PIDEX_TEST_HEADLESS=0 pnpm test tests/project-selection.spec.ts
+```
+
 ```sh
 pnpm check
 pnpm test tests/project-selection.spec.ts
