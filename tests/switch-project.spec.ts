@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testHeadlessFlag } from "./support/headless.js";
 import { test } from "./support/lifecycle.js";
 
 test("#195 switches the owned server to a second project and rejects stale targets", async ({
@@ -13,6 +14,9 @@ test("#195 switches the owned server to a second project and rejects stale targe
   await writeFile(join(lifecycle.project, "AGENTS.md"), "First project instruction");
   await writeFile(join(secondProject, "AGENTS.md"), "Second project instruction");
   const app = await lifecycle.launch();
+  expect(
+    await app.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()),
+  ).toBe(testHeadlessFlag !== "1");
   const initial = await app.page.evaluate(
     () =>
       new Promise<{ projectPath: string; id: string }>((resolve) => {
