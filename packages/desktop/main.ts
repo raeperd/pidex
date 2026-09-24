@@ -293,12 +293,6 @@ const program = Effect.gen(function* () {
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid project target" })),
         );
-        if (!switchProject || quitting || switching || pendingResume || !conversation)
-          return yield* new DesktopError({ message: "Project selection is unavailable" });
-        if (pendingSwitch && pendingSwitch !== target.projectPath)
-          return yield* new DesktopError({
-            message: "Resolve the pending switch before selecting another project.",
-          });
         if (pickedProject !== target.projectPath) {
           const metadata = yield* loadMetadata();
           if (!metadata.recentProjects.includes(target.projectPath))
@@ -306,6 +300,12 @@ const program = Effect.gen(function* () {
               message: "Choose this folder or select it from recent projects first.",
             });
         }
+        if (!switchProject || quitting || switching || pendingResume || !conversation)
+          return yield* new DesktopError({ message: "Project selection is unavailable" });
+        if (pendingSwitch && pendingSwitch !== target.projectPath)
+          return yield* new DesktopError({
+            message: "Resolve the pending switch before selecting another project.",
+          });
         const retrying = pendingSwitch !== undefined;
         if (
           retrying &&

@@ -584,7 +584,7 @@
                 disabled={restarting}>Restart</button
               >
             {/if}
-            {#if switchTarget}<button
+            {#if switchTarget && conversation.status === "idle"}<button
                 class="mr-2 rounded-lg border border-solid border-border bg-raised px-4 py-2 text-sm text-foreground"
                 onclick={() => switchToProject(switchTarget)}
                 disabled={replacing}>Retry switch</button
