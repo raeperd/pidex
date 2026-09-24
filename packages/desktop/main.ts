@@ -82,6 +82,8 @@ const program = Effect.gen(function* () {
   let starting = false;
   let switching = false;
   let pendingResume: typeof SessionLocator.Type | undefined;
+  let pendingSwitch: string | undefined;
+  let pendingSwitchLocator: typeof SessionLocator.Type | undefined;
   // Shared by the RPC result and subscription reconciliation in this application lifetime.
   // oxlint-disable-next-line consistent-function-scoping
   const matchesResume = (
@@ -204,14 +206,7 @@ const program = Effect.gen(function* () {
       ),
     );
   });
-  const openProject = Effect.fn(function* (cwd: string) {
-    const canonical = yield* Effect.tryPromise({
-      try: () => realpath(cwd),
-      catch: () =>
-        new DesktopError({
-          message: `Could not open ${cwd}. Check that the folder exists and is accessible, or Choose another folder.`,
-        }),
-    });
+  const rememberProject = Effect.fn(function* (canonical: string) {
     const metadata = yield* loadMetadata();
     const recentProjects = [canonical];
     const seen = new Set(recentProjects);
@@ -239,6 +234,16 @@ const program = Effect.gen(function* () {
           message: "Could not save recent projects. Check storage permissions and Retry.",
         }),
     }).pipe(Effect.ensuring(Effect.promise(() => unlink(temporary).catch(() => {}))));
+  });
+  const openProject = Effect.fn(function* (cwd: string) {
+    const canonical = yield* Effect.tryPromise({
+      try: () => realpath(cwd),
+      catch: () =>
+        new DesktopError({
+          message: `Could not open ${cwd}. Check that the folder exists and is accessible, or Choose another folder.`,
+        }),
+    });
+    yield* rememberProject(canonical);
     project = canonical;
     sessionFile = undefined;
     interrupted = false;
@@ -264,6 +269,89 @@ const program = Effect.gen(function* () {
         locator: typeof SessionLocator.Type,
       ) => Effect.Effect<typeof Conversation.Type | "uncertain", DesktopError>)
     | undefined;
+  let switchProject:
+    | ((
+        projectPath: string,
+        currentProjectPath: string,
+        currentSessionId: string,
+      ) => Effect.Effect<typeof Conversation.Type | "uncertain", DesktopError>)
+    | undefined;
+  ipcMain.handle("switch-project", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            projectPath: ProjectPath,
+            currentProjectPath: ProjectPath,
+            currentSessionId: SessionLocator.fields.sessionId,
+          }),
+        )(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid project target" })),
+        );
+        if (
+          !switchProject ||
+          quitting ||
+          switching ||
+          pendingResume ||
+          pendingSwitch ||
+          !conversation
+        )
+          return yield* new DesktopError({ message: "Project selection is unavailable" });
+        if (
+          conversation.projectPath !== target.currentProjectPath ||
+          conversation.id !== target.currentSessionId
+        )
+          return yield* new DesktopError({
+            message: "The selected session changed. Refresh and try again.",
+          });
+        switching = true;
+        pendingSwitch = target.projectPath;
+        const selected = yield* switchProject(
+          target.projectPath,
+          target.currentProjectPath,
+          target.currentSessionId,
+        ).pipe(
+          Effect.tapError(() =>
+            Effect.sync(() => {
+              pendingSwitch = undefined;
+              pendingSwitchLocator = undefined;
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              switching = false;
+            }),
+          ),
+        );
+        if (selected === "uncertain" && conversation?.projectPath !== target.projectPath)
+          return {
+            conversation: null,
+            error: "Switch result is uncertain. Wait for reconnect or Retry before sending.",
+            uncertain: true,
+          };
+        const current = selected === "uncertain" ? conversation : selected;
+        if (!current || current.status === "unavailable")
+          return {
+            conversation: null,
+            error: "Switch did not finish. Restart the backend before sending.",
+            uncertain: true,
+          };
+        pendingSwitch = undefined;
+        pendingSwitchLocator = undefined;
+        project = current.projectPath;
+        sessionFile = current.sessionFile;
+        yield* rememberProject(current.projectPath);
+        return { conversation: current, error: "", uncertain: false };
+      }).pipe(
+        Effect.match({
+          onSuccess: (result) => result,
+          onFailure: (error) => ({ conversation: null, error: error.message, uncertain: false }),
+        }),
+      ),
+    ),
+  );
   ipcMain.handle("new-session", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -390,7 +478,7 @@ const program = Effect.gen(function* () {
         const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
         );
-        if (!sendPrompt || quitting || switching || pendingResume)
+        if (!sendPrompt || quitting || switching || pendingResume || pendingSwitch)
           return yield* new DesktopError({ message: "Choose a project first" });
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
@@ -447,7 +535,7 @@ const program = Effect.gen(function* () {
         const path = yield* Schema.decodeUnknownEffect(ProjectPath)(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid project path" })),
         );
-        if (conversation || choosing || quitting)
+        if (conversation || choosing || quitting || switching || pendingSwitch)
           return yield* new DesktopError({ message: "Project selection is unavailable" });
         const metadata = yield* loadMetadata();
         if (!metadata.recentProjects.includes(path))
@@ -469,7 +557,10 @@ const program = Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
         if (
-          (!crashed && conversation?.status !== "unavailable" && !pendingResume) ||
+          (!crashed &&
+            conversation?.status !== "unavailable" &&
+            !pendingResume &&
+            !pendingSwitch) ||
           starting ||
           quitting ||
           !project
@@ -477,23 +568,35 @@ const program = Effect.gen(function* () {
           return;
         const child = server?.child;
         if (child && child.exitCode === null && child.signalCode === null) {
-          if (conversation?.status !== "unavailable" && !pendingResume) return;
+          if (conversation?.status !== "unavailable" && !pendingResume && !pendingSwitch) return;
           if (pendingResume) sessionFile = undefined;
           yield* Effect.callback<void, DesktopError>((resume) => {
-            const onExit = () => resume(Effect.void);
+            const onExit = () => {
+              clearTimeout(forceExit);
+              resume(Effect.void);
+            };
+            const forceExit = setTimeout(() => {
+              if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+            }, 5000);
             child.once("exit", onExit);
             try {
               child.kill();
             } catch {
+              clearTimeout(forceExit);
               child.off("exit", onExit);
               resume(
                 Effect.fail(new DesktopError({ message: "Could not restart the Pi backend" })),
               );
             }
-            return Effect.sync(() => child.off("exit", onExit));
+            return Effect.sync(() => {
+              clearTimeout(forceExit);
+              child.off("exit", onExit);
+            });
           });
         }
         pendingResume = undefined;
+        pendingSwitch = undefined;
+        pendingSwitchLocator = undefined;
         yield* startServer();
       }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
@@ -526,6 +629,7 @@ const program = Effect.gen(function* () {
             type: Schema.Literal("session-locator"),
             sessionId: Schema.String,
             sessionFile: ProjectPath,
+            projectPath: Schema.optional(ProjectPath),
           }),
         )(message);
         if (Exit.isFailure(decoded) || server?.child !== child) return;
@@ -535,7 +639,15 @@ const program = Effect.gen(function* () {
             pendingResume.sessionFile !== decoded.value.sessionFile)
         )
           return;
-        sessionFile = decoded.value.sessionFile;
+        if (pendingSwitch) {
+          if (decoded.value.projectPath !== pendingSwitch) return;
+          pendingSwitchLocator = {
+            projectPath: pendingSwitch,
+            sessionId: decoded.value.sessionId,
+            sessionFile: decoded.value.sessionFile,
+          };
+        } else if (!decoded.value.projectPath || decoded.value.projectPath === project)
+          sessionFile = decoded.value.sessionFile;
         if (child.connected)
           child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
             // A closed channel leaves the backend waiting for the acknowledgment timeout.
@@ -555,6 +667,7 @@ const program = Effect.gen(function* () {
         listSessions = undefined;
         startNewSession = undefined;
         resumeSession = undefined;
+        switchProject = undefined;
         stopRun = undefined;
         currentRun = undefined;
         if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
@@ -661,6 +774,15 @@ const program = Effect.gen(function* () {
                   : Effect.succeed<"uncertain">("uncertain");
               }),
             );
+          switchProject = (projectPath, currentProjectPath, currentSessionId) =>
+            client.SwitchProject({ projectPath, currentProjectPath, currentSessionId }).pipe(
+              Effect.catchCause((cause) => {
+                const failure = Cause.findErrorOption(cause);
+                return Option.isSome(failure) && failure.value._tag === "SwitchError"
+                  ? Effect.fail(new DesktopError({ message: failure.value.message }))
+                  : Effect.succeed<"uncertain">("uncertain");
+              }),
+            );
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
@@ -671,7 +793,22 @@ const program = Effect.gen(function* () {
                       sessionFile = pendingResume.sessionFile;
                       pendingResume = undefined;
                     }
-                  } else sessionFile = update.conversation.sessionFile;
+                  } else if (
+                    !pendingSwitch &&
+                    update.conversation.status !== "unavailable" &&
+                    update.conversation.projectPath === project
+                  )
+                    sessionFile = update.conversation.sessionFile;
+                  if (
+                    pendingSwitch &&
+                    pendingSwitchLocator &&
+                    matchesResume(update.conversation, pendingSwitchLocator)
+                  ) {
+                    project = pendingSwitchLocator.projectPath;
+                    sessionFile = pendingSwitchLocator.sessionFile;
+                    pendingSwitch = undefined;
+                    pendingSwitchLocator = undefined;
+                  }
                   connectionError = "";
                   currentRun = client.Subscribe().pipe(
                     Stream.runHead,
@@ -697,15 +834,22 @@ const program = Effect.gen(function* () {
                       ),
                     );
                   sendPrompt = (text, submissionId) =>
-                    client.Send({ text, submissionId }).pipe(
-                      Effect.map((): "accepted" => "accepted"),
-                      Effect.catchCause((cause) => {
-                        const failure = Cause.findErrorOption(cause);
-                        return Option.isSome(failure) && failure.value._tag === "SendError"
-                          ? Effect.fail(new DesktopError({ message: failure.value.message }))
-                          : Effect.succeed<"uncertain">("uncertain");
-                      }),
-                    );
+                    client
+                      .Send({
+                        projectPath: update.conversation.projectPath,
+                        sessionId: update.conversation.id,
+                        text,
+                        submissionId,
+                      })
+                      .pipe(
+                        Effect.map((): "accepted" => "accepted"),
+                        Effect.catchCause((cause) => {
+                          const failure = Cause.findErrorOption(cause);
+                          return Option.isSome(failure) && failure.value._tag === "SendError"
+                            ? Effect.fail(new DesktopError({ message: failure.value.message }))
+                            : Effect.succeed<"uncertain">("uncertain");
+                        }),
+                      );
                 } else if (conversation)
                   conversation = applyConversationUpdate(conversation, update);
                 if (window && !window.isDestroyed())
@@ -722,6 +866,7 @@ const program = Effect.gen(function* () {
               listSessions = undefined;
               startNewSession = undefined;
               resumeSession = undefined;
+              switchProject = undefined;
               stopRun = undefined;
               currentRun = undefined;
               if (window && !window.isDestroyed()) window.webContents.send("conversation", null);

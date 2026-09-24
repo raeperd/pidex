@@ -2,6 +2,7 @@ import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import {
   createAgentSession,
   createAgentSessionRuntime,
+  type AgentSessionRuntime,
   type CreateAgentSessionRuntimeResult,
   DefaultResourceLoader,
   getAgentDir,
@@ -29,6 +30,7 @@ import {
   HistoryError,
   NewSessionError,
   ResumeError,
+  SwitchError,
   SavedSession,
   SessionLocator,
   ProjectPath,
@@ -146,7 +148,8 @@ const program = Effect.gen(function* () {
         diagnostics: [],
       };
     };
-    const runtime = yield* Effect.acquireRelease(
+    let runtime: AgentSessionRuntime;
+    runtime = yield* Effect.acquireRelease(
       Effect.gen(function* () {
         const sessionManager = yield* Effect.try({
           try: () =>
@@ -167,17 +170,17 @@ const program = Effect.gen(function* () {
           catch: () => new StartupError(),
         });
       }),
-      (acquired) =>
+      () =>
         Effect.gen(function* () {
           yield* Effect.tryPromise({
-            try: () => acquired.dispose(),
+            try: () => runtime.dispose(),
             catch: () => new ShutdownError(),
           });
           yield* Effect.tryPromise({
-            try: () => acquired.session.settingsManager.flush(),
+            try: () => runtime.session.settingsManager.flush(),
             catch: () => new ShutdownError(),
           });
-          const errors = yield* Effect.sync(() => acquired.session.settingsManager.drainErrors());
+          const errors = yield* Effect.sync(() => runtime.session.settingsManager.drainErrors());
           if (errors.length > 0) return yield* new ShutdownError();
         }).pipe(Effect.catch(() => Effect.logError("Could not flush Pi settings during shutdown"))),
     );
@@ -192,7 +195,7 @@ const program = Effect.gen(function* () {
           path,
           message: `Cannot read saved history: ${path}. Check file and folder permissions or restore a valid Pi session, then Retry. Saved files have not been changed.`,
         });
-      if (projectPath !== process.cwd())
+      if (projectPath !== runtime.cwd)
         return yield* new HistoryError({
           path: projectPath,
           message:
@@ -290,8 +293,8 @@ const program = Effect.gen(function* () {
     const snapshot = (notice = false): typeof Conversation.Type => {
       let restored: typeof Conversation.Type = {
         id: session.sessionId,
-        sessionFile: session.sessionFile ?? cwd,
-        projectPath: process.cwd(),
+        sessionFile: session.sessionFile ?? runtime.cwd,
+        projectPath: runtime.cwd,
         modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
         setupError,
         status: "idle",
@@ -479,7 +482,7 @@ const program = Effect.gen(function* () {
       projectPath: string;
       sessionId: string;
     }) {
-      if (projectPath !== cwd || sessionId !== session.sessionId)
+      if (projectPath !== runtime.cwd || sessionId !== session.sessionId)
         return yield* new NewSessionError({
           message: "The selected session changed. Refresh and try again.",
         });
@@ -499,9 +502,12 @@ const program = Effect.gen(function* () {
         const next = yield* Effect.tryPromise({
           try: () =>
             createRuntime({
-              cwd,
+              cwd: runtime.cwd,
               agentDir,
-              sessionManager: SessionManager.create(cwd, session.sessionManager.getSessionDir()),
+              sessionManager: SessionManager.create(
+                runtime.cwd,
+                session.sessionManager.getSessionDir(),
+              ),
             }),
           catch: () =>
             new NewSessionError({
@@ -605,7 +611,7 @@ const program = Effect.gen(function* () {
         state = {
           id: session.sessionId,
           sessionFile: nextFile,
-          projectPath: cwd,
+          projectPath: runtime.cwd,
           modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
           setupError,
           status: "idle",
@@ -632,7 +638,7 @@ const program = Effect.gen(function* () {
         message:
           "Cannot resume saved history. The file is missing, unreadable, or changed. Check the session file and folder permissions, then Retry. Your current session is preserved.",
       });
-      if (locator.projectPath !== cwd)
+      if (locator.projectPath !== runtime.cwd)
         return yield* new ResumeError({
           message: "This session belongs to another project. Open that project first.",
         });
@@ -686,9 +692,9 @@ const program = Effect.gen(function* () {
           try: () => realpath(header.cwd),
           catch: () => failure,
         });
-        if (project !== cwd) return yield* failure;
+        if (project !== runtime.cwd) return yield* failure;
         const listed = yield* Effect.tryPromise({
-          try: () => SessionManager.list(cwd, directory),
+          try: () => SessionManager.list(runtime.cwd, directory),
           catch: () => failure,
         });
         if (
@@ -829,13 +835,193 @@ const program = Effect.gen(function* () {
         ),
       );
     });
+    const switchProject = Effect.fn(function* ({
+      projectPath,
+      currentProjectPath,
+      currentSessionId,
+    }: {
+      projectPath: string;
+      currentProjectPath: string;
+      currentSessionId: string;
+    }) {
+      if (currentProjectPath !== runtime.cwd || currentSessionId !== session.sessionId)
+        return yield* new SwitchError({
+          message: "The selected session changed. Refresh and try again.",
+        });
+      if (replacing || active || state.status !== "idle" || session.isStreaming)
+        return yield* new SwitchError({ message: "Wait for the current run or Stop to finish." });
+      if (projectPath === runtime.cwd) return state;
+      replacing = true;
+      return yield* Effect.gen(function* () {
+        const target = yield* Effect.tryPromise({
+          try: () => realpath(projectPath),
+          catch: () =>
+            new SwitchError({
+              message: `Cannot open ${projectPath}. Check the folder, then Retry.`,
+            }),
+        });
+        if (target !== projectPath)
+          return yield* new SwitchError({
+            message: "The project path changed. Refresh recent projects and Retry.",
+          });
+        yield* Effect.tryPromise({
+          try: () => access(target, constants.R_OK | constants.X_OK),
+          catch: () =>
+            new SwitchError({
+              message: `Cannot access ${target}. Check folder permissions, then Retry.`,
+            }),
+        });
+        const next = yield* Effect.tryPromise({
+          try: () =>
+            createAgentSessionRuntime(createRuntime, {
+              cwd: target,
+              agentDir,
+              sessionManager: SessionManager.create(target),
+            }),
+          catch: () =>
+            new SwitchError({
+              message: "Could not prepare this project. Check Pi history permissions, then Retry.",
+            }),
+        });
+        const previous = runtime;
+        yield* Effect.tryPromise({
+          try: () => previous.dispose(),
+          catch: () =>
+            new SwitchError({
+              message:
+                "Could not release the previous session. Restart the backend before sending.",
+            }),
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.gen(function* () {
+              publish({
+                _tag: "Snapshot",
+                conversation: {
+                  ...snapshot(true),
+                  status: "unavailable",
+                  error: "Session replacement failed. Restart the backend before sending.",
+                },
+              });
+              yield* Effect.tryPromise({
+                try: () => next.dispose(),
+                catch: () =>
+                  new SwitchError({ message: "Could not dispose the prepared session." }),
+              }).pipe(
+                Effect.catch(() => Effect.logWarning("Could not dispose the prepared session")),
+              );
+            }),
+          ),
+        );
+        runtime = next;
+        session = next.session;
+        runtime.setBeforeSessionInvalidate(() => unsubscribe());
+        messageId = "";
+        const nextFile = session.sessionFile;
+        if (!nextFile) {
+          publish({
+            _tag: "Snapshot",
+            conversation: {
+              ...snapshot(true),
+              status: "unavailable",
+              error: "Pi did not provide a recovery locator. Restart the backend before sending.",
+            },
+          });
+          return yield* new SwitchError({
+            message: "Pi did not provide a recovery locator. Restart the backend before sending.",
+          });
+        }
+        yield* Effect.callback<void, SwitchError>((resume) => {
+          const error = new SwitchError({
+            message: "Could not update the recovery locator. Restart the backend before sending.",
+          });
+          let settled = false;
+          const cleanup = () => {
+            clearTimeout(timeout);
+            process.off("message", onAck);
+          };
+          const fail = () => {
+            if (!settled) {
+              settled = true;
+              cleanup();
+              resume(Effect.fail(error));
+            }
+          };
+          const onAck = (message: unknown) => {
+            if (
+              typeof message !== "object" ||
+              message === null ||
+              !("type" in message) ||
+              message.type !== "session-locator-ack" ||
+              !("sessionId" in message) ||
+              message.sessionId !== session.sessionId ||
+              settled
+            )
+              return;
+            settled = true;
+            cleanup();
+            resume(Effect.void);
+          };
+          const timeout = setTimeout(fail, 5000);
+          process.on("message", onAck);
+          if (!process.send) {
+            fail();
+            return Effect.sync(cleanup);
+          }
+          try {
+            process.send(
+              {
+                type: "session-locator",
+                projectPath: target,
+                sessionId: session.sessionId,
+                sessionFile: nextFile,
+              },
+              (sendError) => {
+                if (sendError) fail();
+              },
+            );
+          } catch {
+            fail();
+          }
+          return Effect.sync(cleanup);
+        }).pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              publish({
+                _tag: "Snapshot",
+                conversation: { ...snapshot(true), status: "unavailable", error: error.message },
+              });
+            }),
+          ),
+        );
+        setupError = yield* checkSetup(session).pipe(
+          Effect.catch((error) => Effect.succeed(error)),
+        );
+        attach();
+        publish({ _tag: "Snapshot", conversation: snapshot(true) });
+        return state;
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            replacing = false;
+          }),
+        ),
+      );
+    });
     const send = Effect.fn(function* ({
+      projectPath,
+      sessionId,
       text,
       submissionId,
     }: {
+      projectPath: string;
+      sessionId: string;
       text: string;
       submissionId?: string;
     }) {
+      if (projectPath !== runtime.cwd || sessionId !== session.sessionId)
+        return yield* new SendError({
+          message: "The selected session changed. Refresh before sending.",
+        });
       if (state.setupError) return yield* new SendError({ message: state.setupError.message });
       if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
       if (replacing || state.status !== "idle")
@@ -1013,6 +1199,7 @@ const program = Effect.gen(function* () {
             ListSessions: listSessions,
             NewSession: (payload) => newSession(payload).pipe(Effect.uninterruptible),
             ResumeSession: (payload) => resumeSession(payload).pipe(Effect.uninterruptible),
+            SwitchProject: (payload) => switchProject(payload).pipe(Effect.uninterruptible),
             Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
             Send: (payload) => send(payload).pipe(Effect.uninterruptible),
           }),
@@ -1065,6 +1252,7 @@ const program = Effect.gen(function* () {
               Send: () => Effect.fail(new SendError({ message: error.message })),
               NewSession: () => Effect.fail(new NewSessionError({ message: error.message })),
               ResumeSession: () => Effect.fail(new ResumeError({ message: error.message })),
+              SwitchProject: () => Effect.fail(new SwitchError({ message: error.message })),
             }),
           ),
         ),

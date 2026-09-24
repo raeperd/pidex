@@ -9,7 +9,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeSocket as PlatformNodeSocket } from "@effect/platform-node";
 import { Schema } from "effect";
-import { ConversationUpdate } from "../packages/api/index.js";
+import { Conversation, ConversationUpdate } from "../packages/api/index.js";
 import { test } from "./support/lifecycle.js";
 
 // Playwright requires destructuring even when only testInfo is needed.
@@ -626,13 +626,20 @@ test.describe("#130 subscription limits", () => {
       const subscribe = { _tag: "Request", id: "1", tag: "Subscribe", payload: null, headers: [] };
       fast.send(subscribe);
       slow.send(subscribe);
-      await fast.next((message) => message._tag === "Chunk");
+      const first = await fast.next((message) => message._tag === "Chunk");
       await slow.next((message) => message._tag === "Chunk");
+      const selected = Schema.decodeUnknownSync(
+        Schema.Struct({ _tag: Schema.Literal("Snapshot"), conversation: Conversation }),
+      )(first.values?.[0]).conversation;
       fast.send({
         _tag: "Request",
         id: "2",
         tag: "Send",
-        payload: { text: "Stream a controlled response" },
+        payload: {
+          projectPath: selected.projectPath,
+          sessionId: selected.id,
+          text: "Stream a controlled response",
+        },
         headers: [],
       });
       await fast.next(
