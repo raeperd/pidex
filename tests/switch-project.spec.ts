@@ -183,6 +183,10 @@ test("#195 locator acknowledgment failure disables Send and recovers the previou
   const secondProject = join(lifecycle.home, "second-project");
   await mkdir(secondProject);
   const target = await realpath(secondProject);
+  await writeFile(
+    join(lifecycle.home, "metadata.json"),
+    JSON.stringify({ version: 1, recentProjects: [await realpath(lifecycle.project), target] }),
+  );
   const fault = await app.app.evaluateHandle((_electron, destination) => {
     const childProcess = process.getBuiltinModule("child_process");
     const prototype = childProcess.ChildProcess.prototype;
