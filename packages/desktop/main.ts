@@ -83,6 +83,7 @@ const program = Effect.gen(function* () {
   let switching = false;
   let pendingResume: typeof SessionLocator.Type | undefined;
   let pendingSwitch: string | undefined;
+  let pendingSwitchLocator: typeof SessionLocator.Type | undefined;
   // Shared by the RPC result and subscription reconciliation in this application lifetime.
   // oxlint-disable-next-line consistent-function-scoping
   const matchesResume = (
@@ -315,6 +316,7 @@ const program = Effect.gen(function* () {
           Effect.tapError(() =>
             Effect.sync(() => {
               pendingSwitch = undefined;
+              pendingSwitchLocator = undefined;
             }),
           ),
           Effect.ensuring(
@@ -337,6 +339,7 @@ const program = Effect.gen(function* () {
             uncertain: true,
           };
         pendingSwitch = undefined;
+        pendingSwitchLocator = undefined;
         project = current.projectPath;
         sessionFile = current.sessionFile;
         yield* rememberProject(current.projectPath);
@@ -554,7 +557,10 @@ const program = Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
         if (
-          (!crashed && conversation?.status !== "unavailable" && !pendingResume) ||
+          (!crashed &&
+            conversation?.status !== "unavailable" &&
+            !pendingResume &&
+            !pendingSwitch) ||
           starting ||
           quitting ||
           !project
@@ -562,23 +568,35 @@ const program = Effect.gen(function* () {
           return;
         const child = server?.child;
         if (child && child.exitCode === null && child.signalCode === null) {
-          if (conversation?.status !== "unavailable" && !pendingResume) return;
+          if (conversation?.status !== "unavailable" && !pendingResume && !pendingSwitch) return;
           if (pendingResume) sessionFile = undefined;
           yield* Effect.callback<void, DesktopError>((resume) => {
-            const onExit = () => resume(Effect.void);
+            const onExit = () => {
+              clearTimeout(forceExit);
+              resume(Effect.void);
+            };
+            const forceExit = setTimeout(() => {
+              if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+            }, 5000);
             child.once("exit", onExit);
             try {
               child.kill();
             } catch {
+              clearTimeout(forceExit);
               child.off("exit", onExit);
               resume(
                 Effect.fail(new DesktopError({ message: "Could not restart the Pi backend" })),
               );
             }
-            return Effect.sync(() => child.off("exit", onExit));
+            return Effect.sync(() => {
+              clearTimeout(forceExit);
+              child.off("exit", onExit);
+            });
           });
         }
         pendingResume = undefined;
+        pendingSwitch = undefined;
+        pendingSwitchLocator = undefined;
         yield* startServer();
       }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
@@ -621,9 +639,15 @@ const program = Effect.gen(function* () {
             pendingResume.sessionFile !== decoded.value.sessionFile)
         )
           return;
-        if (pendingSwitch && decoded.value.projectPath !== pendingSwitch) return;
-        if (decoded.value.projectPath) project = decoded.value.projectPath;
-        sessionFile = decoded.value.sessionFile;
+        if (pendingSwitch) {
+          if (decoded.value.projectPath !== pendingSwitch) return;
+          pendingSwitchLocator = {
+            projectPath: pendingSwitch,
+            sessionId: decoded.value.sessionId,
+            sessionFile: decoded.value.sessionFile,
+          };
+        } else if (!decoded.value.projectPath || decoded.value.projectPath === project)
+          sessionFile = decoded.value.sessionFile;
         if (child.connected)
           child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
             // A closed channel leaves the backend waiting for the acknowledgment timeout.
@@ -769,13 +793,22 @@ const program = Effect.gen(function* () {
                       sessionFile = pendingResume.sessionFile;
                       pendingResume = undefined;
                     }
-                  } else sessionFile = update.conversation.sessionFile;
+                  } else if (
+                    !pendingSwitch &&
+                    update.conversation.status !== "unavailable" &&
+                    update.conversation.projectPath === project
+                  )
+                    sessionFile = update.conversation.sessionFile;
                   if (
                     pendingSwitch &&
-                    update.conversation.projectPath === pendingSwitch &&
-                    update.conversation.status !== "unavailable"
-                  )
+                    pendingSwitchLocator &&
+                    matchesResume(update.conversation, pendingSwitchLocator)
+                  ) {
+                    project = pendingSwitchLocator.projectPath;
+                    sessionFile = pendingSwitchLocator.sessionFile;
                     pendingSwitch = undefined;
+                    pendingSwitchLocator = undefined;
+                  }
                   connectionError = "";
                   currentRun = client.Subscribe().pipe(
                     Stream.runHead,
