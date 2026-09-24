@@ -49,9 +49,14 @@ async function setup(cleanup: AsyncDisposableStack) {
     JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-luna" }),
   );
   const requests: ServerResponse[] = [];
+  const cancellations: ServerResponse[] = [];
   const requestBodies: string[] = [];
   const providerInputs: unknown[] = [];
   const provider = createServer((request, response) => {
+    if (request.url === "/cancel") {
+      cancellations.push(response);
+      return;
+    }
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
@@ -109,6 +114,8 @@ async function setup(cleanup: AsyncDisposableStack) {
     home,
     project,
     requests,
+    cancellations,
+    providerUrl: `http://127.0.0.1:${address.port}`,
     requestBodies,
     providerInputs,
     apps,
@@ -163,6 +170,11 @@ async function setup(cleanup: AsyncDisposableStack) {
         );
       }
       response.end("data: [DONE]\n\n");
+    },
+    acknowledgeCancellation() {
+      const response = cancellations.at(-1);
+      if (!response) throw new Error("No pending cancellation");
+      response.end("acknowledged");
     },
     async history() {
       const root = join(agentDir, "sessions");
