@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { testHeadlessFlag } from "./support/headless.js";
 import { mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -106,7 +107,12 @@ for (const accepted of [true, false]) {
     );
     const app = await electron.launch({
       args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
-      env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: temporary,
+        TMPDIR: tmpdir(),
+        PIDEX_TEST_HEADLESS: testHeadlessFlag,
+      },
     });
     const electronProcess = app.process();
     const context = app.context();

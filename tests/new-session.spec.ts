@@ -7,7 +7,10 @@ import { alive, test } from "./support/lifecycle.js";
 test("#192 starts another Pi session from an empty list and an idle session", async ({
   lifecycle,
 }) => {
-  const { page, children } = await lifecycle.launch();
+  const { app, page, children } = await lifecycle.launch();
+  expect(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()),
+  ).toBe(process.env.PIDEX_TEST_HEADLESS === "0");
   const list = page.getByRole("region", { name: "Saved sessions" });
   await expect(list).toContainText("No saved sessions in this project.");
   const prompt = page.getByRole("textbox", { name: "Prompt" });
