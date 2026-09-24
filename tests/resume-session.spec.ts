@@ -317,6 +317,9 @@ test("#194 Restart resolves an uncertain Resume when the file is no longer avail
   await rm(saved.path);
   await fault.evaluate((gate) => gate.restore());
   await second.page.getByRole("button", { name: "Restart" }).click();
+  await expect(second.page.getByRole("button", { name: "Restart" })).toBeHidden({
+    timeout: 15000,
+  });
   await expect(second.page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
   await expect(composer).toHaveValue("");
   await expect(second.page.getByRole("region", { name: "Messages" })).not.toContainText(
