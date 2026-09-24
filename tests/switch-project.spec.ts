@@ -74,6 +74,40 @@ test("#195 switches the owned server to a second project and rejects stale targe
   expect(metadata.recentProjects[0]).toBe(await realpath(secondProject));
 });
 
+test("#195 serializes concurrent project switches before selecting a recovery locator", async ({
+  lifecycle,
+}) => {
+  const app = await lifecycle.launch();
+  const projectPath = await realpath(lifecycle.project);
+  const secondProject = join(lifecycle.home, "second-project");
+  await mkdir(secondProject);
+  const target = await realpath(secondProject);
+  await writeFile(
+    join(lifecycle.home, "metadata.json"),
+    JSON.stringify({ version: 1, recentProjects: [projectPath, target] }),
+  );
+  const results = await app.page.evaluate(async (destination) => {
+    const selected = await new Promise<{ projectPath: string; id: string }>((resolve) => {
+      const unsubscribe = window.desktop.subscribe((update) => {
+        if (update?._tag === "Snapshot") {
+          unsubscribe();
+          resolve({ projectPath: update.conversation.projectPath, id: update.conversation.id });
+        }
+      });
+    });
+    return Promise.all([
+      window.desktop.switchProject(destination, selected.projectPath, selected.id),
+      window.desktop.switchProject(destination, selected.projectPath, selected.id),
+    ]);
+  }, target);
+  expect(results.filter((result) => result.error === "")).toHaveLength(1);
+  expect(results.filter((result) => result.error.includes("unavailable"))).toHaveLength(1);
+  await expect(app.page.getByRole("region", { name: "Current project" })).toContainText(
+    "second-project",
+  );
+  expect(app.children()).toHaveLength(1);
+});
+
 test("#195 disables navigation during a run and rejects competing API operations", async ({
   lifecycle,
 }) => {
@@ -253,6 +287,8 @@ test("#195 locator acknowledgment failure disables Send and recovers the previou
   expect(await fault.evaluate((gate) => gate.dropped())).toBe(true);
   await expect(app.page.getByRole("status")).toHaveText("Unavailable");
   await expect(app.page.getByRole("button", { name: "Send" })).toBeDisabled();
+  await expect(app.page.getByRole("button", { name: "Retry switch" })).toHaveCount(0);
+  await expect(app.page.getByRole("button", { name: "Restart" })).toBeVisible();
   expect(await readFile(old.path, "utf8")).toBe(old.bytes);
   const restartResult = await app.page.evaluate(() => window.desktop.restart());
   expect(restartResult).toBeNull();
