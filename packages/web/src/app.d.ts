@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationUpdate,
+  RecentProjects,
   SessionList,
   SessionLocator,
 } from "../../api/index.js";
@@ -16,6 +17,8 @@ declare global {
         uncertain: boolean;
       }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
+      recentProjects: () => Promise<typeof RecentProjects.Type>;
+      openRecentProject: (projectPath: string) => Promise<typeof Conversation.Type>;
       restart: () => Promise<string | null>;
       onCrash: (onCrash: () => void) => () => void;
 
