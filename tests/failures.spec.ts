@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test, type TestInfo } from "@playwright/test";
+import { testHeadlessFlag } from "./support/headless.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -296,7 +297,12 @@ async function launch(
     );
     const app = await electron.launch({
       args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
-      env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: temporary,
+        TMPDIR: tmpdir(),
+        PIDEX_TEST_HEADLESS: testHeadlessFlag,
+      },
     });
     cleanup.defer(async () => {
       await app.evaluate(({ dialog }) => {

@@ -16,7 +16,12 @@
   import { onMount } from "svelte";
   import type { SessionList } from "../../../api/index.js";
 
-  let { projectPath, oncurrent }: { projectPath: string; oncurrent: () => void } = $props();
+  let {
+    projectPath,
+    oncurrent,
+    onnew,
+    canNew,
+  }: { projectPath: string; oncurrent: () => void; onnew: () => void; canNew: boolean } = $props();
   let result = $state.raw<typeof SessionList.Encoded>();
   let loading = $state(true);
   let error = $state("");
@@ -47,6 +52,11 @@
 
 <section aria-label="Saved sessions" class="flex h-full min-h-0 flex-col">
   <div class="shrink-0 px-3 pt-4 pb-3">
+    <button
+      class="mb-3 w-full rounded-lg border border-solid border-border bg-raised px-3 py-2 text-left text-sm text-foreground disabled:opacity-40"
+      onclick={onnew}
+      disabled={!canNew}>New session</button
+    >
     <label
       class="flex items-center gap-2 rounded-lg px-2 py-2 text-muted focus-within:bg-raised has-focus-visible:outline-2 has-focus-visible:outline-focus"
     >

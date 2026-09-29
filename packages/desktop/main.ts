@@ -71,6 +71,7 @@ const program = Effect.gen(function* () {
   let sessionFile: string | undefined;
   let crashed = false;
   let starting = false;
+  let switching = false;
   let interrupted = false;
   let connectionScope: Scope.Closeable | undefined;
   const connections = yield* Scope.make();
@@ -154,6 +155,37 @@ const program = Effect.gen(function* () {
   let listSessions:
     | ((projectPath: string) => Effect.Effect<typeof SessionList.Type, HistoryError>)
     | undefined;
+  let startNewSession:
+    | ((projectPath: string, sessionId: string) => Effect.Effect<string, DesktopError>)
+    | undefined;
+  ipcMain.handle("new-session", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ projectPath: ProjectPath, sessionId: Schema.String }),
+        )(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid session target" })),
+        );
+        if (!startNewSession || quitting || switching)
+          return yield* new DesktopError({ message: "No connected conversation" });
+        switching = true;
+        yield* startNewSession(target.projectPath, target.sessionId).pipe(
+          Effect.tap((path) =>
+            Effect.sync(() => {
+              sessionFile = path;
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              switching = false;
+            }),
+          ),
+        );
+      }),
+    ),
+  );
   ipcMain.handle("list-sessions", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -194,7 +226,7 @@ const program = Effect.gen(function* () {
         const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
         );
-        if (!sendPrompt || quitting)
+        if (!sendPrompt || quitting || switching)
           return yield* new DesktopError({ message: "Choose a project first" });
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
@@ -242,9 +274,30 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
-        if (!crashed || starting || quitting || !project) return;
+        if (
+          (!crashed && conversation?.status !== "unavailable") ||
+          starting ||
+          quitting ||
+          !project
+        )
+          return;
         const child = server?.child;
-        if (child && child.exitCode === null && child.signalCode === null) return;
+        if (child && child.exitCode === null && child.signalCode === null) {
+          if (conversation?.status !== "unavailable") return;
+          yield* Effect.callback<void, DesktopError>((resume) => {
+            const onExit = () => resume(Effect.void);
+            child.once("exit", onExit);
+            try {
+              child.kill();
+            } catch {
+              child.off("exit", onExit);
+              resume(
+                Effect.fail(new DesktopError({ message: "Could not restart the Pi backend" })),
+              );
+            }
+            return Effect.sync(() => child.off("exit", onExit));
+          });
+        }
         yield* startServer();
       }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
@@ -271,6 +324,21 @@ const program = Effect.gen(function* () {
         catch: () => new DesktopError({ message: "Could not start the Pi conversation" }),
       });
       server = { child };
+      child.on("message", (message: unknown) => {
+        const decoded = Schema.decodeUnknownExit(
+          Schema.Struct({
+            type: Schema.Literal("session-locator"),
+            sessionId: Schema.String,
+            sessionFile: ProjectPath,
+          }),
+        )(message);
+        if (Exit.isFailure(decoded) || server?.child !== child) return;
+        sessionFile = decoded.value.sessionFile;
+        if (child.connected)
+          child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
+            // A closed channel leaves the backend waiting for the acknowledgment timeout.
+          });
+      });
       child.once("exit", () => {
         if (server?.child !== child) return;
         if (quitting) {
@@ -282,6 +350,7 @@ const program = Effect.gen(function* () {
         crashed = true;
         sendPrompt = undefined;
         listSessions = undefined;
+        startNewSession = undefined;
         stopRun = undefined;
         currentRun = undefined;
         if (window && !window.isDestroyed()) window.webContents.send("backend-crashed");
@@ -366,11 +435,25 @@ const program = Effect.gen(function* () {
                     }),
               ),
             );
+          startNewSession = (projectPath, sessionId) =>
+            client.NewSession({ projectPath, sessionId }).pipe(
+              Effect.map(({ sessionFile: path }) => path),
+              Effect.mapError(
+                (error) =>
+                  new DesktopError({
+                    message:
+                      error._tag === "NewSessionError"
+                        ? error.message
+                        : "Could not start a new session. Retry.",
+                  }),
+              ),
+            );
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
                 if (update._tag === "Snapshot") {
                   conversation = update.conversation;
+                  sessionFile = update.conversation.sessionFile;
                   connectionError = "";
                   currentRun = client.Subscribe().pipe(
                     Stream.runHead,
@@ -419,6 +502,7 @@ const program = Effect.gen(function* () {
             Effect.sync(() => {
               sendPrompt = undefined;
               listSessions = undefined;
+              startNewSession = undefined;
               stopRun = undefined;
               currentRun = undefined;
               if (window && !window.isDestroyed()) window.webContents.send("conversation", null);

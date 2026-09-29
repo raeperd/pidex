@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { testHeadlessFlag } from "./support/headless.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -66,7 +67,12 @@ test("#129 #183 Cancel then choose a project with a dark idle conversation, then
   );
   const app = await electron.launch({
     args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
-    env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir() },
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: temporary,
+      TMPDIR: tmpdir(),
+      PIDEX_TEST_HEADLESS: testHeadlessFlag,
+    },
   });
   const electronProcess = app.process();
   const context = app.context();
@@ -212,7 +218,13 @@ for (const provider of [
     // no prompt is sent and no cloud credential exchange is needed.
     const app = await electron.launch({
       args: ["dist/desktop/main.js", `--user-data-dir=${temporary}`],
-      env: { PATH: process.env.PATH ?? "", HOME: temporary, TMPDIR: tmpdir(), PI_OFFLINE: "1" },
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: temporary,
+        TMPDIR: tmpdir(),
+        PI_OFFLINE: "1",
+        PIDEX_TEST_HEADLESS: testHeadlessFlag,
+      },
     });
     cleanup.defer(() => app.close());
     const logs: string[] = [];

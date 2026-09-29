@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from "@playwright/test";
+import { testHeadlessFlag } from "./support/headless.js";
 import { Schema } from "effect";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -112,6 +113,7 @@ for (const instructions of ["AGENTS.md", "CLAUDE.md"]) {
         PATH: process.env.PATH ?? "",
         HOME: temporary,
         TMPDIR: tmpdir(),
+        PIDEX_TEST_HEADLESS: testHeadlessFlag,
         NODE_V8_COVERAGE: coverageDir,
       },
     });
