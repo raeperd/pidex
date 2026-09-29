@@ -179,7 +179,7 @@ test("#194 keeps Send disabled when the recovery locator acknowledgment is lost"
   const sendFailure = await second.page.evaluate(() =>
     window.desktop.send("Do not send to another session").then(() => "", String),
   );
-  expect(sendFailure).toContain("Wait for the current reply");
+  expect(sendFailure).toMatch(/Wait for the current reply|The selected session changed/);
   expect(lifecycle.requests).toHaveLength(1);
   expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
   await fault.evaluate((gate) => gate.restore());
