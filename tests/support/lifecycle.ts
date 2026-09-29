@@ -50,10 +50,19 @@ async function setup(cleanup: AsyncDisposableStack) {
   );
   const requests: ServerResponse[] = [];
   const requestBodies: string[] = [];
+  const providerInputs: unknown[] = [];
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => requestBodies.push(Buffer.concat(chunks).toString("utf8")));
+    request.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      requestBodies.push(body);
+      try {
+        providerInputs.push(JSON.parse(body));
+      } catch {
+        providerInputs.push(body);
+      }
+    });
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.flushHeaders();
     requests.push(response);
@@ -101,6 +110,7 @@ async function setup(cleanup: AsyncDisposableStack) {
     project,
     requests,
     requestBodies,
+    providerInputs,
     apps,
     logs,
     async launch(selectProject = true) {

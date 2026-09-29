@@ -44,7 +44,7 @@ test("#191 lists only the canonical project's Pi histories, newest activity firs
     const draft = page.getByRole("textbox", { name: "Prompt" });
     await draft.fill("Keep this unsent draft");
     await entries.first().check();
-    await expect(list).toContainText("Your current session stays active.");
+    await expect(list.getByRole("button", { name: "Resume session" })).toBeVisible();
     await list.getByText("Session details", { exact: true }).click();
     await expect(list.getByLabel("Session file", { exact: true })).toHaveText(
       expected[0]?.getSessionFile() ?? "missing session",
