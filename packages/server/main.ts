@@ -726,11 +726,13 @@ const program = Effect.gen(function* () {
           session.sessionFile !== locator.sessionFile
         ) {
           publish({
-            _tag: "StateChanged",
-            status: "unavailable",
-            runId: null,
-            messageCount: state.messageCount,
-            error: "Pi resumed a different session. Restart the backend.",
+            _tag: "Snapshot",
+            conversation: {
+              ...state,
+              status: "unavailable",
+              runId: null,
+              error: "Pi resumed a different session. Restart the backend.",
+            },
           });
           return yield* new ResumeError({
             message: "Pi resumed a different session. Restart the backend.",
@@ -792,11 +794,13 @@ const program = Effect.gen(function* () {
           Effect.tapError((error) =>
             Effect.sync(() => {
               publish({
-                _tag: "StateChanged",
-                status: "unavailable",
-                runId: null,
-                messageCount: state.messageCount,
-                error: error.message,
+                _tag: "Snapshot",
+                conversation: {
+                  ...state,
+                  status: "unavailable",
+                  runId: null,
+                  error: error.message,
+                },
               });
             }),
           ),

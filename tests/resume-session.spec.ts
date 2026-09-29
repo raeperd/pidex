@@ -98,6 +98,99 @@ test("#194 rejects a stale Resume request for the active session file", async ({
   expect(lifecycle.requests).toHaveLength(1);
 });
 
+test("#194 keeps Send disabled when the recovery locator acknowledgment is lost", async ({
+  lifecycle,
+}) => {
+  const first = await lifecycle.launch();
+  await first.page.getByRole("textbox", { name: "Prompt" }).fill("Saved context");
+  await first.page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved reply");
+  await expect(first.page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved session");
+  await first.app.evaluate(({ app }) => {
+    setImmediate(() => app.quit());
+  });
+  await expect.poll(() => first.process.exitCode).toBe(0);
+
+  const second = await lifecycle.launch(false);
+  const fault = await second.app.evaluateHandle(() => {
+    const prototype = process.getBuiltinModule("child_process").ChildProcess.prototype;
+    const originalEmit = prototype.emit;
+    let armed = false;
+    let dropped = false;
+    prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+      const message: unknown = args[0];
+      if (
+        armed &&
+        event === "message" &&
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "session-locator"
+      ) {
+        armed = false;
+        const originalSend = this.send;
+        Reflect.set(this, "send", (...sendArgs: unknown[]) => {
+          const sent: unknown = sendArgs[0];
+          if (
+            typeof sent === "object" &&
+            sent !== null &&
+            "type" in sent &&
+            sent.type === "session-locator-ack"
+          ) {
+            dropped = true;
+            return true;
+          }
+          return Reflect.apply(originalSend, this, sendArgs) === true;
+        });
+        try {
+          return Reflect.apply(originalEmit, this, [event, ...args]) === true;
+        } finally {
+          Reflect.set(this, "send", originalSend);
+        }
+      }
+      return Reflect.apply(originalEmit, this, [event, ...args]) === true;
+    };
+    return {
+      arm: () => {
+        armed = true;
+      },
+      wasDropped: () => dropped,
+      restore: () => {
+        prototype.emit = originalEmit;
+      },
+    };
+  });
+  await second.page.getByRole("button", { name: "Choose project" }).click();
+  const list = second.page.getByRole("region", { name: "Saved sessions" });
+  await expect(list.getByRole("radio")).toHaveCount(1);
+  await list.getByRole("radio").check();
+  await second.page.getByRole("textbox", { name: "Prompt" }).fill("Do not send to another session");
+  await fault.evaluate((gate) => gate.arm());
+  await list.getByRole("button", { name: "Resume session" }).click();
+  await expect.poll(() => fault.evaluate((gate) => gate.wasDropped())).toBe(true);
+  await expect(list.getByRole("alert")).toContainText("Could not update the recovery locator", {
+    timeout: 15000,
+  });
+  await expect(second.page.getByRole("status")).toHaveText("Unavailable");
+  await expect(second.page.getByRole("button", { name: "Send" })).toBeDisabled();
+  const sendFailure = await second.page.evaluate(() =>
+    window.desktop.send("Do not send to another session").then(() => "", String),
+  );
+  expect(sendFailure).toContain("Wait for the current reply");
+  expect(lifecycle.requests).toHaveLength(1);
+  expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
+  await fault.evaluate((gate) => gate.restore());
+  await second.page.getByRole("button", { name: "Restart" }).click();
+  await expect(second.page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+  await expect(second.page.getByRole("region", { name: "Messages" })).not.toContainText(
+    "Saved context",
+  );
+  expect(lifecycle.requests).toHaveLength(1);
+});
+
 test("#194 reconciles a lost Resume acknowledgment before enabling Send or recovery", async ({
   lifecycle,
 }, info) => {

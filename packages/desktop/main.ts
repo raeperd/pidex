@@ -360,6 +360,7 @@ const program = Effect.gen(function* () {
         if (child && child.exitCode === null && child.signalCode === null) {
           if (conversation?.status !== "unavailable" && !pendingResume) return;
           if (pendingResume) sessionFile = undefined;
+          if (connectionScope) yield* Scope.close(connectionScope, Exit.void);
           yield* Effect.callback<void, DesktopError>((resume) => {
             const onExit = () => resume(Effect.void);
             child.once("exit", onExit);
@@ -410,13 +411,14 @@ const program = Effect.gen(function* () {
           }),
         )(message);
         if (Exit.isFailure(decoded) || server?.child !== child) return;
+        if (!switching && !pendingResume) return;
         if (
           pendingResume &&
           (pendingResume.sessionId !== decoded.value.sessionId ||
             pendingResume.sessionFile !== decoded.value.sessionFile)
         )
           return;
-        sessionFile = decoded.value.sessionFile;
+        if (!pendingResume) sessionFile = decoded.value.sessionFile;
         if (child.connected)
           child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
             // A closed channel leaves the backend waiting for the acknowledgment timeout.
