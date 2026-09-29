@@ -44,16 +44,28 @@
   let restarting = $state(false);
   let error = $state("");
   let showSessions = $state(false);
+  let showProjects = $state(false);
+  let switchTarget = $state("");
   let replacing = $state(false);
   let requestedNewFrom: string | undefined;
   let resumeTarget = $state.raw<typeof SessionLocator.Type>();
   let resumeUncertain = $state(false);
   let recentProjects = $state.raw<readonly string[]>([]);
+  const canNavigate = $derived(
+    connected &&
+      conversation?.status === "idle" &&
+      !replacing &&
+      !sending &&
+      !resumeTarget &&
+      !switchTarget &&
+      !choosing,
+  );
 
   let canSend = $derived(
     !sending &&
       !replacing &&
       !resumeTarget &&
+      !switchTarget &&
       connected &&
       conversation?.status === "idle" &&
       !conversation.setupError &&
@@ -61,6 +73,8 @@
   );
 
   onMount(() =>
+    // Subscription reconciliation covers New, Resume, and Switch in one lifecycle.
+    // oxlint-disable-next-line complexity
     window.desktop.subscribe((update) => {
       if (update?._tag === "ConnectionError") {
         error = update.message;
@@ -71,6 +85,18 @@
       if (update?._tag === "Snapshot") {
         conversation = update.conversation;
         crashed = false;
+        if (
+          switchTarget &&
+          conversation.projectPath === switchTarget &&
+          conversation.status !== "unavailable"
+        ) {
+          switchTarget = "";
+          showProjects = false;
+          draft = "";
+          pending = undefined;
+          error = "";
+          void loadRecentProjects();
+        }
         if (requestedNewFrom && conversation.id !== requestedNewFrom) {
           draft = "";
           pending = undefined;
@@ -140,6 +166,7 @@
           draft = "";
           pending = undefined;
         }
+        switchTarget = "";
       }
     } catch {
       error = "Could not restart the backend. Try Restart again.";
@@ -186,6 +213,18 @@
   }
 
   async function chooseProject() {
+    if (conversation) {
+      choosing = true;
+      try {
+        const path = await window.desktop.pickProject();
+        if (path) await switchToProject(path);
+      } catch {
+        error = "Could not choose a project. Check the folder and Retry.";
+      } finally {
+        choosing = false;
+      }
+      return;
+    }
     choosing = true;
     error = "";
     try {
@@ -209,6 +248,10 @@
   }
 
   async function openRecentProject(projectPath: string) {
+    if (conversation) {
+      await switchToProject(projectPath);
+      return;
+    }
     choosing = true;
     error = "";
     try {
@@ -223,6 +266,50 @@
           : "Could not open the project. Choose another folder.";
     } finally {
       choosing = false;
+    }
+  }
+
+  async function switchToProject(projectPath: string) {
+    const selected = conversation;
+    if (
+      !selected ||
+      selected.status !== "idle" ||
+      replacing ||
+      sending ||
+      resumeTarget ||
+      (switchTarget && switchTarget !== projectPath)
+    )
+      return;
+    replacing = true;
+    switchTarget = projectPath;
+    error = "";
+    try {
+      const result = await window.desktop.switchProject(
+        projectPath,
+        selected.projectPath,
+        selected.id,
+      );
+      if (result.uncertain) {
+        error = result.error;
+        return;
+      }
+      if (result.error || !result.conversation) {
+        error = result.error || "Could not switch projects. Retry.";
+        switchTarget = "";
+        return;
+      }
+      conversation = result.conversation;
+      switchTarget = "";
+      showProjects = false;
+      showSessions = false;
+      draft = "";
+      pending = undefined;
+      await loadRecentProjects();
+    } catch {
+      error = "Could not switch projects. Check the connection, then Retry.";
+      switchTarget = "";
+    } finally {
+      replacing = false;
     }
   }
 
@@ -301,7 +388,9 @@
 </svelte:head>
 
 <main class="flex h-dvh flex-col overflow-hidden">
-  <header class="flex h-14 shrink-0 items-center border-0 border-b border-solid border-border/60">
+  <header
+    class="relative flex h-14 shrink-0 items-center border-0 border-b border-solid border-border/60"
+  >
     <div class="flex w-64 shrink-0 items-center gap-2.5 px-5 max-[799px]:w-auto max-[799px]:px-4">
       <span
         class="flex size-6 items-center justify-center rounded-md bg-heading/15 font-mono text-xs font-semibold text-heading"
@@ -321,6 +410,36 @@
         <span class="text-border" aria-hidden="true">/</span>
         <span class="shrink-0 text-xs max-[520px]:hidden">Current session</span>
       </section>
+      <button
+        class="mr-3 rounded-lg border border-solid border-border bg-raised px-3 py-1.5 text-xs text-foreground disabled:opacity-40"
+        aria-label="Projects"
+        aria-expanded={showProjects}
+        onclick={() => {
+          showProjects = !showProjects;
+        }}
+        disabled={!canNavigate}>Projects</button
+      >
+      {#if showProjects}
+        <section
+          class="absolute top-14 right-3 z-20 w-72 max-w-[calc(100vw_-_24px)] rounded-lg border border-solid border-border bg-surface p-3 shadow-composer"
+          aria-label="Switch project"
+        >
+          <button
+            class="mb-2 w-full rounded-lg border border-solid border-border bg-raised px-3 py-2 text-left text-sm text-foreground disabled:opacity-40"
+            onclick={chooseProject}
+            disabled={!canNavigate}>Choose project</button
+          >
+          <p class="m-0 mb-2 text-xs text-muted">Recent projects</p>
+          {#each recentProjects.filter((path) => path !== conversation?.projectPath) as path (path)}
+            <button
+              class="mb-1 w-full truncate rounded-lg border border-solid border-border bg-raised px-3 py-2 text-left text-xs text-foreground disabled:opacity-40"
+              onclick={() => openRecentProject(path)}
+              disabled={!canNavigate}
+              title={path}>{path}</button
+            >
+          {/each}
+        </section>
+      {/if}
       <button
         class="mr-4 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted hover:bg-raised hover:text-foreground min-[800px]:hidden"
         aria-label={showSessions ? "Hide sessions" : "Show sessions"}
@@ -360,15 +479,12 @@
             projectPath={conversation.projectPath}
             activeId={conversation.id}
             activeFile={conversation.sessionFile}
-            canNew={connected &&
-              conversation.status === "idle" &&
-              !replacing &&
-              !sending &&
-              !resumeTarget}
+            canNew={canNavigate}
             disabled={!connected ||
               conversation.status !== "idle" ||
               replacing ||
               sending ||
+              Boolean(switchTarget) ||
               (Boolean(resumeTarget) && !resumeUncertain)}
             onnew={newSession}
             onresume={resumeSession}
@@ -458,7 +574,7 @@
           <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
             {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
             {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
-            {#if crashed || conversation.status === "unavailable" || resumeUncertain}
+            {#if crashed || conversation.status === "unavailable" || resumeUncertain || switchTarget}
               {#if crashed}<p role="alert">
                   The backend stopped. Restart to recover saved history.
                 </p>{/if}
@@ -468,6 +584,11 @@
                 disabled={restarting}>Restart</button
               >
             {/if}
+            {#if switchTarget && conversation.status === "idle"}<button
+                class="mr-2 rounded-lg border border-solid border-border bg-raised px-4 py-2 text-sm text-foreground"
+                onclick={() => switchToProject(switchTarget)}
+                disabled={replacing}>Retry switch</button
+              >{/if}
             {#if error}<p role="alert">{error}</p>{/if}
           </div>
           <form
