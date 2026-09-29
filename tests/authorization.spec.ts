@@ -179,11 +179,16 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
         });
       }
     }
+    if (!control.state) throw new Error("Missing selected snapshot");
     control.send({
       _tag: "Request",
       id: "2",
       tag: "Send",
-      payload: { text: "Reply hello" },
+      payload: {
+        projectPath: control.state.projectPath,
+        sessionId: control.state.id,
+        text: "Reply hello",
+      },
       headers: [],
     });
     await expect
