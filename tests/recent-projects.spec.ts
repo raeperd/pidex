@@ -6,6 +6,7 @@ import {
   readdir,
   realpath,
   rename,
+  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -130,6 +131,11 @@ test("#193 keeps a missing recent project with an actionable error", async ({
     recentProjects: [project],
   });
   await page.screenshot({ path: info.outputPath("missing-project.png") });
+  await writeFile(lifecycle.project, "Not a folder");
+  await entries.click();
+  await expect(page.getByRole("alert")).toContainText(`Could not find ${project}`);
+  expect(children()).toHaveLength(0);
+  await rm(lifecycle.project);
   await rename(moved, lifecycle.project);
   await entries.click();
   await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
