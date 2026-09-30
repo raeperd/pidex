@@ -433,30 +433,44 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
-        const activeWindow = window;
-        if (!activeWindow || choosing || quitting) return null;
-        choosing = true;
-        return yield* Effect.gen(function* () {
-          const selection = yield* Effect.tryPromise({
-            try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
-            catch: () => new DesktopError({ message: "Could not choose a project" }),
-          });
-          const cwd = selection.filePaths[0];
-          if (selection.canceled || !cwd) return null;
-          return yield* Effect.tryPromise({
-            try: () => realpath(cwd),
-            catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
-          }).pipe(Effect.flatMap(openProject));
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              choosing = false;
-            }),
-          ),
-        );
+        const selected = yield* pickFolder();
+        return selected ? yield* openProject(selected) : null;
       }),
     ),
   );
+  // Switching projects composes this native selection with the switch-project operation.
+  ipcMain.handle("pick-project", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        return yield* pickFolder();
+      }),
+    ),
+  );
+  const pickFolder = Effect.fn(function* () {
+    const activeWindow = window;
+    if (!activeWindow || choosing || quitting) return null;
+    choosing = true;
+    return yield* Effect.gen(function* () {
+      const selection = yield* Effect.tryPromise({
+        try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
+        catch: () => new DesktopError({ message: "Could not choose a project" }),
+      });
+      const cwd = selection.filePaths[0];
+      if (selection.canceled || !cwd) return null;
+      return yield* Effect.tryPromise({
+        try: () => realpath(cwd),
+        catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
+      });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          choosing = false;
+        }),
+      ),
+    );
+  });
   ipcMain.handle("restart-backend", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
