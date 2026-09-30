@@ -13,7 +13,7 @@ import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { NetAddress } from "effect/net";
 import { RpcSerialization, RpcServer } from "effect/rpc";
-import { access, readFile, readdir, realpath } from "node:fs/promises";
+import { access, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
@@ -93,7 +93,8 @@ const program = Effect.gen(function* () {
     });
 
     let prepared: CreateAgentSessionRuntimeResult | undefined;
-    const cwd = process.cwd();
+    // The session runtime can move the active session to another project directory.
+    let cwd = process.cwd();
     const agentDir = getAgentDir();
     const createRuntime = async ({
       cwd: runtimeCwd,
@@ -193,7 +194,7 @@ const program = Effect.gen(function* () {
           path,
           message: `Cannot read saved history: ${path}. Check file and folder permissions or restore a valid Pi session, then Retry. Saved files have not been changed.`,
         });
-      if (projectPath !== process.cwd())
+      if (projectPath !== cwd)
         return yield* new HistoryError({
           path: projectPath,
           message:
@@ -292,7 +293,7 @@ const program = Effect.gen(function* () {
       let restored: typeof Conversation.Type = {
         id: session.sessionId,
         sessionFile: session.sessionFile ?? cwd,
-        projectPath: process.cwd(),
+        projectPath: cwd,
         modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
         setupError,
         status: "idle",
@@ -480,7 +481,7 @@ const program = Effect.gen(function* () {
       projectPath: string;
       sessionId: string;
     }) {
-      if (projectPath !== cwd || sessionId !== session.sessionId)
+      if (sessionId !== session.sessionId)
         return yield* new NewSessionError({
           message: "The selected session changed. Refresh and try again.",
         });
@@ -490,20 +491,42 @@ const program = Effect.gen(function* () {
         });
       replacing = true;
       return yield* Effect.gen(function* () {
-        yield* Effect.tryPromise({
-          try: () => access(session.sessionManager.getSessionDir(), constants.W_OK),
-          catch: () =>
-            new NewSessionError({
-              message: "Pi history is not writable. Check folder permissions, then Retry.",
-            }),
+        // Preflight the destination project before releasing the current session.
+        if (projectPath !== cwd) {
+          const unavailable = new NewSessionError({
+            message: `Could not open ${projectPath}. The folder is missing or unreadable. Restore it, then select the project again. Your current session is preserved.`,
+          });
+          const canonical = yield* Effect.tryPromise({
+            try: () => realpath(projectPath),
+            catch: () => unavailable,
+          });
+          const info = yield* Effect.tryPromise({
+            try: () => stat(canonical),
+            catch: () => unavailable,
+          });
+          if (canonical !== projectPath || !info.isDirectory()) return yield* unavailable;
+          yield* Effect.tryPromise({
+            try: () => access(canonical, constants.R_OK | constants.X_OK),
+            catch: () => unavailable,
+          });
+        }
+        const unwritable = new NewSessionError({
+          message: "Pi history is not writable. Check folder permissions, then Retry.",
         });
-        const next = yield* Effect.tryPromise({
+        const sessionManager = yield* Effect.try({
           try: () =>
-            createRuntime({
-              cwd,
-              agentDir,
-              sessionManager: SessionManager.create(cwd, session.sessionManager.getSessionDir()),
-            }),
+            projectPath === cwd
+              ? SessionManager.create(cwd, session.sessionManager.getSessionDir())
+              : SessionManager.create(projectPath),
+          catch: () => unwritable,
+        });
+        yield* Effect.tryPromise({
+          try: () => access(sessionManager.getSessionDir(), constants.W_OK),
+          catch: () => unwritable,
+        });
+        // Rebuild project-bound resources, including context files, for the destination.
+        const next = yield* Effect.tryPromise({
+          try: () => createRuntime({ cwd: projectPath, agentDir, sessionManager }),
           catch: () =>
             new NewSessionError({
               message:
@@ -531,6 +554,7 @@ const program = Effect.gen(function* () {
         if (outcome.cancelled)
           return yield* new NewSessionError({ message: "New session was cancelled. Retry." });
         session = runtime.session;
+        cwd = runtime.cwd;
         messageId = "";
         const nextFile = session.sessionFile;
         if (!nextFile) {
@@ -583,7 +607,12 @@ const program = Effect.gen(function* () {
           }
           try {
             process.send(
-              { type: "session-locator", sessionId: nextId, sessionFile: nextFile },
+              {
+                type: "session-locator",
+                projectPath: cwd,
+                sessionId: nextId,
+                sessionFile: nextFile,
+              },
               (error) => {
                 if (error) fail();
               },
@@ -780,6 +809,7 @@ const program = Effect.gen(function* () {
             process.send(
               {
                 type: "session-locator",
+                projectPath: cwd,
                 sessionId: locator.sessionId,
                 sessionFile: locator.sessionFile,
               },
@@ -837,10 +867,16 @@ const program = Effect.gen(function* () {
     const send = Effect.fn(function* ({
       text,
       submissionId,
+      sessionId,
     }: {
       text: string;
       submissionId?: string;
+      sessionId?: string;
     }) {
+      if (sessionId !== undefined && sessionId !== session.sessionId)
+        return yield* new SendError({
+          message: "The selected session changed. Review it before sending.",
+        });
       if (state.setupError) return yield* new SendError({ message: state.setupError.message });
       if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
       if (replacing || state.status !== "idle")

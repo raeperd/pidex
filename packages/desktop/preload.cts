@@ -13,8 +13,10 @@ contextBridge.exposeInMainWorld("desktop", {
   },
 
   stop: (runId: string) => ipcRenderer.invoke("stop-run", runId),
-  send: (text: string, submissionId?: string) =>
-    ipcRenderer.invoke("send-prompt", text, submissionId),
+  send: (text: string, submissionId?: string, sessionId?: string) =>
+    ipcRenderer.invoke("send-prompt", text, submissionId, sessionId),
+  switchProject: (projectPath: string, sessionId: string) =>
+    ipcRenderer.invoke("switch-project", { projectPath, sessionId }),
   subscribe: (onChange: (value: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => onChange(value);
     ipcRenderer.on("conversation", listener);
