@@ -1,4 +1,8 @@
 <script module lang="ts">
+  function projectName(projectPath: string) {
+    return projectPath.split("/").filter(Boolean).at(-1) || "/";
+  }
+
   function followOutput(viewport: HTMLElement) {
     let following = true;
     const onScroll = () => {
@@ -223,7 +227,7 @@
 
   async function newSession() {
     const selected = conversation;
-    if (!selected || selected.status !== "idle" || replacing || sending || resumeTarget) return;
+    if (!selected || !canNavigate) return;
     replacing = true;
     requestedNewFrom = selected.id;
     error = "";
@@ -253,7 +257,7 @@
     error = "";
     try {
       const projectPath = await window.desktop.pickProject();
-      if (projectPath) await switchProject(projectPath);
+      if (projectPath) error = await switchProject(projectPath);
     } catch {
       error = "Could not choose a project. Please try again.";
     }
@@ -261,28 +265,32 @@
 
   async function switchProject(projectPath: string) {
     const selected = conversation;
-    if (!selected || !canNavigate) return;
+    if (!selected || projectPath === selected.projectPath) return "";
+    if (!canNavigate) return "Wait for the current session to finish, then try again.";
     replacing = true;
     requestedNewFrom = selected.id;
     error = "";
     try {
       const result = await window.desktop.switchProject(projectPath, selected.id);
+      // The new snapshot may already have arrived; clear only if it has not replaced the draft.
       if (!result.error) {
-        draft = "";
+        if (requestedNewFrom) draft = "";
         pending = undefined;
-        requestedNewFrom = undefined;
+        showSessions = false;
         await tick();
         editor?.focus();
-      } else if (conversation?.id === selected.id) {
-        requestedNewFrom = undefined;
-        error = result.error;
+        return "";
       }
+      return conversation?.id === selected.id ? result.error : "";
     } catch {
-      error = "Could not switch projects. Check the connection, then try again.";
+      return conversation?.id === selected.id
+        ? "Could not switch projects. Check the connection, then try again."
+        : "";
     } finally {
+      requestedNewFrom = undefined;
       replacing = false;
+      await loadRecentProjects();
     }
-    await loadRecentProjects();
   }
 
   async function resumeSession(locator: typeof SessionLocator.Type) {
@@ -346,7 +354,7 @@
         aria-label="Current project"
       >
         <span class="truncate text-xs text-muted" title={conversation.projectPath}>
-          {conversation.projectPath.split("/").filter(Boolean).at(-1) || "/"}
+          {projectName(conversation.projectPath)}
         </span>
         <span class="sr-only">{conversation.projectPath}</span>
         <span class="text-border" aria-hidden="true">/</span>
@@ -419,9 +427,11 @@
               class="mb-0.5 block w-full cursor-pointer truncate rounded-lg border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[13px] text-foreground/90 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:text-foreground disabled:cursor-default disabled:opacity-40 aria-[current=true]:disabled:opacity-100"
               title={projectPath}
               aria-current={active ? "true" : undefined}
-              onclick={() => switchProject(projectPath)}
-              disabled={active || !canNavigate}
-              >{projectPath.split("/").filter(Boolean).at(-1) || "/"}</button
+              onclick={async () => {
+                error = await switchProject(projectPath);
+              }}
+              disabled={!active && !canNavigate}
+              >{projectName(projectPath)}<span class="sr-only"> {projectPath}</span></button
             >
           {/each}
         </nav>
@@ -648,9 +658,8 @@
             title={projectPath}
             onclick={() => openRecent(projectPath)}
             disabled={choosing}
-            ><span class="shrink-0 text-sm"
-              >{projectPath.split("/").filter(Boolean).at(-1) || "/"}</span
-            > <span class="truncate text-xs text-muted">{projectPath}</span></button
+            ><span class="shrink-0 text-sm">{projectName(projectPath)}</span>
+            <span class="truncate text-xs text-muted">{projectPath}</span></button
           >
         {:else}
           <p class="text-sm text-muted">No recent projects yet.</p>

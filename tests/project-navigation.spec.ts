@@ -29,7 +29,7 @@ test("#195 navigates between idle projects and sessions from the sidebar", async
   await prompt.fill("Unsent alpha text");
   await projects.getByRole("button", { name: "Add project" }).click();
   await expect(current).toContainText(beta);
-  await expect(projects.getByRole("button", { name: "beta", exact: true })).toHaveAttribute(
+  await expect(projects.getByRole("button", { name: /^beta / })).toHaveAttribute(
     "aria-current",
     "true",
   );
@@ -44,7 +44,7 @@ test("#195 navigates between idle projects and sessions from the sidebar", async
   lifecycle.complete("Beta compass remembered.");
   await expect(page.getByRole("status")).toHaveText("Idle");
 
-  await projects.getByRole("button", { name: "project", exact: true }).click();
+  await projects.getByRole("button", { name: /^project / }).click();
   await expect(current).toContainText(alpha);
   await expect(list.getByRole("radio")).toHaveCount(1);
   await list.getByRole("radio").check();
@@ -61,7 +61,7 @@ test("#195 navigates between idle projects and sessions from the sidebar", async
   lifecycle.complete("The alpha lantern.");
   await expect(page.getByRole("status")).toHaveText("Idle");
 
-  await projects.getByRole("button", { name: "beta", exact: true }).click();
+  await projects.getByRole("button", { name: /^beta / }).click();
   await expect(current).toContainText(beta);
   await list.getByRole("radio").check();
   await list.getByRole("button", { name: "Resume session" }).click();
@@ -72,10 +72,15 @@ test("#195 navigates between idle projects and sessions from the sidebar", async
   await page.screenshot({ path: info.outputPath("navigated.png") });
 });
 
-test("#195 disables project and session navigation during a run", async ({ lifecycle }) => {
+test("#195 disables project and session navigation while running or stopping", async ({
+  lifecycle,
+}) => {
   const beta = join(await realpath(lifecycle.home), "beta");
   await mkdir(beta);
-  const { app, page } = await lifecycle.launch();
+  const { app, page } = await lifecycle.launch(false);
+  await lifecycle.holdStops(app);
+  await page.getByRole("button", { name: "Choose project" }).click();
+  await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
   const projects = page.getByRole("navigation", { name: "Projects" });
   await app.evaluate(({ dialog }, path) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
@@ -85,12 +90,17 @@ test("#195 disables project and session navigation during a run", async ({ lifec
   await page.getByRole("textbox", { name: "Prompt" }).fill("Keep running");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => lifecycle.requests.length).toBe(1);
-  await expect(projects.getByRole("button", { name: "project", exact: true })).toBeDisabled();
-  await expect(projects.getByRole("button", { name: "Add project" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "New session" })).toBeDisabled();
-  lifecycle.complete("Finished");
+  for (const status of ["Running", "Stopping"]) {
+    if (status === "Stopping") await page.getByRole("button", { name: "Stop" }).click();
+    await expect(page.getByRole("status")).toHaveText(status);
+    await expect(projects.getByRole("button", { name: /^project / })).toBeDisabled();
+    await expect(projects.getByRole("button", { name: "Add project" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "New session" })).toBeDisabled();
+  }
+  await expect.poll(() => lifecycle.cancellations.length).toBe(1);
+  lifecycle.cancellations[0]?.end();
   await expect(page.getByRole("status")).toHaveText("Idle");
-  await expect(projects.getByRole("button", { name: "project", exact: true })).toBeEnabled();
+  await expect(projects.getByRole("button", { name: /^project / })).toBeEnabled();
   await expect(projects.getByRole("button", { name: "Add project" })).toBeEnabled();
 });
 
@@ -106,7 +116,7 @@ test("#195 keeps the current session usable when a recent project is missing", a
   }, beta);
   await projects.getByRole("button", { name: "Add project" }).click();
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(beta);
-  await projects.getByRole("button", { name: "project", exact: true }).click();
+  await projects.getByRole("button", { name: /^project / }).click();
   const alpha = await realpath(lifecycle.project);
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(alpha);
   const prompt = page.getByRole("textbox", { name: "Prompt" });
@@ -120,10 +130,10 @@ test("#195 keeps the current session usable when a recent project is missing", a
 
   await rename(beta, join(lifecycle.home, "moved"));
   await prompt.fill("Draft for alpha");
-  await projects.getByRole("button", { name: "beta", exact: true }).click();
+  await projects.getByRole("button", { name: /^beta / }).click();
   await expect(page.getByRole("alert")).toContainText(`Could not open ${beta}`);
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(alpha);
-  await expect(projects.getByRole("button", { name: "beta", exact: true })).toBeVisible();
+  await expect(projects.getByRole("button", { name: /^beta / })).toBeVisible();
   await expect(page.getByLabel("assistant", { exact: true })).toHaveText("Kept reply");
   await expect(prompt).toHaveValue("Draft for alpha");
   await page.screenshot({ path: info.outputPath("missing-destination.png") });

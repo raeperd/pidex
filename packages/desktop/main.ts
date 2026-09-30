@@ -171,6 +171,8 @@ const program = Effect.gen(function* () {
     Effect.runFork(shutdown);
   });
   let choosing = false;
+  // Besides recent projects, the last folder chosen with the native picker may be a destination.
+  let pickedProject: string | undefined;
   let conversation: typeof Conversation.Type | undefined;
   let connectionError = "";
   let sendPrompt:
@@ -235,7 +237,10 @@ const program = Effect.gen(function* () {
           }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
-        if (!metadata.recentProjects.includes(target.projectPath))
+        if (
+          !metadata.recentProjects.includes(target.projectPath) &&
+          target.projectPath !== pickedProject
+        )
           return yield* new DesktopError({
             message: "Choose this project with the folder picker.",
           });
@@ -444,7 +449,8 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
-        return yield* pickFolder();
+        pickedProject = (yield* pickFolder()) ?? undefined;
+        return pickedProject ?? null;
       }),
     ),
   );
