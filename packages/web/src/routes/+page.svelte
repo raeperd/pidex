@@ -257,7 +257,8 @@
     error = "";
     try {
       const projectPath = await window.desktop.pickProject();
-      if (projectPath) error = await switchProject(projectPath);
+      const failure = projectPath ? await switchProject(projectPath) : "";
+      if (failure) error = failure;
     } catch {
       error = "Could not choose a project. Please try again.";
     }
@@ -424,11 +425,19 @@
           {#each recentProjects as projectPath (projectPath)}
             {@const active = projectPath === conversation.projectPath}
             <button
-              class="mb-0.5 block w-full cursor-pointer truncate rounded-lg border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[13px] text-foreground/90 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:text-foreground disabled:cursor-default disabled:opacity-40 aria-[current=true]:disabled:opacity-100"
+              class="mb-0.5 block w-full cursor-pointer truncate rounded-lg border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[13px] text-foreground/90 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:text-foreground disabled:cursor-default disabled:opacity-40"
               title={projectPath}
               aria-current={active ? "true" : undefined}
               onclick={async () => {
-                error = await switchProject(projectPath);
+                if (!active) {
+                  const failure = await switchProject(projectPath);
+                  if (failure) error = failure;
+                  return;
+                }
+                // The current project only returns to its composer.
+                showSessions = false;
+                await tick();
+                editor?.focus();
               }}
               disabled={!active && !canNavigate}
               >{projectName(projectPath)}<span class="sr-only"> {projectPath}</span></button
