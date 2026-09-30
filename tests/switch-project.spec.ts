@@ -131,7 +131,7 @@ test("#195 switches idle work to another project with its instructions, working 
   await page.screenshot({ path: info.outputPath("switched-back.png") });
 });
 
-test("#195 rejects switching, New session, and stale or competing sends while running or stopping", async ({
+test("#195 rejects switching, New session, Resume session, and stale or competing sends while running or stopping", async ({
   lifecycle,
 }) => {
   const alpha = await realpath(lifecycle.project);
@@ -147,14 +147,16 @@ test("#195 rejects switching, New session, and stale or competing sends while ru
   const selected = await current(page);
   const attempts = () =>
     page.evaluate(
-      async ([destination, projectPath, id]) => ({
+      async ([destination, projectPath, id, sessionFile]) => ({
         switch: (await window.desktop.switchProject(destination, id)).error,
         newSession: await window.desktop.newSession(projectPath, id).then(() => "", String),
+        resume: (await window.desktop.resumeSession({ projectPath, sessionId: id, sessionFile }))
+          .error,
         send: await window.desktop
           .send("Competing prompt", crypto.randomUUID(), id)
           .then(() => "", String),
       }),
-      [beta, selected.projectPath, selected.id] as const,
+      [beta, selected.projectPath, selected.id, selected.sessionFile] as const,
     );
 
   expect(
@@ -187,7 +189,8 @@ test("#195 rejects switching, New session, and stale or competing sends while ru
     await expect(page.getByRole("status")).toHaveText(status);
     const rejected = await attempts();
     expect(rejected.switch).toContain("Wait for the current reply");
-    expect(rejected.newSession).not.toBe("");
+    expect(rejected.newSession).toContain("Wait for the current reply");
+    expect(rejected.resume).toContain("Wait for the current run");
     expect(rejected.send).toContain("Wait for the current reply");
     expect((await current(page)).id).toBe(selected.id);
   }
@@ -263,7 +266,7 @@ function recent(home: string, projects: string[]) {
 function current(page: Page) {
   return page.evaluate(
     () =>
-      new Promise<{ id: string; projectPath: string }>((resolve) => {
+      new Promise<{ id: string; projectPath: string; sessionFile: string }>((resolve) => {
         const unsubscribe = window.desktop.subscribe((value) => {
           if (value?._tag !== "Snapshot") return;
           unsubscribe();

@@ -23,6 +23,7 @@ import {
   Schedule,
   Schema,
   Scope,
+  Semaphore,
   Stream,
 } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
@@ -66,6 +67,7 @@ const program = Effect.gen(function* () {
   let metadataError = "";
   // Preserve unreadable metadata: skip writes until the user repairs it and relaunches.
   let metadataPreserved = false;
+  const metadataWrites = yield* Semaphore.make(1);
   let metadata = yield* loadMetadata(metadataFile).pipe(
     Effect.catch((error) =>
       Effect.sync((): typeof Metadata.Type => {
@@ -509,16 +511,19 @@ const program = Effect.gen(function* () {
       ].slice(0, 10),
     };
     if (metadataPreserved) return;
-    yield* saveMetadata(metadataFile, metadata).pipe(
-      Effect.match({
-        onSuccess: () => {
-          metadataError = "";
-        },
-        onFailure: (error) => {
-          metadataError = error.message;
-        },
-      }),
-    );
+    // Serialize atomic replacements so an older list never lands last.
+    yield* metadataWrites
+      .withPermit(Effect.suspend(() => saveMetadata(metadataFile, metadata)))
+      .pipe(
+        Effect.match({
+          onSuccess: () => {
+            metadataError = "";
+          },
+          onFailure: (error) => {
+            metadataError = error.message;
+          },
+        }),
+      );
   });
   const startServer = Effect.fn(function* () {
     starting = true;
