@@ -202,6 +202,9 @@ const program = Effect.gen(function* () {
         );
         if (!startNewSession || quitting || switching || pendingResume)
           return yield* new DesktopError({ message: "No connected conversation" });
+        // Switching projects is a separate operation, restricted to recent projects.
+        if (target.projectPath !== project)
+          return yield* new DesktopError({ message: "The selected project changed" });
         switching = true;
         yield* startNewSession(target.projectPath, target.sessionId).pipe(
           Effect.tap((path) =>
@@ -224,8 +227,16 @@ const program = Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
         const target = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ projectPath: ProjectPath, sessionId: Schema.String }),
+          Schema.Struct({
+            projectPath: ProjectPath,
+            sessionId: SessionLocator.fields.sessionId,
+          }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
+        // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
+        if (!metadata.recentProjects.includes(target.projectPath))
+          return yield* new DesktopError({
+            message: "Choose this project with the folder picker.",
+          });
         if (!startNewSession || quitting || switching || pendingResume)
           return yield* new DesktopError({
             message: "Wait for the current session to finish loading, then try again.",
@@ -239,7 +250,6 @@ const program = Effect.gen(function* () {
             }),
           ),
         );
-        yield* rememberProject(target.projectPath);
       }).pipe(
         Effect.match({
           onSuccess: () => ({ error: "" }),
@@ -351,9 +361,11 @@ const program = Effect.gen(function* () {
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
         ).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid submission ID" })));
-        const target = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
-          sessionId,
-        ).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })));
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.UndefinedOr(SessionLocator.fields.sessionId),
+        )(sessionId).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
+        );
         return yield* sendPrompt(prompt, id, target);
       }),
     ),
@@ -488,18 +500,18 @@ const program = Effect.gen(function* () {
     return selected;
   });
   const rememberProject = Effect.fn(function* (canonical: string) {
-    if (metadataPreserved) return;
-    const next: typeof Metadata.Type = {
+    // Update this application lifetime first; persistence may fail or be skipped.
+    metadata = {
       version: 1,
       recentProjects: [
         canonical,
         ...metadata.recentProjects.filter((path) => path !== canonical),
       ].slice(0, 10),
     };
-    yield* saveMetadata(metadataFile, next).pipe(
+    if (metadataPreserved) return;
+    yield* saveMetadata(metadataFile, metadata).pipe(
       Effect.match({
         onSuccess: () => {
-          metadata = next;
           metadataError = "";
         },
         onFailure: (error) => {
@@ -548,6 +560,8 @@ const program = Effect.gen(function* () {
         )
           return;
         if (!pendingResume) {
+          if (decoded.value.projectPath !== project)
+            Effect.runFork(rememberProject(decoded.value.projectPath));
           project = decoded.value.projectPath;
           sessionFile = decoded.value.sessionFile;
         }

@@ -533,6 +533,9 @@ const program = Effect.gen(function* () {
                 "Could not prepare a new session. Check project and Pi history permissions, then Retry.",
             }),
         });
+        // Pi's newSession() keeps the runtime's current cwd, so createRuntime hands it this
+        // prepared destination runtime instead. RPC handlers run uninterruptibly, so it is used
+        // before the cleanup below disposes an unused one.
         prepared = next;
         const outcome = yield* Effect.tryPromise({
           try: () => runtime.newSession(),

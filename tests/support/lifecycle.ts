@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const test = base.extend<{ lifecycle: Awaited<ReturnType<typeof setup>> }>({
   // Playwright requires an object binding pattern for fixtures.
@@ -51,7 +52,13 @@ async function setup(cleanup: AsyncDisposableStack) {
   const requests: ServerResponse[] = [];
   const requestBodies: string[] = [];
   const providerInputs: unknown[] = [];
+  const cancellations: ServerResponse[] = [];
   const provider = createServer((request, response) => {
+    // With holdStops(), Stop stays in Stopping until the test ends this request.
+    if (request.url === "/cancel") {
+      cancellations.push(response);
+      return;
+    }
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
@@ -113,6 +120,20 @@ async function setup(cleanup: AsyncDisposableStack) {
     providerInputs,
     apps,
     logs,
+    cancellations,
+    // Call before choosing a project; the owned server inherits this environment.
+    async holdStops(app: Awaited<ReturnType<typeof electron.launch>>) {
+      await app.evaluate(
+        (_electron, [fixture, url]) => {
+          process.env.NODE_OPTIONS = `--import=${fixture}`;
+          process.env.PIDEX_TEST_PROVIDER_URL = url;
+        },
+        [
+          fileURLToPath(new URL("../fixtures/cancellation-fetch.mjs", import.meta.url)),
+          `http://127.0.0.1:${address.port}`,
+        ] as const,
+      );
+    },
     async launch(selectProject = true) {
       const app = await electron.launch({
         args: ["dist/desktop/main.js", `--user-data-dir=${home}`],
