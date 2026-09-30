@@ -12,7 +12,7 @@ import {
   SessionList,
   SessionLocator,
 } from "../api/index.js";
-import { readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import {
   Cause,
   Deferred,
@@ -64,10 +64,13 @@ const program = Effect.gen(function* () {
   // Desktop-owned metadata; Pi owns history, so this file never stores transcripts or credentials.
   const metadataFile = join(app.getPath("userData"), "metadata.json");
   let metadataError = "";
+  // Preserve unreadable metadata: skip writes until the user repairs it and relaunches.
+  let metadataPreserved = false;
   let metadata = yield* loadMetadata(metadataFile).pipe(
     Effect.catch((error) =>
       Effect.sync((): typeof Metadata.Type => {
         metadataError = error.message;
+        metadataPreserved = true;
         return { version: 1, recentProjects: [] };
       }),
     ),
@@ -345,13 +348,21 @@ const program = Effect.gen(function* () {
         if (conversation) return conversation;
         if (!window || choosing || quitting) return null;
         choosing = true;
+        const missing = new DesktopError({
+          message: `Could not find ${path}. Restore the folder, then try again. It stays in your recent projects.`,
+        });
         return yield* Effect.tryPromise({
           try: () => realpath(path),
-          catch: () =>
-            new DesktopError({
-              message: `Could not find ${path}. Restore the folder, then try again. It stays in your recent projects.`,
-            }),
+          catch: () => missing,
         }).pipe(
+          Effect.tap((canonical) =>
+            Effect.tryPromise({ try: () => stat(canonical), catch: () => missing }).pipe(
+              Effect.filterOrFail(
+                (info) => info.isDirectory(),
+                () => missing,
+              ),
+            ),
+          ),
           Effect.flatMap(openProject),
           Effect.ensuring(
             Effect.sync(() => {
@@ -439,7 +450,7 @@ const program = Effect.gen(function* () {
     sessionFile = undefined;
     interrupted = false;
     const selected = yield* startServer();
-    if (!metadataError) {
+    if (!metadataPreserved) {
       const next: typeof Metadata.Type = {
         version: 1,
         recentProjects: [
@@ -451,6 +462,7 @@ const program = Effect.gen(function* () {
         Effect.match({
           onSuccess: () => {
             metadata = next;
+            metadataError = "";
           },
           onFailure: (error) => {
             metadataError = error.message;
@@ -810,6 +822,7 @@ const Metadata = Schema.Struct({
   version: Schema.Literal(1),
   recentProjects: Schema.Array(ProjectPath),
 });
+const MetadataFile = Schema.fromJsonString(Metadata, { space: 2 });
 
 const loadMetadata = Effect.fn(function* (file: string) {
   const unreadable = new DesktopError({
@@ -827,8 +840,7 @@ const loadMetadata = Effect.fn(function* (file: string) {
   );
   if (contents === undefined)
     return { version: 1, recentProjects: [] } satisfies typeof Metadata.Type;
-  return yield* Effect.try({ try: () => JSON.parse(contents), catch: () => unreadable }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Metadata)),
+  return yield* Schema.decodeUnknownEffect(MetadataFile)(contents).pipe(
     Effect.mapError(() => unreadable),
   );
 });
@@ -836,9 +848,12 @@ const loadMetadata = Effect.fn(function* (file: string) {
 // Replace atomically so an interrupted write never leaves partial metadata.
 const saveMetadata = Effect.fn(function* (file: string, value: typeof Metadata.Type) {
   const temporary = `${file}.${randomBytes(8).toString("hex")}.tmp`;
+  const contents = yield* Schema.encodeEffect(MetadataFile)(value).pipe(
+    Effect.mapError(() => new DesktopError({ message: "Could not encode Pidex metadata" })),
+  );
   yield* Effect.tryPromise({
     try: async () => {
-      await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+      await writeFile(temporary, `${contents}\n`, { mode: 0o600 });
       await rename(temporary, file);
     },
     catch: () =>

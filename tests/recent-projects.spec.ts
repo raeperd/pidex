@@ -1,5 +1,14 @@
 import { expect } from "@playwright/test";
-import { mkdir, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { alive, test } from "./support/lifecycle.js";
 
@@ -44,6 +53,19 @@ test("#193 reopens a recent project after relaunch without resuming or provider 
   await expect(second.page.getByRole("button", { name: "Choose project" })).toBeEnabled();
   await expect(second.page.getByRole("region", { name: "Conversation" })).toHaveCount(0);
   await expect(entries).toHaveCount(1);
+  const unlisted = await second.page.evaluate(
+    (path) => window.desktop.openProject(path),
+    join(await realpath(lifecycle.home), ".pi"),
+  );
+  expect(unlisted).toEqual({
+    conversation: null,
+    error: "Choose this project with the folder picker.",
+  });
+  expect(second.children()).toHaveLength(0);
+  expect(JSON.parse(await readFile(join(lifecycle.home, "metadata.json"), "utf8"))).toEqual({
+    version: 1,
+    recentProjects: [project],
+  });
   await second.page.screenshot({ path: info.outputPath("recent-projects.png") });
   await entries.click();
   const list = second.page.getByRole("region", { name: "Saved sessions" });
@@ -103,6 +125,10 @@ test("#193 keeps a missing recent project with an actionable error", async ({
   await expect(entries).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Conversation" })).toHaveCount(0);
   expect(children()).toHaveLength(0);
+  expect(JSON.parse(await readFile(join(lifecycle.home, "metadata.json"), "utf8"))).toEqual({
+    version: 1,
+    recentProjects: [project],
+  });
   await page.screenshot({ path: info.outputPath("missing-project.png") });
   await rename(moved, lifecycle.project);
   await entries.click();
@@ -128,4 +154,30 @@ test("#193 preserves unreadable metadata and still opens a chosen project", asyn
   });
   await expect.poll(() => main.exitCode).toBe(0);
   expect(await readFile(metadata, "utf8")).toBe("{ not json");
+});
+
+test("#193 shows a metadata save failure and saves after the folder is writable again", async ({
+  lifecycle,
+}) => {
+  await using cleanup = new AsyncDisposableStack();
+  const { app, page, process: main } = await lifecycle.launch(false);
+  await chmod(lifecycle.home, 0o500);
+  cleanup.defer(() => chmod(lifecycle.home, 0o700));
+  await page.getByRole("button", { name: "Choose project" }).click();
+  await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+  await expect(page.getByRole("alert")).toContainText("Cannot save Pidex metadata");
+  await chmod(lifecycle.home, 0o700);
+  expect(await readdir(lifecycle.home)).not.toContain("metadata.json");
+  await app.evaluate(({ app: application }) => {
+    setImmediate(() => application.quit());
+  });
+  await expect.poll(() => main.exitCode).toBe(0);
+  const second = await lifecycle.launch(false);
+  await second.page.getByRole("button", { name: "Choose project" }).click();
+  await expect(second.page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
+  await expect(second.page.getByRole("alert")).toHaveCount(0);
+  expect(JSON.parse(await readFile(join(lifecycle.home, "metadata.json"), "utf8"))).toEqual({
+    version: 1,
+    recentProjects: [await realpath(lifecycle.project)],
+  });
 });

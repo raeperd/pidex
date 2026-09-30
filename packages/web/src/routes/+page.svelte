@@ -106,8 +106,8 @@
     }),
   );
 
-  onMount(async () => {
-    ({ projects: recentProjects, error: metadataError } = await window.desktop.recentProjects());
+  onMount(() => {
+    void loadRecentProjects();
   });
 
   onMount(() =>
@@ -190,6 +190,7 @@
     } finally {
       choosing = false;
     }
+    await loadRecentProjects();
   }
 
   async function openRecent(projectPath: string) {
@@ -204,6 +205,15 @@
       error ||= "Could not open the project. Please try again.";
     } finally {
       choosing = false;
+    }
+    await loadRecentProjects();
+  }
+
+  async function loadRecentProjects() {
+    try {
+      ({ projects: recentProjects, error: metadataError } = await window.desktop.recentProjects());
+    } catch {
+      metadataError = "Could not load recent projects. Relaunch Pidex to try again.";
     }
   }
 
@@ -450,6 +460,7 @@
               >
             {/if}
             {#if error}<p role="alert">{error}</p>{/if}
+            {#if metadataError}<p role="alert">{metadataError}</p>{/if}
           </div>
           <form
             class="rounded-[24px] border border-solid border-border bg-surface p-5 pb-4 shadow-composer has-[textarea:focus-visible]:outline-2 has-[textarea:focus-visible]:outline-solid has-[textarea:focus-visible]:outline-focus has-[textarea:focus-visible]:outline-offset-[3px] max-[520px]:p-4"
