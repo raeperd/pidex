@@ -1,8 +1,8 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { Socket } from "effect/unstable/socket";
+import { Socket } from "effect/socket";
 import { NodeSocket } from "@effect/platform-node";
-import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
+import { RpcClient, RpcSerialization } from "effect/rpc";
 import {
   applyConversationUpdate,
   Conversation,
