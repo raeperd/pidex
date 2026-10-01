@@ -10,8 +10,9 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import { NetAddress } from "effect/net";
+import { RpcSerialization, RpcServer } from "effect/rpc";
 import { access, readFile, readdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1090,7 +1091,7 @@ const program = Effect.gen(function* () {
       return yield* rpc;
     }),
   );
-  if (server.address._tag !== "TcpAddress") return yield* new StartupError();
+  if (!NetAddress.isInetAddress(server.address)) return yield* new StartupError();
   process.send?.({ port: server.address.port, sessionFile: readySessionFile });
   yield* Effect.never;
 });

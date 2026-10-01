@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/rpc";
 
 // Paths cross a native filesystem boundary; reject embedded NULs.
 // oxlint-disable-next-line no-control-regex
