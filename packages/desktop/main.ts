@@ -12,7 +12,7 @@ import {
   SessionList,
   SessionLocator,
 } from "../api/index.js";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import {
   Cause,
   Deferred,
@@ -26,7 +26,7 @@ import {
   Stream,
 } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const program = Effect.gen(function* () {
@@ -59,6 +59,20 @@ const program = Effect.gen(function* () {
           catch: () => new DesktopError({ message: "Could not load application content" }),
         });
       }).pipe(Effect.catch(() => Effect.succeed(new Response(null, { status: 404 })))),
+    ),
+  );
+  // Desktop-owned metadata; Pi owns history, so this file never stores transcripts or credentials.
+  const metadataFile = join(app.getPath("userData"), "metadata.json");
+  let metadataError = "";
+  // Preserve unreadable metadata: skip writes until the user repairs it and relaunches.
+  let metadataPreserved = false;
+  let metadata = yield* loadMetadata(metadataFile).pipe(
+    Effect.catch((error) =>
+      Effect.sync((): typeof Metadata.Type => {
+        metadataError = error.message;
+        metadataPreserved = true;
+        return { version: 1, recentProjects: [] };
+      }),
     ),
   );
   let window: BrowserWindow | undefined;
@@ -310,6 +324,60 @@ const program = Effect.gen(function* () {
       }),
     ),
   );
+  ipcMain.handle("recent-projects", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        return { projects: metadata.recentProjects, error: metadataError };
+      }),
+    ),
+  );
+  ipcMain.handle("open-project", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const path = yield* Schema.decodeUnknownEffect(ProjectPath)(value).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid project" })),
+        );
+        if (!metadata.recentProjects.includes(path))
+          return yield* new DesktopError({
+            message: "Choose this project with the folder picker.",
+          });
+        if (conversation) return conversation;
+        if (!window || choosing || quitting) return null;
+        choosing = true;
+        const missing = new DesktopError({
+          message: `Could not find ${path}. Restore the folder, then try again. It stays in your recent projects.`,
+        });
+        return yield* Effect.tryPromise({
+          try: () => realpath(path),
+          catch: () => missing,
+        }).pipe(
+          Effect.tap((canonical) =>
+            Effect.tryPromise({ try: () => stat(canonical), catch: () => missing }).pipe(
+              Effect.filterOrFail(
+                (info) => info.isDirectory(),
+                () => missing,
+              ),
+            ),
+          ),
+          Effect.flatMap(openProject),
+          Effect.ensuring(
+            Effect.sync(() => {
+              choosing = false;
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.match({
+          onSuccess: (selected) => ({ conversation: selected ?? null, error: "" }),
+          onFailure: (error) => ({ conversation: null, error: error.message }),
+        }),
+      ),
+    ),
+  );
   ipcMain.handle("choose-project", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -327,13 +395,10 @@ const program = Effect.gen(function* () {
           });
           const cwd = selection.filePaths[0];
           if (selection.canceled || !cwd) return null;
-          project = yield* Effect.tryPromise({
+          return yield* Effect.tryPromise({
             try: () => realpath(cwd),
             catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
-          });
-          sessionFile = undefined;
-          interrupted = false;
-          return yield* startServer();
+          }).pipe(Effect.flatMap(openProject));
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
@@ -380,6 +445,33 @@ const program = Effect.gen(function* () {
       }).pipe(Effect.match({ onSuccess: () => null, onFailure: (error) => error.message })),
     ),
   );
+  const openProject = Effect.fn(function* (canonical: string) {
+    project = canonical;
+    sessionFile = undefined;
+    interrupted = false;
+    const selected = yield* startServer();
+    if (!metadataPreserved) {
+      const next: typeof Metadata.Type = {
+        version: 1,
+        recentProjects: [
+          canonical,
+          ...metadata.recentProjects.filter((path) => path !== canonical),
+        ].slice(0, 10),
+      };
+      yield* saveMetadata(metadataFile, next).pipe(
+        Effect.match({
+          onSuccess: () => {
+            metadata = next;
+            metadataError = "";
+          },
+          onFailure: (error) => {
+            metadataError = error.message;
+          },
+        }),
+      );
+    }
+    return selected;
+  });
   const startServer = Effect.fn(function* () {
     starting = true;
     connectionError = "";
@@ -724,6 +816,53 @@ const program = Effect.gen(function* () {
       event.senderFrame.url === "pidex://app/"
     );
   }
+});
+
+const Metadata = Schema.Struct({
+  version: Schema.Literal(1),
+  recentProjects: Schema.Array(ProjectPath),
+});
+const MetadataFile = Schema.fromJsonString(Metadata, { space: 2 });
+
+const loadMetadata = Effect.fn(function* (file: string) {
+  const unreadable = new DesktopError({
+    message: `Cannot read Pidex metadata: ${file}. Restore or remove the file, then relaunch. Recent projects are not saved until then; the file has not been changed.`,
+  });
+  const contents = yield* Effect.tryPromise({
+    try: () => readFile(file, "utf8"),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      cause instanceof Error && "code" in cause && cause.code === "ENOENT"
+        ? Effect.succeed(undefined)
+        : Effect.fail(unreadable),
+    ),
+  );
+  if (contents === undefined)
+    return { version: 1, recentProjects: [] } satisfies typeof Metadata.Type;
+  return yield* Schema.decodeUnknownEffect(MetadataFile)(contents).pipe(
+    Effect.mapError(() => unreadable),
+  );
+});
+
+// Replace atomically so an interrupted write never leaves partial metadata.
+const saveMetadata = Effect.fn(function* (file: string, value: typeof Metadata.Type) {
+  const temporary = `${file}.${randomBytes(8).toString("hex")}.tmp`;
+  const contents = yield* Schema.encodeEffect(MetadataFile)(value).pipe(
+    Effect.mapError(() => new DesktopError({ message: "Could not encode Pidex metadata" })),
+  );
+  yield* Effect.tryPromise({
+    try: async () => {
+      await writeFile(temporary, `${contents}\n`, { mode: 0o600 });
+      await rename(temporary, file);
+    },
+    catch: () =>
+      new DesktopError({
+        message: `Cannot save Pidex metadata: ${file}. Check folder permissions, then relaunch.`,
+      }),
+  }).pipe(
+    Effect.tapError(() => Effect.ignore(Effect.tryPromise(() => rm(temporary, { force: true })))),
+  );
 });
 
 class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopError", {

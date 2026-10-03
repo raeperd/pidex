@@ -48,6 +48,8 @@
   let requestedNewFrom: string | undefined;
   let resumeTarget = $state.raw<typeof SessionLocator.Type>();
   let resumeUncertain = $state(false);
+  let recentProjects = $state.raw<string[]>([]);
+  let metadataError = $state("");
 
   let canSend = $derived(
     !sending &&
@@ -103,6 +105,10 @@
       }
     }),
   );
+
+  onMount(() => {
+    void loadRecentProjects();
+  });
 
   onMount(() =>
     window.desktop.onCrash(() => {
@@ -183,6 +189,31 @@
       error ||= "Could not open the project. Please try again.";
     } finally {
       choosing = false;
+    }
+    await loadRecentProjects();
+  }
+
+  async function openRecent(projectPath: string) {
+    choosing = true;
+    error = "";
+    try {
+      const result = await window.desktop.openProject(projectPath);
+      if (!conversation) conversation = result.conversation;
+      if (result.conversation) crashed = false;
+      error ||= result.error;
+    } catch {
+      error ||= "Could not open the project. Please try again.";
+    } finally {
+      choosing = false;
+    }
+    await loadRecentProjects();
+  }
+
+  async function loadRecentProjects() {
+    try {
+      ({ projects: recentProjects, error: metadataError } = await window.desktop.recentProjects());
+    } catch {
+      metadataError = "Could not load recent projects. Relaunch Pidex to try again.";
     }
   }
 
@@ -429,6 +460,7 @@
               >
             {/if}
             {#if error}<p role="alert">{error}</p>{/if}
+            {#if metadataError}<p role="alert">{metadataError}</p>{/if}
           </div>
           <form
             class="rounded-[24px] border border-solid border-border bg-surface p-5 pb-4 shadow-composer has-[textarea:focus-visible]:outline-2 has-[textarea:focus-visible]:outline-solid has-[textarea:focus-visible]:outline-focus has-[textarea:focus-visible]:outline-offset-[3px] max-[520px]:p-4"
@@ -520,7 +552,9 @@
       <h2 class="mt-0 mb-3 text-2xl leading-[1.3] font-medium max-[520px]:text-xl">
         Start with your project
       </h2>
-      <p class="max-w-[48ch] text-muted">Choose a folder to start a conversation with Pi.</p>
+      <p class="max-w-[48ch] text-muted">
+        Choose a folder or reopen a recent project to start a conversation with Pi.
+      </p>
       <button
         class="rounded-lg border border-solid border-border bg-raised px-4 py-2 font-sans text-sm text-foreground cursor-pointer disabled:cursor-default disabled:text-muted"
         onclick={chooseProject}
@@ -528,6 +562,25 @@
       >
       {#if choosing}<p role="status">Opening project…</p>{/if}
       {#if error}<p role="alert">{error}</p>{/if}
+      {#if metadataError}<p role="alert">{metadataError}</p>{/if}
+      <section class="mt-10" aria-label="Recent projects">
+        <h3 class="mt-0 mb-2 text-[11px] font-medium tracking-[0.08em] text-muted uppercase">
+          Recent projects
+        </h3>
+        {#each recentProjects as projectPath (projectPath)}
+          <button
+            class="mb-1 flex w-full min-w-0 cursor-pointer items-baseline gap-3 rounded-lg border-0 bg-transparent px-3 py-2.5 text-left font-sans text-foreground hover:bg-raised disabled:cursor-default disabled:opacity-40"
+            title={projectPath}
+            onclick={() => openRecent(projectPath)}
+            disabled={choosing}
+            ><span class="shrink-0 text-sm"
+              >{projectPath.split("/").filter(Boolean).at(-1) || "/"}</span
+            > <span class="truncate text-xs text-muted">{projectPath}</span></button
+          >
+        {:else}
+          <p class="text-sm text-muted">No recent projects yet.</p>
+        {/each}
+      </section>
     </div>
   {/if}
 </main>

@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld("desktop", {
     return () => ipcRenderer.removeListener("conversation", listener);
   },
   chooseProject: () => ipcRenderer.invoke("choose-project"),
+  recentProjects: () => ipcRenderer.invoke("recent-projects"),
+  openProject: (projectPath: string) => ipcRenderer.invoke("open-project", projectPath),
 });
