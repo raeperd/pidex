@@ -8,6 +8,8 @@ import {
   Conversation,
   ConversationApi,
   HistoryError,
+  ModelList,
+  ModelListError,
   ProjectPath,
   SessionList,
   SessionLocator,
@@ -184,6 +186,9 @@ const program = Effect.gen(function* () {
   let listSessions:
     | ((projectPath: string) => Effect.Effect<typeof SessionList.Type, HistoryError>)
     | undefined;
+  let listModels:
+    | ((sessionId: string) => Effect.Effect<typeof ModelList.Type, ModelListError>)
+    | undefined;
   let startNewSession:
     | ((projectPath: string, sessionId: string) => Effect.Effect<string, DesktopError>)
     | undefined;
@@ -334,6 +339,27 @@ const program = Effect.gen(function* () {
         );
         // Encode tagged errors before Electron's structured clone drops their custom fields.
       }).pipe(Effect.flatMap(Schema.encodeEffect(SessionList))),
+    ),
+  );
+  ipcMain.handle("list-models", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const sessionId = yield* Schema.decodeUnknownEffect(SessionLocator.fields.sessionId)(
+          value,
+        ).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })));
+        if (!listModels || quitting)
+          return { list: null, error: "Could not load models. Check the connection, then Retry." };
+        return yield* listModels(sessionId).pipe(
+          // Encode tagged errors before Electron's structured clone drops their custom fields.
+          Effect.flatMap(Schema.encodeEffect(ModelList)),
+          Effect.map((list) => ({ list, error: "" })),
+          Effect.catchTag("ModelListError", (error) =>
+            Effect.succeed({ list: null, error: error.message }),
+          ),
+        );
+      }),
     ),
   );
   ipcMain.handle("stop-run", (event, value: unknown) =>
@@ -673,6 +699,16 @@ const program = Effect.gen(function* () {
                     }),
               ),
             );
+          listModels = (sessionId) =>
+            client.ListModels({ sessionId }).pipe(
+              Effect.mapError((error) =>
+                error._tag === "ModelListError"
+                  ? error
+                  : new ModelListError({
+                      message: "Could not load models. Check the connection, then Retry.",
+                    }),
+              ),
+            );
           startNewSession = (projectPath, sessionId) =>
             client.NewSession({ projectPath, sessionId }).pipe(
               Effect.map(({ sessionFile: path }) => path),
@@ -754,6 +790,7 @@ const program = Effect.gen(function* () {
             Effect.sync(() => {
               sendPrompt = undefined;
               listSessions = undefined;
+              listModels = undefined;
               startNewSession = undefined;
               resumeSession = undefined;
               stopRun = undefined;
