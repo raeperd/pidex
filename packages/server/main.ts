@@ -9,7 +9,7 @@ import {
   SettingsManager,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, Deferred, Effect, Layer, Queue, Result, Schema, Stream } from "effect";
+import { Cause, Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { NetAddress } from "effect/net";
 import { RpcSerialization, RpcServer } from "effect/rpc";
@@ -270,7 +270,7 @@ const program = Effect.gen(function* () {
       // Session replacement can rebuild the runtime; use the one serving this session.
       const { modelRuntime } = target;
       // Local and cached catalogs only; per-provider checks keep one failure from hiding others.
-      const checks = yield* Effect.forEach(
+      const [available, errors] = yield* Effect.partition(
         modelRuntime.getProviders(),
         (provider) =>
           Effect.tryPromise((signal) => modelRuntime.getAvailable(provider.id, { signal })).pipe(
@@ -282,7 +282,6 @@ const program = Effect.gen(function* () {
                   message: `Pi could not check ${provider.name} authentication. Check its credentials in Pi, then Retry.`,
                 }),
             ),
-            Effect.result,
           ),
         { concurrency: "unbounded" },
       );
@@ -290,12 +289,8 @@ const program = Effect.gen(function* () {
       return {
         projectPath,
         sessionId,
-        models: checks
-          .filter(Result.isSuccess)
-          .flatMap(({ success }) =>
-            success.map(({ provider, id, name }) => ({ provider, id, name })),
-          ),
-        errors: checks.filter(Result.isFailure).map(({ failure }) => failure),
+        models: available.flat().map(({ provider, id, name }) => ({ provider, id, name })),
+        errors,
       };
     });
     const checkSetup = Effect.fn(function* (target: typeof session) {

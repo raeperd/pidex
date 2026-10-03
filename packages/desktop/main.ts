@@ -346,9 +346,9 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
-        const sessionId = yield* Schema.decodeUnknownEffect(Schema.String)(value).pipe(
-          Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
-        );
+        const sessionId = yield* Schema.decodeUnknownEffect(SessionLocator.fields.sessionId)(
+          value,
+        ).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })));
         if (!listModels || quitting)
           return { list: null, error: "Could not load models. Check the connection, then Retry." };
         return yield* listModels(sessionId).pipe(

@@ -66,7 +66,7 @@ export class ModelListError extends Schema.TaggedError<ModelListError>()("ModelL
 
 export const ModelList = Schema.Struct({
   projectPath: ProjectPath,
-  sessionId: Schema.String,
+  sessionId: SessionLocator.fields.sessionId,
   models: Schema.Array(Schema.Struct({ ...ModelIdentity.fields, name: Schema.String })),
   errors: Schema.Array(ProviderError),
 });
@@ -140,7 +140,7 @@ export const ConversationApi = RpcGroup.make(
     error: HistoryError,
   }),
   Rpc.make("ListModels", {
-    payload: { sessionId: Schema.String },
+    payload: { sessionId: SessionLocator.fields.sessionId },
     success: ModelList,
     error: ModelListError,
   }),

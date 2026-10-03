@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Conversation } from "../packages/api/index.js";
 import { test } from "./support/lifecycle.js";
 
 test("#215 discovers models by provider and model ID without changing Pi", async ({
@@ -122,7 +123,7 @@ test("#215 distinguishes no authenticated models from bounded auth-check failure
 function currentConversation(page: Page) {
   return page.evaluate(
     () =>
-      new Promise<{ id: string; projectPath: string; model: unknown }>((resolve) => {
+      new Promise<typeof Conversation.Type>((resolve) => {
         const stop = window.desktop.subscribe((update) => {
           if (update?._tag !== "Snapshot") return;
           stop();
