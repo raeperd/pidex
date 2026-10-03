@@ -1119,7 +1119,11 @@ const program = Effect.gen(function* () {
     }
 
     function modelIdentity() {
-      return session.model ? { provider: session.model.provider, id: session.model.id } : null;
+      // Pi substitutes a placeholder model when none resolves; it is not a model identity.
+      const model = session.model;
+      return model && session.modelRuntime.getModel(model.provider, model.id)
+        ? { provider: model.provider, id: model.id }
+        : null;
     }
 
     function finishRun() {

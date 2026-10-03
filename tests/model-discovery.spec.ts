@@ -31,6 +31,8 @@ test("#215 discovers models by provider and model ID without changing Pi", async
 test("#215 reports a failed provider separately and Retry rediscovers it", async ({
   lifecycle,
 }) => {
+  const { page } = await lifecycle.launch();
+  const conversation = await currentConversation(page);
   const auth = join(lifecycle.agentDir, "auth.json");
   const valid = await readFile(auth, "utf8");
   // A malformed credential fails only that provider's auth check.
@@ -41,8 +43,6 @@ test("#215 reports a failed provider separately and Retry rediscovers it", async
       moonbase: { type: "api_key", key: 6 },
     }),
   );
-  const { page } = await lifecycle.launch();
-  const conversation = await currentConversation(page);
   const failed = await listModels(page, conversation.id);
   expect(failed.list?.errors).toEqual([
     expect.objectContaining({ provider: "moonbase", message: expect.stringContaining("Retry") }),
@@ -62,7 +62,7 @@ test("#215 reports a failed provider separately and Retry rediscovers it", async
     id: "luna-6",
     name: "GPT-6 Luna",
   });
-  expect((await currentConversation(page)).model).toEqual(conversation.model);
+  expect((await currentConversation(page)).model).toEqual({ provider: "openai", id: "gpt-6-luna" });
   expect(lifecycle.requests).toHaveLength(0);
 });
 
