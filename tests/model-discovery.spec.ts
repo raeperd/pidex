@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "./support/lifecycle.js";
 
@@ -26,6 +26,32 @@ test("#215 discovers models by provider and model ID without changing Pi", async
   });
   expect(lifecycle.requests).toHaveLength(0);
   expect(await piSettings(lifecycle.agentDir)).toEqual(settings);
+});
+
+test("#215 scopes discovery to the session after a project switch", async ({ lifecycle }) => {
+  const beta = join(await realpath(lifecycle.home), "beta");
+  await mkdir(beta);
+  await writeFile(
+    join(lifecycle.home, "metadata.json"),
+    JSON.stringify({ version: 1, recentProjects: [beta] }),
+  );
+  const { page } = await lifecycle.launch();
+  const before = await currentConversation(page);
+  expect(
+    await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
+      beta,
+      before.id,
+    ] as const),
+  ).toEqual({ error: "" });
+  await expect(page.getByRole("region", { name: "Current project" })).toContainText(beta);
+  const after = await currentConversation(page);
+  expect((await listModels(page, before.id)).list).toBeNull();
+  expect((await listModels(page, after.id)).list).toMatchObject({
+    projectPath: beta,
+    sessionId: after.id,
+    errors: [],
+  });
+  expect(lifecycle.requests).toHaveLength(0);
 });
 
 test("#215 reports a failed provider separately and Retry rediscovers it", async ({

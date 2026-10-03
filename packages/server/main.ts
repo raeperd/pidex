@@ -262,6 +262,7 @@ const program = Effect.gen(function* () {
     });
     const listModels = Effect.fn(function* ({ sessionId }: { sessionId: string }) {
       const target = session;
+      const projectPath = cwd;
       const stale = new ModelListError({
         message: "The selected session changed. Refresh and try again.",
       });
@@ -287,7 +288,7 @@ const program = Effect.gen(function* () {
       );
       if (target !== session) return yield* stale;
       return {
-        projectPath: cwd,
+        projectPath,
         sessionId,
         models: checks
           .filter(Result.isSuccess)
