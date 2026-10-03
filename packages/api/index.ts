@@ -125,7 +125,12 @@ export const ConversationApi = RpcGroup.make(
     stream: true,
   }),
   Rpc.make("Send", {
-    payload: { text: Schema.String, submissionId: Schema.optional(Schema.String) },
+    payload: {
+      text: Schema.String,
+      submissionId: Schema.optional(Schema.String),
+      // The session the composer targeted; a replaced session rejects the prompt.
+      sessionId: Schema.optional(SessionLocator.fields.sessionId),
+    },
     error: SendError,
   }),
   Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),

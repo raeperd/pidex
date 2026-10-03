@@ -23,6 +23,7 @@ import {
   Schedule,
   Schema,
   Scope,
+  Semaphore,
   Stream,
 } from "effect";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
@@ -66,6 +67,7 @@ const program = Effect.gen(function* () {
   let metadataError = "";
   // Preserve unreadable metadata: skip writes until the user repairs it and relaunches.
   let metadataPreserved = false;
+  const metadataWrites = yield* Semaphore.make(1);
   let metadata = yield* loadMetadata(metadataFile).pipe(
     Effect.catch((error) =>
       Effect.sync((): typeof Metadata.Type => {
@@ -175,6 +177,7 @@ const program = Effect.gen(function* () {
     | ((
         text: string,
         submissionId?: string,
+        sessionId?: string,
       ) => Effect.Effect<"accepted" | "uncertain", DesktopError>)
     | undefined;
   let stopRun: ((runId: string) => Effect.Effect<void, DesktopError>) | undefined;
@@ -201,6 +204,9 @@ const program = Effect.gen(function* () {
         );
         if (!startNewSession || quitting || switching || pendingResume)
           return yield* new DesktopError({ message: "No connected conversation" });
+        // Switching projects is a separate operation, restricted to recent projects.
+        if (target.projectPath !== project)
+          return yield* new DesktopError({ message: "The selected project changed" });
         switching = true;
         yield* startNewSession(target.projectPath, target.sessionId).pipe(
           Effect.tap((path) =>
@@ -215,6 +221,43 @@ const program = Effect.gen(function* () {
           ),
         );
       }),
+    ),
+  );
+  ipcMain.handle("switch-project", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            projectPath: ProjectPath,
+            sessionId: SessionLocator.fields.sessionId,
+          }),
+        )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
+        // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
+        if (!metadata.recentProjects.includes(target.projectPath))
+          return yield* new DesktopError({
+            message: "Choose this project with the folder picker.",
+          });
+        if (!startNewSession || quitting || switching || pendingResume)
+          return yield* new DesktopError({
+            message: "Wait for the current session to finish loading, then try again.",
+          });
+        switching = true;
+        // Pi preflights and replaces the session; its locator message commits the new project.
+        yield* startNewSession(target.projectPath, target.sessionId).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              switching = false;
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.match({
+          onSuccess: () => ({ error: "" }),
+          onFailure: (error) => ({ error: error.message }),
+        }),
+      ),
     ),
   );
   ipcMain.handle("resume-session", (event, value: unknown) =>
@@ -307,7 +350,7 @@ const program = Effect.gen(function* () {
       }),
     ),
   );
-  ipcMain.handle("send-prompt", (event, text: unknown, submissionId: unknown) =>
+  ipcMain.handle("send-prompt", (event, text: unknown, submissionId: unknown, sessionId: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
@@ -320,7 +363,12 @@ const program = Effect.gen(function* () {
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
         ).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid submission ID" })));
-        return yield* sendPrompt(prompt, id);
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.UndefinedOr(SessionLocator.fields.sessionId),
+        )(sessionId).pipe(
+          Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
+        );
+        return yield* sendPrompt(prompt, id, target);
       }),
     ),
   );
@@ -450,18 +498,25 @@ const program = Effect.gen(function* () {
     sessionFile = undefined;
     interrupted = false;
     const selected = yield* startServer();
-    if (!metadataPreserved) {
-      const next: typeof Metadata.Type = {
-        version: 1,
-        recentProjects: [
-          canonical,
-          ...metadata.recentProjects.filter((path) => path !== canonical),
-        ].slice(0, 10),
-      };
-      yield* saveMetadata(metadataFile, next).pipe(
+    yield* rememberProject(canonical);
+    return selected;
+  });
+  const rememberProject = Effect.fn(function* (canonical: string) {
+    // Update this application lifetime first; persistence may fail or be skipped.
+    metadata = {
+      version: 1,
+      recentProjects: [
+        canonical,
+        ...metadata.recentProjects.filter((path) => path !== canonical),
+      ].slice(0, 10),
+    };
+    if (metadataPreserved) return;
+    // Serialize atomic replacements so an older list never lands last.
+    yield* metadataWrites
+      .withPermit(Effect.suspend(() => saveMetadata(metadataFile, metadata)))
+      .pipe(
         Effect.match({
           onSuccess: () => {
-            metadata = next;
             metadataError = "";
           },
           onFailure: (error) => {
@@ -469,8 +524,6 @@ const program = Effect.gen(function* () {
           },
         }),
       );
-    }
-    return selected;
   });
   const startServer = Effect.fn(function* () {
     starting = true;
@@ -498,6 +551,7 @@ const program = Effect.gen(function* () {
         const decoded = Schema.decodeUnknownExit(
           Schema.Struct({
             type: Schema.Literal("session-locator"),
+            projectPath: ProjectPath,
             sessionId: Schema.String,
             sessionFile: ProjectPath,
           }),
@@ -510,7 +564,12 @@ const program = Effect.gen(function* () {
             pendingResume.sessionFile !== decoded.value.sessionFile)
         )
           return;
-        if (!pendingResume) sessionFile = decoded.value.sessionFile;
+        if (!pendingResume) {
+          if (decoded.value.projectPath !== project)
+            Effect.runFork(rememberProject(decoded.value.projectPath));
+          project = decoded.value.projectPath;
+          sessionFile = decoded.value.sessionFile;
+        }
         if (child.connected)
           child.send({ type: "session-locator-ack", sessionId: decoded.value.sessionId }, () => {
             // A closed channel leaves the backend waiting for the acknowledgment timeout.
@@ -671,8 +730,8 @@ const program = Effect.gen(function* () {
                           }),
                       ),
                     );
-                  sendPrompt = (text, submissionId) =>
-                    client.Send({ text, submissionId }).pipe(
+                  sendPrompt = (text, submissionId, sessionId) =>
+                    client.Send({ text, submissionId, sessionId }).pipe(
                       Effect.map((): "accepted" => "accepted"),
                       Effect.catchCause((cause) => {
                         const failure = Cause.findErrorOption(cause);

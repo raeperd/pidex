@@ -25,7 +25,12 @@ declare global {
       onCrash: (onCrash: () => void) => () => void;
 
       stop: (runId: string) => Promise<void>;
-      send: (text: string, submissionId?: string) => Promise<"accepted" | "uncertain">;
+      send: (
+        text: string,
+        submissionId?: string,
+        sessionId?: string,
+      ) => Promise<"accepted" | "uncertain">;
+      switchProject: (projectPath: string, sessionId: string) => Promise<{ error: string }>;
       subscribe: (
         onChange: (
           value:

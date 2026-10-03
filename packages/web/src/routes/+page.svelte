@@ -147,7 +147,7 @@
     sending = true;
     error = "";
     try {
-      const outcome = await window.desktop.send(submitted, submission.id);
+      const outcome = await window.desktop.send(submitted, submission.id, conversation?.id);
       if (pending === submission) {
         if (outcome === "accepted") {
           if (draft === submitted) draft = "";
