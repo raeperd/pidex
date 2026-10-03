@@ -41,10 +41,10 @@ test("#215 searches models by provider, name, or ID and navigates by keyboard", 
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
   await search.press("ArrowUp");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-  await search.press("End");
-  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
   await search.press("Home");
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await search.press("End");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
   // Enter inside the composer form must not send the draft.
   await search.press("Enter");
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -72,30 +72,36 @@ test("#215 keeps other providers usable when one auth check fails, and Retry red
   const { page } = await lifecycle.launch();
   const auth = join(lifecycle.agentDir, "auth.json");
   const valid = await readFile(auth, "utf8");
-  // A malformed credential fails only that provider's auth check.
+  // A malformed credential fails only that provider's auth check, here the current model's.
   await writeFile(
     auth,
     JSON.stringify({
-      openai: { type: "api_key", key: "fixture-key" },
-      moonbase: { type: "api_key", key: 6 },
+      openai: { type: "api_key", key: 6 },
+      moonbase: { type: "api_key", key: "fixture-key" },
     }),
   );
   const prompt = page.getByRole("textbox", { name: "Prompt" });
   await prompt.fill("Unsent draft");
   const { dialog, search, options } = await openPicker(page);
-  await expect(dialog.getByRole("alert")).toContainText("moonbase");
+  await expect(dialog.getByRole("alert")).toContainText("OpenAI");
   await search.fill("GPT-6 Luna");
   await expect(options).toHaveCount(1);
-  await expect(options).toContainText("openai · gpt-6-luna");
+  await expect(options).toContainText("moonbase · luna-6");
+  await expect(options).toHaveAttribute("aria-selected", "true");
 
   await writeFile(auth, valid);
   await dialog.getByRole("button", { name: "Retry" }).click();
   await expect(options).toHaveCount(2);
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(options.nth(0)).toContainText("Current");
-  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  // Retry keeps the highlighted model; the current model is unchanged.
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
   await search.press("Escape");
   await expect(page.getByRole("button", { name: "Model: GPT-6 Luna" })).toBeVisible();
+  // Reopening highlights the current model again.
+  await openPicker(page);
+  await expect(dialog.getByRole("option", { selected: true })).toContainText("Current");
+  await search.press("Escape");
   await expect(prompt).toHaveValue("Unsent draft");
   expect(lifecycle.requests).toHaveLength(0);
   expect(await piSettings(lifecycle.agentDir)).toEqual(settings);

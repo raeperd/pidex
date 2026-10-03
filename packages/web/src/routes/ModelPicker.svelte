@@ -7,6 +7,14 @@
       .every((term) => text.includes(term));
   }
 
+  // Display names can repeat; a model is identified by provider and model ID.
+  function sameModel(
+    model: { provider: string; id: string },
+    target: { provider: string; id: string } | null,
+  ) {
+    return model.provider === target?.provider && model.id === target.id;
+  }
+
   function optionId(index: number) {
     return `model-option-${index}`;
   }
@@ -55,10 +63,8 @@
     if (refocus) onclose();
   }
 
-  async function load() {
+  async function load(keep = current) {
     const id = ++request;
-    // Retry keeps the highlighted model when it is still available.
-    const highlighted = activeModel ?? current;
     loading = true;
     error = "";
     list = undefined;
@@ -78,9 +84,14 @@
         : result.error;
     if (error) return;
     list = result.list ?? undefined;
-    const index = (target: typeof ModelIdentity.Type | null | undefined) =>
-      matches.findIndex((model) => model.provider === target?.provider && model.id === target.id);
-    active = Math.max(0, index(highlighted) >= 0 ? index(highlighted) : index(current));
+    const kept = matches.findIndex((model) => sameModel(model, keep));
+    active =
+      kept >= 0
+        ? kept
+        : Math.max(
+            0,
+            matches.findIndex((model) => sameModel(model, current)),
+          );
   }
 
   function navigate(event: KeyboardEvent) {
@@ -176,7 +187,6 @@
         </div>
         <div id="model-options" role="listbox" aria-label="Models">
           {#each matches as model, index (`${model.provider}/${model.id}`)}
-            {@const isCurrent = model.provider === current?.provider && model.id === current.id}
             <div
               id={optionId(index)}
               class="flex items-baseline gap-2 rounded-lg px-3 py-2 aria-selected:bg-raised"
@@ -191,7 +201,7 @@
                 <span class="block truncate text-sm text-foreground">{model.name}</span>
                 <span class="block truncate text-muted">{model.provider} · {model.id}</span>
               </span>
-              {#if isCurrent}<span class="shrink-0 text-info">Current</span>{/if}
+              {#if sameModel(model, current)}<span class="shrink-0 text-info">Current</span>{/if}
             </div>
           {/each}
         </div>
@@ -202,7 +212,8 @@
             onclick={() => {
               // Retry disappears after success; keep focus inside the picker.
               search?.focus();
-              void load();
+              // Retry keeps the highlighted model when it is still available.
+              void load(activeModel ?? current);
             }}>Retry</button
           >
         {/if}
