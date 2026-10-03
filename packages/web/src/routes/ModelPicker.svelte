@@ -60,6 +60,7 @@
   function close(refocus = true) {
     open = false;
     request++;
+    list = undefined;
     if (refocus) onclose();
   }
 
