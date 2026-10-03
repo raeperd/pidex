@@ -40,7 +40,7 @@ Run with `$pidex-implement-issue <issue URL>`. This workflow includes implementa
 
 5. Run the pidex-review-pr subworkflow.
    - Execute `pidex-review-pr` for each completed draft without requiring another user prompt. Pass the PR URL, issue/spec, layer scope, and recorded review fixed point.
-   - Let that skill own Codex, independent subagent review, findings, final CI, and readiness. Keep its run record across layers and follow-up fixes so each PR receives only one Codex trigger during this implementation run.
+   - Let that skill own independent subagent review, findings, final CI, and readiness. Keep its run record across layers and follow-up fixes.
    - Completion: the layer is verified ready, or pidex-review-pr leaves it in draft with a specific blocker.
 
 6. Continue and report.
