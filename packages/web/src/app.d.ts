@@ -16,6 +16,7 @@ declare global {
         uncertain: boolean;
       }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
+      pickProject: () => Promise<string | null>;
       recentProjects: () => Promise<{ projects: string[]; error: string }>;
       openProject: (projectPath: string) => Promise<{
         conversation: typeof Conversation.Type | null;

@@ -79,7 +79,7 @@
   }
 </script>
 
-<section aria-label="Saved sessions" class="flex h-full min-h-0 flex-col">
+<section aria-label="Saved sessions" class="flex min-h-0 flex-1 flex-col">
   <div class="shrink-0 px-3 pt-4 pb-3">
     <button
       class="mb-3 w-full rounded-lg border border-solid border-border bg-raised px-3 py-2 text-left text-sm text-foreground disabled:opacity-40"

@@ -171,6 +171,8 @@ const program = Effect.gen(function* () {
     Effect.runFork(shutdown);
   });
   let choosing = false;
+  // Besides recent projects, the last folder chosen with the native picker may be a destination.
+  let pickedProject: string | undefined;
   let conversation: typeof Conversation.Type | undefined;
   let connectionError = "";
   let sendPrompt:
@@ -235,7 +237,10 @@ const program = Effect.gen(function* () {
           }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
-        if (!metadata.recentProjects.includes(target.projectPath))
+        if (
+          !metadata.recentProjects.includes(target.projectPath) &&
+          target.projectPath !== pickedProject
+        )
           return yield* new DesktopError({
             message: "Choose this project with the folder picker.",
           });
@@ -433,30 +438,45 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
-        const activeWindow = window;
-        if (!activeWindow || choosing || quitting) return null;
-        choosing = true;
-        return yield* Effect.gen(function* () {
-          const selection = yield* Effect.tryPromise({
-            try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
-            catch: () => new DesktopError({ message: "Could not choose a project" }),
-          });
-          const cwd = selection.filePaths[0];
-          if (selection.canceled || !cwd) return null;
-          return yield* Effect.tryPromise({
-            try: () => realpath(cwd),
-            catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
-          }).pipe(Effect.flatMap(openProject));
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              choosing = false;
-            }),
-          ),
-        );
+        const selected = yield* pickFolder();
+        return selected ? yield* openProject(selected) : null;
       }),
     ),
   );
+  // Switching projects composes this native selection with the switch-project operation.
+  ipcMain.handle("pick-project", (event) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        pickedProject = (yield* pickFolder()) ?? undefined;
+        return pickedProject ?? null;
+      }),
+    ),
+  );
+  const pickFolder = Effect.fn(function* () {
+    const activeWindow = window;
+    if (!activeWindow || choosing || quitting) return null;
+    choosing = true;
+    return yield* Effect.gen(function* () {
+      const selection = yield* Effect.tryPromise({
+        try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
+        catch: () => new DesktopError({ message: "Could not choose a project" }),
+      });
+      const cwd = selection.filePaths[0];
+      if (selection.canceled || !cwd) return null;
+      return yield* Effect.tryPromise({
+        try: () => realpath(cwd),
+        catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
+      });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          choosing = false;
+        }),
+      ),
+    );
+  });
   ipcMain.handle("restart-backend", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {
