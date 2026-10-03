@@ -52,11 +52,31 @@ export class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
   message: Schema.String,
 }) {}
 
+// A model is identified within its provider; display names can repeat.
+export const ModelIdentity = Schema.Struct({ provider: Schema.String, id: Schema.String });
+
+export class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", {
+  provider: Schema.String,
+  message: Schema.String,
+}) {}
+
+export class ModelListError extends Schema.TaggedError<ModelListError>()("ModelListError", {
+  message: Schema.String,
+}) {}
+
+export const ModelList = Schema.Struct({
+  projectPath: ProjectPath,
+  sessionId: Schema.String,
+  models: Schema.Array(Schema.Struct({ ...ModelIdentity.fields, name: Schema.String })),
+  errors: Schema.Array(ProviderError),
+});
+
 export const Conversation = Schema.Struct({
   id: Schema.String,
   sessionFile: ProjectPath,
   projectPath: Schema.String,
   modelName: Schema.String,
+  model: Schema.NullOr(ModelIdentity),
   setupError: Schema.NullOr(SetupError),
   status: Schema.Literals(["idle", "running", "stopping", "unavailable"]),
   runId: Schema.NullOr(Schema.String),
@@ -118,6 +138,11 @@ export const ConversationApi = RpcGroup.make(
     payload: { projectPath: ProjectPath },
     success: SessionList,
     error: HistoryError,
+  }),
+  Rpc.make("ListModels", {
+    payload: { sessionId: Schema.String },
+    success: ModelList,
+    error: ModelListError,
   }),
   Rpc.make("Subscribe", {
     success: ConversationUpdate,

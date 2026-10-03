@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationUpdate,
+  ModelList,
   SessionList,
   SessionLocator,
 } from "../../api/index.js";
@@ -10,6 +11,9 @@ declare global {
     desktop: {
       newSession: (projectPath: string, sessionId: string) => Promise<void>;
       listSessions: (projectPath: string) => Promise<typeof SessionList.Encoded>;
+      listModels: (
+        sessionId: string,
+      ) => Promise<{ list: typeof ModelList.Encoded | null; error: string }>;
       resumeSession: (locator: typeof SessionLocator.Type) => Promise<{
         conversation: typeof Conversation.Type | null;
         error: string;

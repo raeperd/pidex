@@ -43,7 +43,10 @@ async function setup(cleanup: AsyncDisposableStack) {
   await mkdir(agentDir, { recursive: true });
   await writeFile(
     join(agentDir, "auth.json"),
-    JSON.stringify({ openai: { type: "api_key", key: "fixture-key" } }),
+    JSON.stringify({
+      openai: { type: "api_key", key: "fixture-key" },
+      moonbase: { type: "api_key", key: "fixture-key" },
+    }),
   );
   await writeFile(
     join(agentDir, "settings.json"),
@@ -104,6 +107,22 @@ async function setup(cleanup: AsyncDisposableStack) {
             },
           ],
         },
+        // A second provider whose model shares the first model's display name.
+        moonbase: {
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          api: "openai-completions",
+          models: [
+            {
+              id: "luna-6",
+              name: "GPT-6 Luna",
+              reasoning: false,
+              input: ["text"],
+              contextWindow: 128000,
+              maxTokens: 4096,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            },
+          ],
+        },
       },
     }),
   );
@@ -115,6 +134,7 @@ async function setup(cleanup: AsyncDisposableStack) {
   return {
     home,
     project,
+    agentDir,
     requests,
     requestBodies,
     providerInputs,
