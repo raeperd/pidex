@@ -31,6 +31,7 @@
     type SessionLocator,
   } from "../../../api/index.js";
   import AssistantMessage from "./AssistantMessage.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
   import Sessions from "./Sessions.svelte";
   let conversation = $state.raw<typeof Conversation.Type | null>(null);
   let draft = $state("");
@@ -480,7 +481,15 @@
               placeholder="Ask Pi to work on your project…"></textarea>
             <div class="mt-4 flex items-center gap-3">
               <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
-                <span class="wrap-anywhere">{conversation.modelName}</span>
+                {#key `${conversation.projectPath}:${conversation.id}`}
+                  <ModelPicker
+                    projectPath={conversation.projectPath}
+                    sessionId={conversation.id}
+                    current={conversation.model}
+                    label={conversation.modelName}
+                    onclose={() => editor?.focus()}
+                  />
+                {/key}
                 <span
                   class="group inline-flex items-center gap-1.5 border-0 border-l border-solid border-border pl-3 whitespace-nowrap"
                   role="status"
