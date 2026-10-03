@@ -5,7 +5,7 @@ Assign every PR exactly one milestone when you create it, so each release milest
 1. Choose the milestone, taking the first rule that applies.
    - The PR implements or fixes an issue in an open milestone: use that issue's milestone.
    - The PR defines or plans a milestone (spec, design prototype, issue breakdown): use that milestone.
-   - Otherwise (maintenance, CI, tests, dependencies, process docs, follow-ups to closed milestones): use the active milestone, the lowest open version that still has open issues. List candidates with `gh api 'repos/OWNER/REPO/milestones?state=open'`.
+   - Otherwise: use the active milestone, the lowest open version that still has open issues.
    - When linked issues span open milestones or no rule fits, leave the PR unassigned and name it with the reason in the final report.
    - Completion: one milestone title is chosen, or the PR is recorded as unassigned with the reason.
 
