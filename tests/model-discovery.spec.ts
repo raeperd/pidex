@@ -27,6 +27,8 @@ test("#215 discovers models by provider and model ID without changing Pi", async
   });
   expect(lifecycle.requests).toHaveLength(0);
   expect(await piSettings(lifecycle.agentDir)).toEqual(settings);
+  // Pi creates an empty catalog cache at startup and fills it only on a network refresh.
+  expect(await readFile(join(lifecycle.agentDir, "models-store.json"), "utf8")).toBe("{}");
 });
 
 test("#215 scopes discovery to the session after a project switch", async ({ lifecycle }) => {
@@ -46,7 +48,10 @@ test("#215 scopes discovery to the session after a project switch", async ({ lif
   ).toEqual({ error: "" });
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(beta);
   const after = await currentConversation(page);
-  expect((await listModels(page, before.id)).list).toBeNull();
+  expect(await listModels(page, before.id)).toEqual({
+    list: null,
+    error: "The selected session changed. Refresh and try again.",
+  });
   expect((await listModels(page, after.id)).list).toMatchObject({
     projectPath: beta,
     sessionId: after.id,
@@ -58,6 +63,7 @@ test("#215 scopes discovery to the session after a project switch", async ({ lif
 test("#215 reports a failed provider separately and Retry rediscovers it", async ({
   lifecycle,
 }) => {
+  const settings = await piSettings(lifecycle.agentDir);
   const { page } = await lifecycle.launch();
   const conversation = await currentConversation(page);
   const auth = join(lifecycle.agentDir, "auth.json");
@@ -91,6 +97,7 @@ test("#215 reports a failed provider separately and Retry rediscovers it", async
   });
   expect((await currentConversation(page)).model).toEqual({ provider: "openai", id: "gpt-6-luna" });
   expect(lifecycle.requests).toHaveLength(0);
+  expect(await piSettings(lifecycle.agentDir)).toEqual(settings);
 });
 
 test("#215 distinguishes no authenticated models from bounded auth-check failures", async ({
