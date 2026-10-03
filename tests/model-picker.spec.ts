@@ -41,12 +41,26 @@ test("#215 searches models by provider, name, or ID and navigates by keyboard", 
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
   await search.press("ArrowUp");
   await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+  await search.press("End");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+  await search.press("Home");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  // Enter inside the composer form must not send the draft.
+  await search.press("Enter");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Idle");
 
   await search.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(prompt).toBeFocused();
   await expect(prompt).toHaveValue("Unsent draft");
   await expect(page.getByRole("button", { name: "Model: GPT-6 Luna" })).toBeVisible();
+  // Moving focus elsewhere closes the picker without taking focus back.
+  await openPicker(page);
+  await page.getByRole("searchbox", { name: "Search saved sessions" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search saved sessions" })).toBeFocused();
+  await expect(prompt).toHaveValue("Unsent draft");
   expect(lifecycle.requests).toHaveLength(0);
   expect(await piSettings(lifecycle.agentDir)).toEqual(settings);
 });
@@ -54,6 +68,7 @@ test("#215 searches models by provider, name, or ID and navigates by keyboard", 
 test("#215 keeps other providers usable when one auth check fails, and Retry rediscovers", async ({
   lifecycle,
 }) => {
+  const settings = await piSettings(lifecycle.agentDir);
   const { page } = await lifecycle.launch();
   const auth = join(lifecycle.agentDir, "auth.json");
   const valid = await readFile(auth, "utf8");
@@ -78,10 +93,12 @@ test("#215 keeps other providers usable when one auth check fails, and Retry red
   await expect(options).toHaveCount(2);
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(options.nth(0)).toContainText("Current");
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
   await search.press("Escape");
   await expect(page.getByRole("button", { name: "Model: GPT-6 Luna" })).toBeVisible();
   await expect(prompt).toHaveValue("Unsent draft");
   expect(lifecycle.requests).toHaveLength(0);
+  expect(await piSettings(lifecycle.agentDir)).toEqual(settings);
 });
 
 test("#215 distinguishes loading, no authenticated models, and discovery failure", async ({
@@ -89,6 +106,7 @@ test("#215 distinguishes loading, no authenticated models, and discovery failure
 }) => {
   const auth = join(lifecycle.agentDir, "auth.json");
   await writeFile(auth, "{}");
+  const settings = await piSettings(lifecycle.agentDir);
   const { page, children } = await lifecycle.launch();
   // The picker stays usable while setup disables Send.
   await expect(page.getByRole("alert")).toContainText("authentication");
@@ -112,18 +130,22 @@ test("#215 distinguishes loading, no authenticated models, and discovery failure
   await dialog.getByRole("button", { name: "Retry" }).click();
   await expect(options.first()).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  // Discovery never changes Send gating.
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
 
   const [backend] = children();
   if (!backend) throw new Error("Missing Pi backend");
   process.kill(backend, "SIGKILL");
   await expect.poll(() => alive(backend)).toBe(false);
   // Reopening runs discovery again.
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("combobox").press("Escape");
   await openPicker(page);
   await expect(dialog.getByRole("alert")).toContainText("Could not load models");
   await expect(options).toHaveCount(0);
   await expect(prompt).toHaveValue("Unsent draft");
   expect(lifecycle.requests).toHaveLength(0);
+  // The test rewrote auth.json itself; Pidex leaves the other Pi files alone.
+  expect((await piSettings(lifecycle.agentDir)).toSpliced(1, 1)).toEqual(settings.toSpliced(1, 1));
 });
 
 async function openPicker(page: Page) {

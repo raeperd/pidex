@@ -6,6 +6,10 @@
       .split(/\s+/)
       .every((term) => text.includes(term));
   }
+
+  function optionId(index: number) {
+    return `model-option-${index}`;
+  }
 </script>
 
 <script lang="ts">
@@ -45,14 +49,16 @@
     await load();
   }
 
-  function close() {
+  function close(refocus = true) {
     open = false;
     request++;
-    onclose();
+    if (refocus) onclose();
   }
 
   async function load() {
     const id = ++request;
+    // Retry keeps the highlighted model when it is still available.
+    const highlighted = activeModel ?? current;
     loading = true;
     error = "";
     list = undefined;
@@ -65,20 +71,22 @@
     // Ignore results for an earlier request or target.
     if (id !== request) return;
     loading = false;
-    if (
+    error =
       result.list &&
       (result.list.sessionId !== sessionId || result.list.projectPath !== projectPath)
-    )
-      return;
-    error = result.error;
+        ? "The selected session changed. Refresh and try again."
+        : result.error;
+    if (error) return;
     list = result.list ?? undefined;
-    active = Math.max(
-      0,
-      matches.findIndex((model) => model.provider === current?.provider && model.id === current.id),
-    );
+    const index = (target: typeof ModelIdentity.Type | null | undefined) =>
+      matches.findIndex((model) => model.provider === target?.provider && model.id === target.id);
+    active = Math.max(0, index(highlighted) >= 0 ? index(highlighted) : index(current));
   }
 
   function navigate(event: KeyboardEvent) {
+    // The picker sits inside the composer form; Enter must not submit the draft.
+    // Applying the active model belongs to #216.
+    if (event.key === "Enter") event.preventDefault();
     const last = matches.length - 1;
     const next = {
       ArrowDown: active >= last ? 0 : active + 1,
@@ -92,13 +100,19 @@
       document.getElementById(optionId(next))?.scrollIntoView({ block: "nearest" });
     }
   }
-
-  function optionId(index: number) {
-    return `model-option-${index}`;
-  }
 </script>
 
-<div class="relative min-w-0">
+<div
+  class="relative min-w-0"
+  onfocusout={(event) => {
+    // Close when focus leaves the picker; the new focus target keeps focus.
+    if (
+      open &&
+      !(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))
+    )
+      close(false);
+  }}
+>
   <button
     type="button"
     class="max-w-full cursor-pointer truncate rounded-md border-0 bg-transparent px-1.5 py-1 font-sans text-xs text-muted hover:bg-raised hover:text-foreground"
@@ -138,26 +152,28 @@
         onkeydown={navigate}
       />
       <div class="min-h-0 overflow-y-auto px-2 pb-2 text-xs" aria-busy={loading}>
-        {#if loading}
-          <p class="px-2 text-muted" aria-live="polite">Loading models…</p>
-        {:else if error}
-          <p class="rounded-lg bg-error/5 p-3" role="alert">{error}</p>
-        {:else if list && list.models.length === 0 && list.errors.length > 0}
-          <p class="rounded-lg bg-error/5 p-3" role="alert">
-            Pi could not check provider authentication. Check your credentials in Pi, then Retry.
-          </p>
-        {:else if list && list.models.length === 0}
-          <p class="px-2 text-muted">
-            No authenticated models. Use /login in Pi or configure a provider API key, then Retry.
-          </p>
-        {:else if list}
-          {#each list.errors as failure (failure.provider)}
-            <p class="rounded-lg bg-error/5 p-3" role="alert">{failure.message}</p>
-          {/each}
-          {#if matches.length === 0}
-            <p class="px-2 text-muted">No models match “{query}”.</p>
+        <div aria-live="polite">
+          {#if loading}
+            <p class="px-2 text-muted">Loading models…</p>
+          {:else if error}
+            <p class="rounded-lg bg-error/5 p-3" role="alert">{error}</p>
+          {:else if list && list.models.length === 0 && list.errors.length > 0}
+            <p class="rounded-lg bg-error/5 p-3" role="alert">
+              Pi could not check provider authentication. Check your credentials in Pi, then Retry.
+            </p>
+          {:else if list && list.models.length === 0}
+            <p class="px-2 text-muted">
+              No authenticated models. Use /login in Pi or configure a provider API key, then Retry.
+            </p>
+          {:else if list}
+            {#each list.errors as failure (failure.provider)}
+              <p class="rounded-lg bg-error/5 p-3" role="alert">{failure.message}</p>
+            {/each}
+            {#if matches.length === 0}
+              <p class="px-2 text-muted">No models match “{query}”.</p>
+            {/if}
           {/if}
-        {/if}
+        </div>
         <div id="model-options" role="listbox" aria-label="Models">
           {#each matches as model, index (`${model.provider}/${model.id}`)}
             {@const isCurrent = model.provider === current?.provider && model.id === current.id}
