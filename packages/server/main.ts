@@ -189,7 +189,7 @@ const program = Effect.gen(function* () {
         if (!candidateModel) return yield* authenticationError;
         // A credential refresh can wait on a held lock; an unanswered check counts as missing.
         const auth = yield* Effect.tryPromise({
-          try: () => view.modelRuntime.getAuth(candidateModel),
+          try: (signal) => view.modelRuntime.getAuth(candidateModel, { signal }),
           catch: () => authenticationError,
         }).pipe(
           Effect.interruptible,
