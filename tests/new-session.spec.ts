@@ -71,7 +71,7 @@ test("#192 rejects New session while a run is active", async ({ lifecycle }) => 
         resolve(value.conversation);
       });
     });
-    return window.desktop.newSession(snapshot.projectPath, snapshot.id).then(
+    return window.desktop.newSession(snapshot.projectPath, snapshot.id, crypto.randomUUID()).then(
       () => "accepted",
       () => "rejected",
     );
@@ -150,7 +150,7 @@ test("#192 serializes simultaneous New session and Send against one selected ses
   const results = await page.evaluate(
     ({ projectPath, id }) =>
       Promise.allSettled([
-        window.desktop.newSession(projectPath, id),
+        window.desktop.newSession(projectPath, id, crypto.randomUUID()),
         window.desktop.send("Racing prompt", crypto.randomUUID()),
       ]),
     selected,
@@ -245,86 +245,102 @@ test("#192 ignores delayed updates from the replaced session", async ({ lifecycl
   await expect(page.getByLabel("assistant", { exact: true })).toHaveText("New reply");
 });
 
-test("#192 recovers the new locator when its RPC acknowledgment is lost", async ({ lifecycle }) => {
-  const { app, page, children } = await lifecycle.launch();
-  const prompt = page.getByRole("textbox", { name: "Prompt" });
-  await prompt.fill("Original history");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => lifecycle.requests.length).toBe(1);
-  lifecycle.complete("Original reply");
-  await expect(page.getByRole("status")).toHaveText("Idle");
+test("#192 a session draft's first run survives a reconnect", async ({ lifecycle }) => {
+  const { app, page } = await lifecycle.launch();
   const fault = await app.evaluateHandle(
     (_electron, modulePath) => {
       const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
         modulePath,
       );
       const prototype = NodeSocket.NodeWS.WebSocket.prototype;
-      const originalSend = prototype.send;
       const originalEmit = prototype.emit;
-      let requestId: number | undefined;
-      let dropped = false;
-      let offline = false;
-      prototype.send = function (...args: unknown[]) {
-        const data: unknown = JSON.parse(String(args[0]));
-        if (
-          typeof data === "object" &&
-          data !== null &&
-          "tag" in data &&
-          data.tag === "NewSession" &&
-          "id" in data &&
-          typeof data.id === "number"
-        )
-          requestId = data.id;
-        return originalSend.apply(this, args);
-      };
+      let disconnect: (() => void) | undefined;
       prototype.emit = function (event: string | symbol, ...args: unknown[]) {
-        const data = String(args[0]);
-        if (event === "open" && offline) {
-          this.terminate();
-          return true;
-        }
-        if (
-          event === "message" &&
-          requestId !== undefined &&
-          data.includes(`"requestId":${requestId}`) &&
-          data.includes('"_tag":"Exit"')
-        ) {
-          dropped = true;
-          offline = true;
-          requestId = undefined;
-          this.terminate();
-          return true;
-        }
+        if (event === "open")
+          disconnect = () => {
+            this.terminate();
+          };
         return originalEmit.apply(this, [event, ...args]);
       };
-      return {
-        dropped: () => dropped,
-        reconnect: () => {
-          offline = false;
-        },
-      };
+      return { disconnect: () => disconnect?.() };
     },
     fileURLToPath(import.meta.resolve("@effect/platform-node")),
   );
-  await prompt.fill("Unsent old-session draft");
-  await page.getByRole("button", { name: "New session" }).click();
-  await expect.poll(() => fault.evaluate((gate) => gate.dropped())).toBe(true);
-  await expect(page.getByRole("status")).toHaveText("Disconnected");
-  const [backend] = children();
-  if (!backend) throw new Error("Missing Pi backend");
-  process.kill(backend, "SIGKILL");
-  await expect.poll(() => alive(backend)).toBe(false);
-  await fault.evaluate((gate) => gate.reconnect());
-  await page.getByRole("button", { name: "Restart", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText("Idle", { timeout: 15000 });
-  await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
-  await expect(prompt).toHaveValue("");
-  await expect(page.getByRole("alert")).toContainText("Saved history is missing");
-  await prompt.fill("New history after lost acknowledgment");
+  const selected = await page.evaluate(() => window.desktop.chooseProject());
+  await page.getByRole("textbox", { name: "Prompt" }).fill("First prompt in a draft");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => lifecycle.requests.length).toBe(2);
-  lifecycle.complete("New reply");
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  const response = lifecycle.requests[0];
+  if (!response) throw new Error("Missing provider request");
+  const chunk = (delta: object, finish_reason: string | null = null) =>
+    response.write(
+      `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-6-luna", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+    );
+  // Part of the reply has streamed when the connection drops.
+  chunk({ role: "assistant", content: "First " });
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("First");
+  await fault.evaluate((gate) => gate.disconnect());
+  await expect(page.getByRole("status")).toHaveText("Running");
+  await expect(page.getByLabel("user")).toHaveText("First prompt in a draft");
+  chunk({ content: "reply" });
+  chunk({}, "stop");
+  response.end("data: [DONE]\n\n");
+  // Updates streamed around the reconnect are applied once.
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("First reply");
   await expect(page.getByRole("status")).toHaveText("Idle");
-  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("New reply");
-  expect(await lifecycle.history()).toHaveLength(2);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect((await page.evaluate(() => window.desktop.chooseProject()))?.id).toBe(selected?.id);
+  expect(await lifecycle.history()).toHaveLength(1);
+});
+
+test("#192 an unlisted history folder refuses Send instead of duplicating history", async ({
+  lifecycle,
+}) => {
+  await using cleanup = new AsyncDisposableStack();
+  const { page } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("First saved prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved history");
+  await page.getByRole("button", { name: "New session" }).click();
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
+  // Writable but not listable: a later save under the same ID could not be found.
+  await chmod(dirname(saved.path), 0o300);
+  cleanup.defer(() => chmod(dirname(saved.path), 0o700));
+  await prompt.fill("Prompt in an unlisted folder");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send the prompt");
+  await expect(prompt).toHaveValue("Prompt in an unlisted folder");
+  expect(lifecycle.requests).toHaveLength(1);
+  await chmod(dirname(saved.path), 0o700);
+  expect(await lifecycle.history()).toHaveLength(1);
+});
+
+test("#192 New session refuses a draft ID that is not new", async ({ lifecycle }) => {
+  const { page } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("Saved prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved history");
+  const selected = await page.evaluate(() => window.desktop.chooseProject());
+  if (!selected) throw new Error("Missing selection");
+  const attempt = (draftId: string) =>
+    page.evaluate(
+      ([projectPath, id, next]) =>
+        window.desktop.newSession(projectPath, id, next).then(() => "", String),
+      [selected.projectPath, selected.id, draftId] as const,
+    );
+  // A draft ID names new history only; an existing session's ID or a non-UUID is refused.
+  expect(await attempt(selected.id)).toContain("already has saved history");
+  expect(await attempt("not-a-uuid")).toContain("Invalid session target");
+  expect((await page.evaluate(() => window.desktop.chooseProject()))?.id).toBe(selected.id);
+  expect(await lifecycle.history()).toEqual([saved]);
 });

@@ -41,10 +41,10 @@ test("#215 scopes discovery to the session after a project switch", async ({ lif
   const { page } = await lifecycle.launch();
   const before = await currentConversation(page);
   expect(
-    await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
-      beta,
-      before.id,
-    ] as const),
+    await page.evaluate(
+      ([path, id]) => window.desktop.switchProject(path, id, crypto.randomUUID()),
+      [beta, before.id] as const,
+    ),
   ).toEqual({ error: "" });
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(beta);
   const after = await currentConversation(page);
