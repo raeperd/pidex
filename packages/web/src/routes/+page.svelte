@@ -1,4 +1,8 @@
 <script module lang="ts">
+  function projectName(projectPath: string) {
+    return projectPath.split("/").filter(Boolean).at(-1) || "/";
+  }
+
   function followOutput(viewport: HTMLElement) {
     let following = true;
     const onScroll = () => {
@@ -50,7 +54,19 @@
   let resumeTarget = $state.raw<typeof SessionLocator.Type>();
   let recentProjects = $state.raw<string[]>([]);
   let metadataError = $state("");
+  // Switch failures show in the sidebar, which stays visible in the narrow layout.
+  let projectError = $state("");
+  // Sorted by name so rows stay put when a switch reorders recent projects.
+  const sidebarProjects = $derived(
+    recentProjects.toSorted(
+      (a, b) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b),
+    ),
+  );
 
+  // Switching is serialized with Send; the owning APIs also reject competing requests.
+  const canNavigate = $derived(
+    connected && conversation?.status === "idle" && !replacing && !sending && !resumeTarget,
+  );
   let canSend = $derived(
     !sending &&
       !replacing &&
@@ -70,6 +86,8 @@
       }
       connected = update !== null;
       if (update?._tag === "Snapshot") {
+        // A switch error belongs to the selection it was raised from.
+        if (conversation?.id !== update.conversation.id) projectError = "";
         conversation = update.conversation;
         crashed = false;
         if (requestedNewFrom && conversation.id !== requestedNewFrom) {
@@ -212,7 +230,7 @@
 
   async function newSession() {
     const selected = conversation;
-    if (!selected || selected.status !== "idle" || replacing || sending || resumeTarget) return;
+    if (!selected || !canNavigate) return;
     replacing = true;
     requestedNewFrom = selected.id;
     error = "";
@@ -235,6 +253,52 @@
       }
     } finally {
       replacing = false;
+    }
+  }
+
+  async function addProject() {
+    const selected = conversation;
+    if (selected) await switchProject((draftId) => window.desktop.addProject(selected.id, draftId));
+  }
+
+  async function openProject(projectPath: string) {
+    await switchProject((draftId) => {
+      const selected = conversation;
+      return selected
+        ? window.desktop.switchProject(projectPath, selected.id, draftId)
+        : Promise.resolve({ error: "" });
+    });
+  }
+
+  // Selects a new session draft in another project; the request names the draft it creates.
+  async function switchProject(request: (draftId: string) => Promise<{ error: string }>) {
+    const selected = conversation;
+    if (!selected) return;
+    projectError = canNavigate ? "" : "Wait for the current session to finish, then try again.";
+    if (projectError) return;
+    replacing = true;
+    requestedNewFrom = selected.id;
+    try {
+      const result = await request(crypto.randomUUID());
+      if (result.error) {
+        if (conversation?.id === selected.id) projectError = result.error;
+        return;
+      }
+      // The new snapshot may already have arrived; clear only if it has not replaced the draft.
+      if (requestedNewFrom && conversation?.id !== selected.id) draft = "";
+      if (conversation?.id !== selected.id) {
+        pending = undefined;
+        showSessions = false;
+        await tick();
+        editor?.focus();
+      }
+    } catch {
+      if (conversation?.id === selected.id)
+        projectError = "Could not switch projects. Check the connection, then try again.";
+    } finally {
+      requestedNewFrom = undefined;
+      replacing = false;
+      await loadRecentProjects();
     }
   }
 
@@ -281,7 +345,7 @@
         aria-label="Current project"
       >
         <span class="truncate text-xs text-muted" title={conversation.projectPath}>
-          {conversation.projectPath.split("/").filter(Boolean).at(-1) || "/"}
+          {projectName(conversation.projectPath)}
         </span>
         <span class="sr-only">{conversation.projectPath}</span>
         <span class="text-border" aria-hidden="true">/</span>
@@ -317,20 +381,65 @@
         id="session-sidebar"
         aria-label="Session sidebar"
         class={[
-          "w-64 shrink-0 border-0 border-r border-solid border-border/60 bg-[#0d0e10] max-[799px]:w-full max-[799px]:border-r-0",
+          "flex w-64 shrink-0 flex-col border-0 border-r border-solid border-border/60 bg-[#0d0e10] max-[799px]:w-full max-[799px]:border-r-0",
           !showSessions && "max-[799px]:hidden",
         ]}
       >
+        <nav
+          class="shrink-0 border-0 border-b border-solid border-border/60 px-3 pt-4 pb-3"
+          aria-label="Projects"
+        >
+          <div class="flex items-center justify-between px-2 pb-2">
+            <h2 class="m-0 text-[11px] font-medium tracking-[0.08em] text-muted uppercase">
+              Projects
+            </h2>
+            <button
+              class="flex size-7 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted hover:bg-raised hover:text-foreground disabled:cursor-default disabled:opacity-40"
+              aria-label="Add project"
+              title="Add project"
+              onclick={addProject}
+              disabled={!canNavigate}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg
+              >
+            </button>
+          </div>
+          <!-- A stable order keeps rows from moving under the pointer after a switch. -->
+          <div class="max-h-40 overflow-y-auto">
+            {#each sidebarProjects as projectPath (projectPath)}
+              {@const active = projectPath === conversation.projectPath}
+              <button
+                class="mb-0.5 block w-full cursor-pointer truncate rounded-lg border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[13px] text-foreground/90 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:text-foreground disabled:cursor-default disabled:opacity-40"
+                title={projectPath}
+                aria-current={active ? "true" : undefined}
+                onclick={async () => {
+                  if (!active) return openProject(projectPath);
+                  // The current project only returns to its composer.
+                  showSessions = false;
+                  await tick();
+                  editor?.focus();
+                }}
+                disabled={!active && !canNavigate}
+                >{projectName(projectPath)}<span class="sr-only"> {projectPath}</span></button
+              >
+            {/each}
+          </div>
+          {#if projectError}<p class="mx-2 mt-2 mb-0 text-xs" role="alert">{projectError}</p>{/if}
+        </nav>
         {#key `${conversation.projectPath}:${conversation.id}`}
           <Sessions
             projectPath={conversation.projectPath}
             activeId={conversation.id}
             activeFile={conversation.sessionFile}
-            canNew={connected &&
-              conversation.status === "idle" &&
-              !replacing &&
-              !sending &&
-              !resumeTarget}
+            canNew={canNavigate}
             disabled={!connected ||
               conversation.status !== "idle" ||
               replacing ||
@@ -556,9 +665,8 @@
             title={projectPath}
             onclick={() => openRecent(projectPath)}
             disabled={choosing}
-            ><span class="shrink-0 text-sm"
-              >{projectPath.split("/").filter(Boolean).at(-1) || "/"}</span
-            > <span class="truncate text-xs text-muted">{projectPath}</span></button
+            ><span class="shrink-0 text-sm">{projectName(projectPath)}</span>
+            <span class="truncate text-xs text-muted">{projectPath}</span></button
           >
         {:else}
           <p class="text-sm text-muted">No recent projects yet.</p>
