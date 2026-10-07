@@ -28,7 +28,9 @@ import {
   SetupError,
   StopError,
   HistoryError,
+  ModelListError,
   NewSessionError,
+  ProviderError,
   ResumeError,
   SavedSession,
   SessionLocator,
@@ -258,6 +260,39 @@ const program = Effect.gen(function* () {
       sessions.sort((a, b) => b.modified.localeCompare(a.modified));
       return { projectPath, sessions, errors };
     });
+    const listModels = Effect.fn(function* ({ sessionId }: { sessionId: string }) {
+      const target = session;
+      const projectPath = cwd;
+      const stale = new ModelListError({
+        message: "The selected session changed. Refresh and try again.",
+      });
+      if (sessionId !== target.sessionId) return yield* stale;
+      // Session replacement can rebuild the runtime; use the one serving this session.
+      const { modelRuntime } = target;
+      // Local and cached catalogs only; per-provider checks keep one failure from hiding others.
+      const [available, errors] = yield* Effect.partition(
+        modelRuntime.getProviders(),
+        (provider) =>
+          Effect.tryPromise((signal) => modelRuntime.getAvailable(provider.id, { signal })).pipe(
+            Effect.timeout("5 seconds"),
+            Effect.mapError(
+              () =>
+                new ProviderError({
+                  provider: provider.id,
+                  message: `Pi could not check ${provider.name} authentication. Check its credentials in Pi, then Retry.`,
+                }),
+            ),
+          ),
+        { concurrency: "unbounded" },
+      );
+      if (target !== session) return yield* stale;
+      return {
+        projectPath,
+        sessionId,
+        models: available.flat().map(({ provider, id, name }) => ({ provider, id, name })),
+        errors,
+      };
+    });
     const checkSetup = Effect.fn(function* (target: typeof session) {
       const provider = target.settingsManager.getDefaultProvider();
       const modelId = target.settingsManager.getDefaultModel();
@@ -295,6 +330,7 @@ const program = Effect.gen(function* () {
         sessionFile: session.sessionFile ?? cwd,
         projectPath: cwd,
         modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
+        model: modelIdentity(),
         setupError,
         status: "idle",
         runId: null,
@@ -640,6 +676,7 @@ const program = Effect.gen(function* () {
           sessionFile: nextFile,
           projectPath: cwd,
           modelName: setupError ? "Setup required" : (session.model?.name ?? "Setup required"),
+          model: modelIdentity(),
           setupError,
           status: "idle",
           runId: null,
@@ -1055,6 +1092,7 @@ const program = Effect.gen(function* () {
                 }),
               ),
             ListSessions: listSessions,
+            ListModels: listModels,
             NewSession: (payload) => newSession(payload).pipe(Effect.uninterruptible),
             ResumeSession: (payload) => resumeSession(payload).pipe(Effect.uninterruptible),
             Stop: (payload) => stop(payload).pipe(Effect.uninterruptible),
@@ -1074,6 +1112,14 @@ const program = Effect.gen(function* () {
       return interrupted || unfinished
         ? "The previous run was interrupted. Saved history was restored; send a prompt to continue."
         : "";
+    }
+
+    function modelIdentity() {
+      // Pi substitutes a placeholder model when none resolves; it is not a model identity.
+      const model = session.model;
+      return model && session.modelRuntime.getModel(model.provider, model.id)
+        ? { provider: model.provider, id: model.id }
+        : null;
     }
 
     function finishRun() {
@@ -1105,6 +1151,7 @@ const program = Effect.gen(function* () {
               Subscribe: () => Stream.fail(error),
               ListSessions: ({ projectPath }) =>
                 Effect.fail(new HistoryError({ path: projectPath, message: error.message })),
+              ListModels: () => Effect.fail(new ModelListError({ message: error.message })),
               Stop: () => Effect.fail(new StopError({ message: error.message })),
               Send: () => Effect.fail(new SendError({ message: error.message })),
               NewSession: () => Effect.fail(new NewSessionError({ message: error.message })),
