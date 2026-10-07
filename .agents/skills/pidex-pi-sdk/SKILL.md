@@ -16,7 +16,8 @@ Use the documentation shipped with the installed Pi package as the API authority
 
 2. Choose the integration layer.
    - Use `createAgentSession` when one session owns the whole lifecycle.
-   - Use `createAgentSessionRuntime` when new, resume, fork, or import replaces sessions.
+   - Use `createAgentSessionRuntime` when new, resume, fork, or import replaces one long-lived session.
+   - Open a `createAgentSession` per run against the target `SessionManager` when the host owns selection outside Pi, as Pidex does.
    - Use RPC mode for process isolation or a non-Node client.
    - Keep the selected runtime layer in one clear composition root.
    - Completion: session ownership and replacement behavior are explicit.

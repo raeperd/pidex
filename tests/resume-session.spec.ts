@@ -1,4 +1,6 @@
 import { expect } from "@playwright/test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
 import { chmod, readFile, realpath, rm } from "node:fs/promises";
 import { alive, test } from "./support/lifecycle.js";
 import { fileURLToPath } from "node:url";
@@ -464,3 +466,47 @@ for (const failure of ["missing", "unreadable"] as const)
       expect(await readFile(saved.path, "utf8")).toBe(saved.bytes);
     }
   });
+
+test("#194 resumes a Pi CLI session without writing to its history", async ({ lifecycle }) => {
+  const project = await realpath(lifecycle.project);
+  const seeded = SessionManager.create(
+    project,
+    join(
+      lifecycle.home,
+      ".pi",
+      "agent",
+      "sessions",
+      `--${project.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+    ),
+  );
+  seeded.appendMessage({ role: "user", content: "CLI prompt", timestamp: 1 });
+  seeded.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "CLI reply" }],
+    api: "openai-completions",
+    provider: "openai",
+    model: "gpt-6-luna",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 2,
+  });
+  const file = seeded.getSessionFile();
+  if (!file) throw new Error("Missing seeded session file");
+  const bytes = await readFile(file, "utf8");
+  // Pi records these when it opens a session; reading must not add them.
+  expect(bytes).not.toContain("thinking_level_change");
+  const { page } = await lifecycle.launch();
+  const list = page.getByRole("region", { name: "Saved sessions" });
+  await list.getByRole("radio").check();
+  await list.getByRole("button", { name: "Resume session" }).click();
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("CLI reply");
+  expect(await readFile(file, "utf8")).toBe(bytes);
+  expect(lifecycle.requests).toHaveLength(0);
+});
