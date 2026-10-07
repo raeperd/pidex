@@ -186,14 +186,14 @@ const program = Effect.gen(function* () {
   let readSession:
     | ((
         target: typeof SessionLocator.Type,
-        writable?: boolean,
+        draft?: boolean,
       ) => Effect.Effect<typeof Conversation.Type, ReadSessionError | DesktopError>)
     | undefined;
   // Reads the renderer's next target and commits it as the selection only after it loads.
-  // A new session draft also needs writable history for its first reply.
-  const select = Effect.fn(function* (target: typeof SessionLocator.Type, writable = false) {
+  // `draft` requires a new session draft: no saved history yet, and writable history.
+  const select = Effect.fn(function* (target: typeof SessionLocator.Type, draft = false) {
     if (!readSession) return yield* new DesktopError({ message: "No connected conversation" });
-    const next = yield* readSession(target, writable);
+    const next = yield* readSession(target, draft);
     selected = target;
     used = false;
     show(next);
@@ -241,7 +241,7 @@ const program = Effect.gen(function* () {
           Schema.Struct({
             projectPath: ProjectPath,
             sessionId: Schema.String,
-            draftId: SessionLocator.fields.sessionId,
+            draftId: DraftId,
           }),
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session target" })),
@@ -263,7 +263,7 @@ const program = Effect.gen(function* () {
           Schema.Struct({
             projectPath: ProjectPath,
             sessionId: SessionLocator.fields.sessionId,
-            draftId: SessionLocator.fields.sessionId,
+            draftId: DraftId,
           }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
@@ -287,7 +287,10 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
-        const locator = yield* Schema.decodeUnknownEffect(SessionLocator)(value).pipe(
+        // Resume names saved history, so the file is required.
+        const locator = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ ...SessionLocator.fields, sessionFile: ProjectPath }),
+        )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
         );
         if (!readSession || !selected || quitting || switching || sending)
@@ -306,7 +309,9 @@ const program = Effect.gen(function* () {
         return yield* select(locator).pipe(
           Effect.tapError((error) =>
             // A selected session whose history became unusable must not accept Send.
-            error._tag === "ReadSessionError" && current.sessionId === locator.sessionId
+            error._tag === "ReadSessionError" &&
+            error.reason !== "busy" &&
+            current.sessionId === locator.sessionId
               ? Effect.sync(() => {
                   if (!conversation) return;
                   show({
@@ -692,6 +697,9 @@ const program = Effect.gen(function* () {
             });
             return;
           }
+          // A session draft saved while disconnected gets its exact file from now on.
+          if (selected === target && !target.sessionFile && restored.messageCount > 0)
+            selected = { ...target, sessionFile: restored.sessionFile };
           show(
             interrupted && !restored.error && restored.status === "idle"
               ? {
@@ -761,8 +769,8 @@ const program = Effect.gen(function* () {
                       }),
                 ),
               );
-          readSession = (target, writable) =>
-            client.ReadSession({ ...target, writable }).pipe(
+          readSession = (target, draft) =>
+            client.ReadSession({ ...target, draft }).pipe(
               Effect.mapError((error) =>
                 error._tag === "ReadSessionError"
                   ? error
@@ -810,19 +818,26 @@ const program = Effect.gen(function* () {
             const saved = yield* readSession(draft).pipe(
               Effect.catch(() => Effect.succeed(undefined)),
             );
-            if (!saved || saved.messageCount === 0 || selected !== draft) return;
+            if (!saved || saved.messageCount === 0 || selected !== draft || !conversation) return;
             selected = { ...draft, sessionFile: saved.sessionFile };
-            show({ ...saved, error: conversation?.error || saved.error });
+            // Only the file changes; the live transcript already has every streamed update.
+            show({ ...conversation, sessionFile: saved.sessionFile });
           });
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
                 if (!synced) {
-                  // A run may have finished while disconnected; the read replaces the initial
-                  // run state, which may only be a placeholder while the run prepares.
                   synced = true;
                   connectionError = "";
-                  yield* recover();
+                  // The selected session's live run is current; queued updates continue from it.
+                  // Otherwise a run may have finished while disconnected, so reread the selection.
+                  if (
+                    update._tag === "Snapshot" &&
+                    update.conversation.id === selected?.sessionId &&
+                    update.conversation.projectPath === selected.projectPath
+                  )
+                    show(update.conversation);
+                  else yield* recover();
                   if (conversation) yield* Deferred.succeed(initial, conversation);
                   return;
                 }
@@ -842,7 +857,7 @@ const program = Effect.gen(function* () {
                 if (window && !window.isDestroyed())
                   window.webContents.send("conversation", update);
                 if (update._tag === "StateChanged" && update.status === "idle")
-                  yield* recordSaved();
+                  yield* recordSaved().pipe(Effect.forkIn(socketScope));
               }),
             ),
           );
@@ -1021,6 +1036,11 @@ const saveMetadata = Effect.fn(function* (file: string, value: typeof Metadata.T
     Effect.tapError(() => Effect.ignore(Effect.tryPromise(() => rm(temporary, { force: true })))),
   );
 });
+
+// The renderer names each new session draft with a UUID.
+const DraftId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+);
 
 class RecoveryFailure extends Schema.TaggedError<RecoveryFailure>()("RecoveryFailure", {
   message: Schema.String,

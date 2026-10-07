@@ -270,14 +270,52 @@ test("#192 a session draft's first run survives a reconnect", async ({ lifecycle
   await page.getByRole("textbox", { name: "Prompt" }).fill("First prompt in a draft");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => lifecycle.requests.length).toBe(1);
-  await expect(page.getByRole("status")).toHaveText("Running");
+  const response = lifecycle.requests[0];
+  if (!response) throw new Error("Missing provider request");
+  const chunk = (delta: object, finish_reason: string | null = null) =>
+    response.write(
+      `data: ${JSON.stringify({ id: "reply", object: "chat.completion.chunk", created: 1, model: "gpt-6-luna", choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+    );
+  // Part of the reply has streamed when the connection drops.
+  chunk({ role: "assistant", content: "First " });
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("First");
   await fault.evaluate((gate) => gate.disconnect());
   await expect(page.getByRole("status")).toHaveText("Running");
   await expect(page.getByLabel("user")).toHaveText("First prompt in a draft");
-  lifecycle.complete("First reply");
+  chunk({ content: "reply" });
+  chunk({}, "stop");
+  response.end("data: [DONE]\n\n");
+  // Updates streamed around the reconnect are applied once.
   await expect(page.getByLabel("assistant", { exact: true })).toHaveText("First reply");
   await expect(page.getByRole("status")).toHaveText("Idle");
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect((await page.evaluate(() => window.desktop.chooseProject()))?.id).toBe(selected?.id);
+  expect(await lifecycle.history()).toHaveLength(1);
+});
+
+test("#192 an unlisted history folder refuses Send instead of duplicating history", async ({
+  lifecycle,
+}) => {
+  await using cleanup = new AsyncDisposableStack();
+  const { page } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("First saved prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved history");
+  await page.getByRole("button", { name: "New session" }).click();
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
+  // Writable but not listable: a later save under the same ID could not be found.
+  await chmod(dirname(saved.path), 0o300);
+  cleanup.defer(() => chmod(dirname(saved.path), 0o700));
+  await prompt.fill("Prompt in an unlisted folder");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send the prompt");
+  await expect(prompt).toHaveValue("Prompt in an unlisted folder");
+  expect(lifecycle.requests).toHaveLength(1);
+  await chmod(dirname(saved.path), 0o700);
   expect(await lifecycle.history()).toHaveLength(1);
 });

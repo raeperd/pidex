@@ -143,8 +143,8 @@ export const ConversationApi = RpcGroup.make(
     error: HistoryError,
   }),
   Rpc.make("ReadSession", {
-    // `writable` also requires a session draft to be able to save its first reply.
-    payload: { ...SessionLocator.fields, writable: Schema.optional(Schema.Boolean) },
+    // `draft` requires a new session draft: no saved history yet, and a writable folder.
+    payload: { ...SessionLocator.fields, draft: Schema.optional(Schema.Boolean) },
     success: Conversation,
     error: ReadSessionError,
   }),

@@ -210,7 +210,12 @@ test("#195 rejects switching, New session, Resume session, and stale or competin
   expect(staleSend).toContain("selected session changed");
   // Resume stays inside the selected project, even for a project in recent projects.
   const crossProject = await page.evaluate(
-    (path) => window.desktop.resumeSession({ projectPath: path, sessionId: crypto.randomUUID() }),
+    (path) =>
+      window.desktop.resumeSession({
+        projectPath: path,
+        sessionId: "cross-project",
+        sessionFile: `${path}/cross-project.jsonl`,
+      }),
     beta,
   );
   expect(crossProject.error).toContain("belongs to another project");

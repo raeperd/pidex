@@ -48,9 +48,9 @@ const program = Effect.gen(function* () {
   const subscribers = new Set<(update: typeof ConversationUpdate.Type, bytes: number) => void>();
 
   const readSession = Effect.fn(function* ({
-    writable,
+    draft,
     ...target
-  }: typeof SessionLocator.Type & { writable?: boolean }) {
+  }: typeof SessionLocator.Type & { draft?: boolean }) {
     const running = (run: Run | undefined) =>
       run?.target.projectPath === target.projectPath && run.target.sessionId === target.sessionId;
     // Only one run at a time: selecting another session waits for it.
@@ -62,8 +62,14 @@ const program = Effect.gen(function* () {
     if (active && !running(active)) return yield* busy;
     if (active?.session) return active.conversation;
     const located = yield* locate(target);
-    // A new session draft must be able to save its first reply.
-    if (writable)
+    // A new session draft has no history yet and must be able to save its first reply.
+    if (draft && located.saved)
+      return yield* new ReadSessionError({
+        reason: "unavailable",
+        path: located.directory,
+        message: "This session already has saved history. Choose New session again.",
+      });
+    if (draft)
       yield* Effect.tryPromise({
         try: () => access(located.directory, constants.W_OK),
         catch: () =>
@@ -78,7 +84,8 @@ const program = Effect.gen(function* () {
     const run = active;
     if (run && !running(run)) return yield* busy;
     if (!run) return conversation;
-    const live: typeof Conversation.Type = { ...conversation, status: "running", runId: run.id };
+    // The run ID is published once the run's session is open; until then it cannot be stopped.
+    const live: typeof Conversation.Type = { ...conversation, status: "running", runId: null };
     return live;
   });
 
@@ -110,7 +117,7 @@ const program = Effect.gen(function* () {
         model: null,
         setupError: null,
         status: "running",
-        runId: id,
+        runId: null,
         messageCount: 0,
         entries: [],
         error: "",
@@ -145,8 +152,11 @@ const program = Effect.gen(function* () {
     }).pipe(
       Effect.mapError((error) => new SendError({ message: error.message })),
       Effect.tapError(() =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           active = undefined;
+          // Nothing will start or finish; release anyone waiting on this run.
+          yield* Deferred.succeed(started, undefined);
+          yield* Deferred.succeed(finished, undefined);
         }),
       ),
     );
@@ -481,6 +491,7 @@ const program = Effect.gen(function* () {
         return {
           cwd: project.path,
           directory: project.directory,
+          saved: false,
           unlisted: listing.failure,
           manager: yield* Effect.try({
             try: () =>
@@ -541,6 +552,7 @@ const program = Effect.gen(function* () {
     return {
       cwd: project.path,
       directory: project.directory,
+      saved: true,
       unlisted: undefined,
       manager: yield* Effect.try({
         try: () => SessionManager.open(path, undefined, project.path),
@@ -854,7 +866,8 @@ const program = Effect.gen(function* () {
                   Effect.sync(() => {
                     // Registration and the initial run state happen together, without a gap.
                     subscribers.add(enqueue);
-                    const initial: typeof ConversationUpdate.Type = active
+                    // A run that is still preparing has nothing to show yet.
+                    const initial: typeof ConversationUpdate.Type = active?.session
                       ? { _tag: "Snapshot", conversation: active.conversation }
                       : { _tag: "Idle" };
                     enqueue(initial, Buffer.byteLength(JSON.stringify(initial)));
