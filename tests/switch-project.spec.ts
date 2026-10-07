@@ -39,6 +39,20 @@ test("#195 switches idle work to another project with its instructions, working 
   await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
   const switched = await current(page);
   expect(switched.id).not.toBe(before.id);
+  // Deliver a late update from the previous session and wait until the renderer has it.
+  const received = page.evaluate(
+    (sessionId) =>
+      new Promise<void>((resolve) => {
+        const stop = window.desktop.subscribe((value) => {
+          if (value?._tag !== "EntryUpserted" || value.sessionId !== sessionId) return;
+          stop();
+          resolve();
+        });
+        document.documentElement.dataset.lateUpdateReady = "true";
+      }),
+    before.id,
+  );
+  await page.waitForFunction(() => document.documentElement.dataset.lateUpdateReady === "true");
   await app.evaluate(({ BrowserWindow }, sessionId) => {
     BrowserWindow.getAllWindows()[0]?.webContents.send("conversation", {
       _tag: "EntryUpserted",
@@ -46,6 +60,7 @@ test("#195 switches idle work to another project with its instructions, working 
       entry: { id: "late-alpha-reply", role: "assistant", text: "Late alpha reply" },
     });
   }, before.id);
+  await received;
   await expect(page.getByRole("region", { name: "Saved sessions" })).toContainText(
     "No saved sessions in this project.",
   );

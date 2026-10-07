@@ -168,8 +168,6 @@ const program = Effect.gen(function* () {
     Effect.runFork(shutdown);
   });
   let choosing = false;
-  // Besides recent projects, the last folder chosen with the native picker may be a destination.
-  let pickedProject: string | undefined;
   let conversation: typeof Conversation.Type | undefined;
   let connectionError = "";
   let sendPrompt:
@@ -270,16 +268,11 @@ const program = Effect.gen(function* () {
           }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
-        if (
-          !metadata.recentProjects.includes(target.projectPath) &&
-          target.projectPath !== pickedProject
-        )
+        if (!metadata.recentProjects.includes(target.projectPath))
           return yield* new DesktopError({
             message: "Choose this project with the folder picker.",
           });
-        yield* idleSelection(target.sessionId);
-        yield* selectDraft({ projectPath: target.projectPath, sessionId: target.draftId });
-        yield* rememberProject(target.projectPath);
+        yield* switchProject(target.projectPath, target.sessionId, target.draftId);
       }).pipe(
         Effect.match({
           onSuccess: () => ({ error: "" }),
@@ -511,17 +504,38 @@ const program = Effect.gen(function* () {
       }),
     ),
   );
-  // Switching projects composes this native selection with the switch-project operation.
-  ipcMain.handle("pick-project", (event) =>
+  // Adds a project from the native folder picker and switches to a new session draft there.
+  ipcMain.handle("add-project", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
-        pickedProject = (yield* pickFolder()) ?? undefined;
-        return pickedProject ?? null;
-      }),
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            sessionId: SessionLocator.fields.sessionId,
+            draftId: SessionLocator.fields.sessionId,
+          }),
+        )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
+        yield* idleSelection(target.sessionId);
+        const folder = yield* pickFolder();
+        if (folder) yield* switchProject(folder, target.sessionId, target.draftId);
+      }).pipe(
+        Effect.match({
+          onSuccess: () => ({ error: "" }),
+          onFailure: (error) => ({ error: error.message }),
+        }),
+      ),
     ),
   );
+  const switchProject = Effect.fn(function* (
+    projectPath: string,
+    sessionId: string,
+    draftId: string,
+  ) {
+    yield* idleSelection(sessionId);
+    yield* selectDraft({ projectPath, sessionId: draftId });
+    yield* rememberProject(projectPath);
+  });
   const pickFolder = Effect.fn(function* () {
     const activeWindow = window;
     if (!activeWindow || choosing || quitting) return null;
