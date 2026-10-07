@@ -319,3 +319,28 @@ test("#192 an unlisted history folder refuses Send instead of duplicating histor
   await chmod(dirname(saved.path), 0o700);
   expect(await lifecycle.history()).toHaveLength(1);
 });
+
+test("#192 New session refuses a draft ID that is not new", async ({ lifecycle }) => {
+  const { page } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("Saved prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  lifecycle.complete("Saved reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  const [saved] = await lifecycle.history();
+  if (!saved) throw new Error("Missing saved history");
+  const selected = await page.evaluate(() => window.desktop.chooseProject());
+  if (!selected) throw new Error("Missing selection");
+  const attempt = (draftId: string) =>
+    page.evaluate(
+      ([projectPath, id, next]) =>
+        window.desktop.newSession(projectPath, id, next).then(() => "", String),
+      [selected.projectPath, selected.id, draftId] as const,
+    );
+  // A draft ID names new history only; an existing session's ID or a non-UUID is refused.
+  expect(await attempt(selected.id)).toContain("already has saved history");
+  expect(await attempt("not-a-uuid")).toContain("Invalid session target");
+  expect((await page.evaluate(() => window.desktop.chooseProject()))?.id).toBe(selected.id);
+  expect(await lifecycle.history()).toEqual([saved]);
+});

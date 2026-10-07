@@ -108,8 +108,9 @@ const program = Effect.gen(function* () {
     const runId = currentRun
       ? yield* currentRun.pipe(Effect.catch(() => Effect.succeed(undefined)))
       : undefined;
-    // A lost connection means unknown, even when the last observed state was Idle.
-    if (conversation && runId !== null) {
+    // A lost connection means unknown, even when the last observed state was Idle. A Send still
+    // preparing its run counts as a run too.
+    if (conversation && (sending || runId !== null)) {
       const confirmation = yield* Effect.tryPromise({
         try: () =>
           dialog.showMessageBox({
@@ -837,6 +838,8 @@ const program = Effect.gen(function* () {
                     update.conversation.projectPath === selected.projectPath
                   )
                     show(update.conversation);
+                  // Known race: if the run's session opens and streams before this read is
+                  // served, the read already includes deltas that are also queued here.
                   else yield* recover();
                   if (conversation) yield* Deferred.succeed(initial, conversation);
                   return;
