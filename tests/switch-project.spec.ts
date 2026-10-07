@@ -30,10 +30,10 @@ test("#195 switches idle work to another project with its instructions, working 
 
   const before = await current(page);
   expect(
-    await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
-      beta,
-      before.id,
-    ] as const),
+    await page.evaluate(
+      ([path, id]) => window.desktop.switchProject(path, id, crypto.randomUUID()),
+      [beta, before.id] as const,
+    ),
   ).toEqual({ error: "" });
   await expect(page.getByRole("region", { name: "Current project" })).toContainText(beta);
   await expect(page.getByLabel("assistant", { exact: true })).toHaveCount(0);
@@ -103,10 +103,10 @@ test("#195 switches idle work to another project with its instructions, working 
 
   const restored = await current(page);
   expect(
-    await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
-      alpha,
-      restored.id,
-    ] as const),
+    await page.evaluate(
+      ([path, id]) => window.desktop.switchProject(path, id, crypto.randomUUID()),
+      [alpha, restored.id] as const,
+    ),
   ).toEqual({ error: "" });
   const list = page.getByRole("region", { name: "Saved sessions" });
   await expect(list.getByRole("radio")).toHaveCount(1);
@@ -173,8 +173,10 @@ test("#195 rejects switching, New session, Resume session, and stale or competin
   const attempts = () =>
     page.evaluate(
       async ([destination, projectPath, id, sessionFile]) => ({
-        switch: (await window.desktop.switchProject(destination, id)).error,
-        newSession: await window.desktop.newSession(projectPath, id).then(() => "", String),
+        switch: (await window.desktop.switchProject(destination, id, crypto.randomUUID())).error,
+        newSession: await window.desktop
+          .newSession(projectPath, id, crypto.randomUUID())
+          .then(() => "", String),
         resume: (await window.desktop.resumeSession({ projectPath, sessionId: id, sessionFile }))
           .error,
         send: await window.desktop
@@ -185,25 +187,33 @@ test("#195 rejects switching, New session, Resume session, and stale or competin
     );
 
   expect(
-    await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
-      unlisted,
-      selected.id,
-    ] as const),
+    await page.evaluate(
+      ([path, id]) => window.desktop.switchProject(path, id, crypto.randomUUID()),
+      [unlisted, selected.id] as const,
+    ),
   ).toEqual({ error: "Choose this project with the folder picker." });
   expect(
     await page.evaluate(
-      ([path, id]) => window.desktop.newSession(path, id).then(() => "", String),
+      ([path, id]) =>
+        window.desktop.newSession(path, id, crypto.randomUUID()).then(() => "", String),
       [beta, selected.id] as const,
     ),
   ).toContain("selected project changed");
-  const stale = await page.evaluate(([path]) => window.desktop.switchProject(path, "stale-id"), [
-    beta,
-  ] as const);
+  const stale = await page.evaluate(
+    ([path]) => window.desktop.switchProject(path, "stale-id", crypto.randomUUID()),
+    [beta] as const,
+  );
   expect(stale.error).toContain("selected session changed");
   const staleSend = await page.evaluate(() =>
     window.desktop.send("Stale prompt", crypto.randomUUID(), "stale-id").then(() => "", String),
   );
   expect(staleSend).toContain("selected session changed");
+  // Resume stays inside the selected project, even for a project in recent projects.
+  const crossProject = await page.evaluate(
+    (path) => window.desktop.resumeSession({ projectPath: path, sessionId: crypto.randomUUID() }),
+    beta,
+  );
+  expect(crossProject.error).toContain("belongs to another project");
   expect(lifecycle.requests).toHaveLength(0);
 
   await page.getByRole("textbox", { name: "Prompt" }).fill("Keep this run");
@@ -250,10 +260,10 @@ for (const failure of ["missing", "unreadable"] as const)
     const [saved] = await lifecycle.history();
     if (!saved) throw new Error("Missing saved history");
     const selected = await current(page);
-    const result = await page.evaluate(([path, id]) => window.desktop.switchProject(path, id), [
-      destination,
-      selected.id,
-    ] as const);
+    const result = await page.evaluate(
+      ([path, id]) => window.desktop.switchProject(path, id, crypto.randomUUID()),
+      [destination, selected.id] as const,
+    );
     expect(result.error).toContain(`Could not open ${destination}`);
     await expect(page.getByRole("status")).toHaveText("Idle");
     await expect(page.getByLabel("assistant", { exact: true })).toHaveText("Kept reply");

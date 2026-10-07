@@ -344,7 +344,8 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     // The server sends one initial run state; the transcript comes from reading the session.
     expect(updates.wire.filter((message) => message.includes('"_tag":"Idle"'))).toHaveLength(1);
     expect(updates.wire.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(0);
-    expect(updates.ipc.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
+    // One read when the project opens, and one when the draft's first reply is saved.
+    expect(updates.ipc.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(2);
     for (const messages of [updates.wire, updates.ipc]) {
       const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
       expect(deltas).toHaveLength(14);
@@ -643,6 +644,26 @@ test.describe("#130 subscription limits", () => {
           message.values?.some((value) => value._tag === "TextDelta" && value.delta === "start") ===
           true,
       );
+      if (scenario === "item budget") {
+        // The server owns the one-run rule: another session can be neither read nor run.
+        const other = { projectPath: target.projectPath, sessionId: randomUUID() };
+        fast.send({ _tag: "Request", id: "3", tag: "ReadSession", payload: other, headers: [] });
+        const read = await fast.next(
+          (message) => message._tag === "Exit" && message.requestId === "3",
+        );
+        expect(JSON.stringify(read.exit)).toContain('"reason":"busy"');
+        fast.send({
+          _tag: "Request",
+          id: "4",
+          tag: "Send",
+          payload: { target: other, text: "Competing prompt" },
+          headers: [],
+        });
+        const competing = await fast.next(
+          (message) => message._tag === "Exit" && message.requestId === "4",
+        );
+        expect(JSON.stringify(competing.exit)).toContain("Wait for the current reply");
+      }
       const part =
         scenario === "item budget"
           ? "x"

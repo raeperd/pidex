@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { alive, test } from "./support/lifecycle.js";
 
 test("#192 starts another Pi session from an empty list and an idle session", async ({
@@ -70,7 +71,7 @@ test("#192 rejects New session while a run is active", async ({ lifecycle }) => 
         resolve(value.conversation);
       });
     });
-    return window.desktop.newSession(snapshot.projectPath, snapshot.id).then(
+    return window.desktop.newSession(snapshot.projectPath, snapshot.id, crypto.randomUUID()).then(
       () => "accepted",
       () => "rejected",
     );
@@ -149,7 +150,7 @@ test("#192 serializes simultaneous New session and Send against one selected ses
   const results = await page.evaluate(
     ({ projectPath, id }) =>
       Promise.allSettled([
-        window.desktop.newSession(projectPath, id),
+        window.desktop.newSession(projectPath, id, crypto.randomUUID()),
         window.desktop.send("Racing prompt", crypto.randomUUID()),
       ]),
     selected,
@@ -242,4 +243,41 @@ test("#192 ignores delayed updates from the replaced session", async ({ lifecycl
   expect(lifecycle.requestBodies[0]).not.toContain("Old reply arrived late");
   lifecycle.complete("New reply");
   await expect(page.getByLabel("assistant", { exact: true })).toHaveText("New reply");
+});
+
+test("#192 a session draft's first run survives a reconnect", async ({ lifecycle }) => {
+  const { app, page } = await lifecycle.launch();
+  const fault = await app.evaluateHandle(
+    (_electron, modulePath) => {
+      const { NodeSocket } = process.getBuiltinModule("module").createRequire(modulePath)(
+        modulePath,
+      );
+      const prototype = NodeSocket.NodeWS.WebSocket.prototype;
+      const originalEmit = prototype.emit;
+      let disconnect: (() => void) | undefined;
+      prototype.emit = function (event: string | symbol, ...args: unknown[]) {
+        if (event === "open")
+          disconnect = () => {
+            this.terminate();
+          };
+        return originalEmit.apply(this, [event, ...args]);
+      };
+      return { disconnect: () => disconnect?.() };
+    },
+    fileURLToPath(import.meta.resolve("@effect/platform-node")),
+  );
+  const selected = await page.evaluate(() => window.desktop.chooseProject());
+  await page.getByRole("textbox", { name: "Prompt" }).fill("First prompt in a draft");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requests.length).toBe(1);
+  await expect(page.getByRole("status")).toHaveText("Running");
+  await fault.evaluate((gate) => gate.disconnect());
+  await expect(page.getByRole("status")).toHaveText("Running");
+  await expect(page.getByLabel("user")).toHaveText("First prompt in a draft");
+  lifecycle.complete("First reply");
+  await expect(page.getByLabel("assistant", { exact: true })).toHaveText("First reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect((await page.evaluate(() => window.desktop.chooseProject()))?.id).toBe(selected?.id);
+  expect(await lifecycle.history()).toHaveLength(1);
 });

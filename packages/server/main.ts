@@ -30,7 +30,6 @@ import {
   SavedSession,
   SendError,
   SessionLocator,
-  SessionTarget,
   SetupError,
   StopError,
   SubscribeError,
@@ -51,15 +50,17 @@ const program = Effect.gen(function* () {
   const readSession = Effect.fn(function* ({
     writable,
     ...target
-  }: typeof SessionTarget.Type & { writable?: boolean }) {
-    if (active && sameSession(active.target, target)) return active.conversation;
+  }: typeof SessionLocator.Type & { writable?: boolean }) {
+    const running = (run: Run | undefined) =>
+      run?.target.projectPath === target.projectPath && run.target.sessionId === target.sessionId;
     // Only one run at a time: selecting another session waits for it.
-    if (active)
-      return yield* new ReadSessionError({
-        reason: "unavailable",
-        path: target.projectPath,
-        message: "Wait for the current reply or Stop to finish.",
-      });
+    const busy = new ReadSessionError({
+      reason: "busy",
+      path: target.projectPath,
+      message: "Wait for the current reply or Stop to finish.",
+    });
+    if (active && !running(active)) return yield* busy;
+    if (active?.session) return active.conversation;
     const located = yield* locate(target);
     // A new session draft must be able to save its first reply.
     if (writable)
@@ -72,7 +73,13 @@ const program = Effect.gen(function* () {
             message: "Pi history is not writable. Check folder permissions, then Retry.",
           }),
       });
-    return yield* describe(located);
+    const conversation = yield* describe(located);
+    // A run may have started while the history was read.
+    const run = active;
+    if (run && !running(run)) return yield* busy;
+    if (!run) return conversation;
+    const live: typeof Conversation.Type = { ...conversation, status: "running", runId: run.id };
+    return live;
   });
 
   const send = Effect.fn(function* ({
@@ -80,27 +87,46 @@ const program = Effect.gen(function* () {
     text,
     submissionId,
   }: {
-    target: typeof SessionTarget.Type;
+    target: typeof SessionLocator.Type;
     text: string;
     submissionId?: string;
   }) {
     if (!text.trim()) return yield* new SendError({ message: "Enter a prompt." });
+    const id = crypto.randomUUID();
+    const started = yield* Deferred.make<void>();
+    const finished = yield* Deferred.make<void>();
+    const stopped = yield* Deferred.make<void, StopError>();
+    // Check and reserve the single run in one step, before any asynchronous preparation.
     if (active) return yield* new SendError({ message: "Wait for the current reply." });
     const run: Run = {
-      id: crypto.randomUUID(),
+      id,
       target,
-      conversation: placeholder(target),
+      // Stands in until the run's Pi session is open; readers then get the real conversation.
+      conversation: {
+        id: target.sessionId,
+        sessionFile: target.sessionFile ?? target.projectPath,
+        projectPath: target.projectPath,
+        modelName: "",
+        model: null,
+        setupError: null,
+        status: "running",
+        runId: id,
+        messageCount: 0,
+        entries: [],
+        error: "",
+      },
       session: undefined,
       messageId: "",
       failed: false,
-      started: yield* Deferred.make<void>(),
-      finished: yield* Deferred.make<void>(),
-      stopped: yield* Deferred.make<void, StopError>(),
+      started,
+      finished,
+      stopped,
     };
-    // Reserve the single run before any asynchronous preparation.
     active = run;
     const session = yield* Effect.gen(function* () {
       const located = yield* locate(target);
+      // Without a listing, an earlier save under this ID could be duplicated.
+      if (located.unlisted) return yield* located.unlisted;
       const opened = yield* openSession(located).pipe(
         Effect.mapError(
           () =>
@@ -418,24 +444,51 @@ const program = Effect.gen(function* () {
   });
 
   // Resolves a target to its project and Pi session history without changing either.
-  const locate = Effect.fn(function* (target: typeof SessionTarget.Type) {
+  const locate = Effect.fn(function* (target: typeof SessionLocator.Type) {
+    // Keep this helper local to file resolution, its sole consumer.
+    // oxlint-disable-next-line consistent-function-scoping
+    const errorCode = (cause: unknown) =>
+      cause instanceof Error && "code" in cause ? String(cause.code) : undefined;
     const project = yield* locateProject(target.projectPath);
     let file = target.sessionFile;
     if (!file) {
       // A session draft gets its file with the first saved reply; Pi names it after the ID.
-      const files = yield* Effect.tryPromise(() => readdir(project.directory)).pipe(
-        Effect.catch(() => Effect.succeed<string[]>([])),
+      const unreadable = (reason?: string) =>
+        new ReadSessionError({
+          reason: "unavailable",
+          path: project.directory,
+          ...(reason === undefined ? {} : { code: reason }),
+          message: `Cannot read saved history: ${project.directory}. Check file and folder permissions, then Retry. Saved files have not been changed.`,
+        });
+      // An unlisted history folder can still be shown as an empty draft, but not run in.
+      const listing = yield* Effect.tryPromise({
+        try: () => readdir(project.directory),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.map((names) => ({ names, failure: undefined })),
+        Effect.catch((cause) =>
+          Effect.succeed({
+            names: [],
+            failure: errorCode(cause) === "ENOENT" ? undefined : unreadable(errorCode(cause)),
+          }),
+        ),
       );
-      const saved = files.find((name) => name.endsWith(`_${target.sessionId}.jsonl`));
-      if (!saved)
+      const files = listing.names;
+      const saved = files.filter((name) => name.endsWith(`_${target.sessionId}.jsonl`));
+      // Two files for one ID would make the target ambiguous.
+      if (saved.length > 1) return yield* unreadable();
+      if (saved[0] === undefined)
         return {
           cwd: project.path,
           directory: project.directory,
-          manager: SessionManager.create(project.path, project.directory, {
-            id: target.sessionId,
+          unlisted: listing.failure,
+          manager: yield* Effect.try({
+            try: () =>
+              SessionManager.create(project.path, project.directory, { id: target.sessionId }),
+            catch: () => unreadable(),
           }),
         };
-      file = join(project.directory, saved);
+      file = join(project.directory, saved[0]);
     }
     const path = file;
     const failure = (reason?: string) =>
@@ -488,6 +541,7 @@ const program = Effect.gen(function* () {
     return {
       cwd: project.path,
       directory: project.directory,
+      unlisted: undefined,
       manager: yield* Effect.try({
         try: () => SessionManager.open(path, undefined, project.path),
         catch: () => failure(),
@@ -858,7 +912,7 @@ type Located = { cwd: string; manager: SessionManager };
 
 type Run = {
   id: string;
-  target: typeof SessionTarget.Type;
+  target: typeof SessionLocator.Type;
   conversation: typeof Conversation.Type;
   session: AgentSession | undefined;
   messageId: string;
@@ -867,31 +921,6 @@ type Run = {
   finished: Deferred.Deferred<void>;
   stopped: Deferred.Deferred<void, StopError>;
 };
-
-function errorCode(cause: unknown) {
-  return cause instanceof Error && "code" in cause ? String(cause.code) : undefined;
-}
-
-function sameSession(a: typeof SessionTarget.Type, b: typeof SessionTarget.Type) {
-  return a.projectPath === b.projectPath && a.sessionId === b.sessionId;
-}
-
-// Stands in for the run's conversation until its Pi session is open.
-function placeholder(target: typeof SessionTarget.Type): typeof Conversation.Type {
-  return {
-    id: target.sessionId,
-    sessionFile: target.sessionFile ?? target.projectPath,
-    projectPath: target.projectPath,
-    modelName: "",
-    model: null,
-    setupError: null,
-    status: "running",
-    runId: null,
-    messageCount: 0,
-    entries: [],
-    error: "",
-  };
-}
 
 class StartupError extends Schema.TaggedError<StartupError>()("StartupError", {}) {}
 

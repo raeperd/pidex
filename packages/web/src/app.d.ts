@@ -9,7 +9,7 @@ import type {
 declare global {
   interface Window {
     desktop: {
-      newSession: (projectPath: string, sessionId: string) => Promise<void>;
+      newSession: (projectPath: string, sessionId: string, draftId: string) => Promise<void>;
       listSessions: (projectPath: string) => Promise<typeof SessionList.Encoded>;
       listModels: (
         sessionId: string,
@@ -17,7 +17,6 @@ declare global {
       resumeSession: (locator: typeof SessionLocator.Type) => Promise<{
         conversation: typeof Conversation.Type | null;
         error: string;
-        uncertain: boolean;
       }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
       recentProjects: () => Promise<{ projects: string[]; error: string }>;
@@ -34,7 +33,11 @@ declare global {
         submissionId?: string,
         sessionId?: string,
       ) => Promise<"accepted" | "uncertain">;
-      switchProject: (projectPath: string, sessionId: string) => Promise<{ error: string }>;
+      switchProject: (
+        projectPath: string,
+        sessionId: string,
+        draftId: string,
+      ) => Promise<{ error: string }>;
       subscribe: (
         onChange: (
           value:

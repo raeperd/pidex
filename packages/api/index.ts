@@ -5,17 +5,11 @@ import { Rpc, RpcGroup } from "effect/rpc";
 // oxlint-disable-next-line no-control-regex
 export const ProjectPath = Schema.String.check(Schema.isPattern(/^\/[^\0]*$/));
 
+// Names the session a request targets. A session draft has no file until its first saved reply;
+// the server then finds the file by session ID.
 export const SessionLocator = Schema.Struct({
   projectPath: ProjectPath,
   sessionId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/)),
-  sessionFile: ProjectPath,
-});
-
-// The session a request targets. A session draft has no file until its first saved reply;
-// the server then finds the file by session ID.
-export const SessionTarget = Schema.Struct({
-  projectPath: ProjectPath,
-  sessionId: SessionLocator.fields.sessionId,
   sessionFile: Schema.optional(ProjectPath),
 });
 
@@ -26,6 +20,7 @@ export class HistoryError extends Schema.TaggedError<HistoryError>()("HistoryErr
 
 export const SavedSession = Schema.Struct({
   ...SessionLocator.fields,
+  sessionFile: ProjectPath,
   title: Schema.String.check(Schema.isNonEmpty()),
   modified: Schema.String.check(Schema.isPattern(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/)),
 });
@@ -94,7 +89,7 @@ export const Conversation = Schema.Struct({
 });
 
 export const ConversationUpdate = Schema.Union([
-  // A run's conversation, sent when the run starts and to new subscribers during it.
+  // The active run's conversation, sent to a new subscriber while a run is active.
   Schema.Struct({ _tag: Schema.Literal("Snapshot"), conversation: Conversation }),
   // Sent to new subscribers when no run is active.
   Schema.Struct({ _tag: Schema.Literal("Idle") }),
@@ -133,8 +128,9 @@ export class StopError extends Schema.TaggedError<StopError>()("StopError", {
 }) {}
 
 export class ReadSessionError extends Schema.TaggedError<ReadSessionError>()("ReadSessionError", {
-  // missing: the project folder or session file does not exist; unavailable: it cannot be used.
-  reason: Schema.Literals(["missing", "unavailable"]),
+  // missing: the project folder or session file does not exist; unavailable: it cannot be used;
+  // busy: a run for another session is active.
+  reason: Schema.Literals(["missing", "unavailable", "busy"]),
   path: ProjectPath,
   code: Schema.optional(Schema.String),
   message: Schema.String,
@@ -148,7 +144,7 @@ export const ConversationApi = RpcGroup.make(
   }),
   Rpc.make("ReadSession", {
     // `writable` also requires a session draft to be able to save its first reply.
-    payload: { ...SessionTarget.fields, writable: Schema.optional(Schema.Boolean) },
+    payload: { ...SessionLocator.fields, writable: Schema.optional(Schema.Boolean) },
     success: Conversation,
     error: ReadSessionError,
   }),
@@ -164,7 +160,7 @@ export const ConversationApi = RpcGroup.make(
   }),
   Rpc.make("Send", {
     payload: {
-      target: SessionTarget,
+      target: SessionLocator,
       text: Schema.String,
       submissionId: Schema.optional(Schema.String),
     },

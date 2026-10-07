@@ -14,7 +14,6 @@ import {
   ReadSessionError,
   SessionList,
   SessionLocator,
-  SessionTarget,
 } from "../api/index.js";
 import { readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import {
@@ -89,12 +88,14 @@ const program = Effect.gen(function* () {
   let server: { child: ChildProcess; port?: number } | undefined;
   // Mirrors the renderer's selection for recovery; it belongs to this application lifetime,
   // not to a child or a window. A session draft has no file until its first saved reply.
-  let selected: typeof SessionTarget.Type | undefined;
+  let selected: typeof SessionLocator.Type | undefined;
   // Whether a run started in the selected session, so lost first-turn history is detectable.
   let used = false;
   let crashed = false;
   let starting = false;
   let switching = false;
+  // A Send in flight may not have reached the server yet; selection waits for its answer.
+  let sending = false;
   let interrupted = false;
   let connectionScope: Scope.Closeable | undefined;
   const connections = yield* Scope.make();
@@ -170,7 +171,7 @@ const program = Effect.gen(function* () {
   let connectionError = "";
   let sendPrompt:
     | ((
-        target: typeof SessionTarget.Type,
+        target: typeof SessionLocator.Type,
         text: string,
         submissionId?: string,
       ) => Effect.Effect<"accepted" | "uncertain", DesktopError>)
@@ -180,21 +181,19 @@ const program = Effect.gen(function* () {
     | ((projectPath: string) => Effect.Effect<typeof SessionList.Type, HistoryError>)
     | undefined;
   let listModels:
-    | ((target: typeof SessionTarget.Type) => Effect.Effect<typeof ModelList.Type, ModelListError>)
+    | ((target: typeof SessionLocator.Type) => Effect.Effect<typeof ModelList.Type, ModelListError>)
     | undefined;
   let readSession:
     | ((
-        target: typeof SessionTarget.Type,
+        target: typeof SessionLocator.Type,
         writable?: boolean,
       ) => Effect.Effect<typeof Conversation.Type, ReadSessionError | DesktopError>)
     | undefined;
   // Reads the renderer's next target and commits it as the selection only after it loads.
   // A new session draft also needs writable history for its first reply.
-  const select = Effect.fn(function* (target: typeof SessionTarget.Type, writable = false) {
+  const select = Effect.fn(function* (target: typeof SessionLocator.Type, writable = false) {
     if (!readSession) return yield* new DesktopError({ message: "No connected conversation" });
-    const next = yield* readSession(target, writable).pipe(
-      Effect.mapError((error) => new DesktopError({ message: error.message })),
-    );
+    const next = yield* readSession(target, writable);
     selected = target;
     used = false;
     show(next);
@@ -206,38 +205,52 @@ const program = Effect.gen(function* () {
       window.webContents.send("conversation", { _tag: "Snapshot", conversation: next });
   };
   const busy = () => conversation?.status === "running" || conversation?.status === "stopping";
+  // New session and project switch start from an idle, current selection.
+  const idleSelection = Effect.fn(function* (sessionId: string) {
+    if (!readSession || !selected || quitting || switching || sending)
+      return yield* new DesktopError({
+        message: "Wait for the current session to finish loading, then try again.",
+      });
+    if (sessionId !== selected.sessionId)
+      return yield* new DesktopError({
+        message: "The selected session changed. Refresh and try again.",
+      });
+    if (busy())
+      return yield* new DesktopError({ message: "Wait for the current reply or Stop to finish." });
+    return selected;
+  });
+  // A new session draft also needs writable history for its first reply.
+  const selectDraft = Effect.fn(function* (target: typeof SessionLocator.Type) {
+    switching = true;
+    yield* select(target, true).pipe(
+      Effect.mapError((error) => new DesktopError({ message: error.message })),
+      Effect.ensuring(
+        Effect.sync(() => {
+          switching = false;
+        }),
+      ),
+    );
+  });
   ipcMain.handle("new-session", (event, value: unknown) =>
     Effect.runPromise(
       Effect.gen(function* () {
         if (!isTrustedWindow(event))
           return yield* new DesktopError({ message: "Untrusted window" });
+        // The renderer names the session draft it creates; the first Send saves it under this ID.
         const target = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ projectPath: ProjectPath, sessionId: Schema.String }),
+          Schema.Struct({
+            projectPath: ProjectPath,
+            sessionId: Schema.String,
+            draftId: SessionLocator.fields.sessionId,
+          }),
         )(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session target" })),
         );
-        if (!readSession || !selected || quitting || switching)
-          return yield* new DesktopError({ message: "No connected conversation" });
+        const current = yield* idleSelection(target.sessionId);
         // Switching projects is a separate operation, restricted to recent projects.
-        if (target.projectPath !== selected.projectPath)
+        if (target.projectPath !== current.projectPath)
           return yield* new DesktopError({ message: "The selected project changed" });
-        if (target.sessionId !== selected.sessionId)
-          return yield* new DesktopError({
-            message: "The selected session changed. Refresh and try again.",
-          });
-        if (busy())
-          return yield* new DesktopError({
-            message: "Wait for the current reply or Stop to finish.",
-          });
-        switching = true;
-        // A session draft gets its Pi session from the first Send under this ID.
-        yield* select({ projectPath: selected.projectPath, sessionId: randomUUID() }, true).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              switching = false;
-            }),
-          ),
-        );
+        yield* selectDraft({ projectPath: current.projectPath, sessionId: target.draftId });
       }),
     ),
   );
@@ -250,6 +263,7 @@ const program = Effect.gen(function* () {
           Schema.Struct({
             projectPath: ProjectPath,
             sessionId: SessionLocator.fields.sessionId,
+            draftId: SessionLocator.fields.sessionId,
           }),
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         // Pi runs tools in the destination, so only Desktop-selected folders are allowed.
@@ -257,26 +271,8 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({
             message: "Choose this project with the folder picker.",
           });
-        if (!readSession || !selected || quitting || switching)
-          return yield* new DesktopError({
-            message: "Wait for the current session to finish loading, then try again.",
-          });
-        if (target.sessionId !== selected.sessionId)
-          return yield* new DesktopError({
-            message: "The selected session changed. Refresh and try again.",
-          });
-        if (busy())
-          return yield* new DesktopError({
-            message: "Wait for the current reply or Stop to finish.",
-          });
-        switching = true;
-        yield* select({ projectPath: target.projectPath, sessionId: randomUUID() }, true).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              switching = false;
-            }),
-          ),
-        );
+        yield* idleSelection(target.sessionId);
+        yield* selectDraft({ projectPath: target.projectPath, sessionId: target.draftId });
         yield* rememberProject(target.projectPath);
       }).pipe(
         Effect.match({
@@ -294,8 +290,13 @@ const program = Effect.gen(function* () {
         const locator = yield* Schema.decodeUnknownEffect(SessionLocator)(value).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid session identity" })),
         );
-        if (!readSession || quitting || switching)
+        if (!readSession || !selected || quitting || switching || sending)
           return yield* new DesktopError({ message: "No connected conversation" });
+        // Resume stays inside the selected project; switching projects has its own checks.
+        if (locator.projectPath !== selected.projectPath)
+          return yield* new DesktopError({
+            message: "This session belongs to another project. Open that project first.",
+          });
         if (busy())
           return yield* new DesktopError({
             message: "Wait for the current run to finish before resuming a session.",
@@ -303,9 +304,9 @@ const program = Effect.gen(function* () {
         const current = selected;
         switching = true;
         return yield* select(locator).pipe(
-          Effect.tapError(() =>
+          Effect.tapError((error) =>
             // A selected session whose history became unusable must not accept Send.
-            current?.sessionId === locator.sessionId && conversation
+            error._tag === "ReadSessionError" && current.sessionId === locator.sessionId
               ? Effect.sync(() => {
                   if (!conversation) return;
                   show({
@@ -325,8 +326,8 @@ const program = Effect.gen(function* () {
         );
       }).pipe(
         Effect.match({
-          onSuccess: (selection) => ({ conversation: selection, error: "", uncertain: false }),
-          onFailure: (error) => ({ conversation: null, error: error.message, uncertain: false }),
+          onSuccess: (selection) => ({ conversation: selection, error: "" }),
+          onFailure: (error) => ({ conversation: null, error: error.message }),
         }),
       ),
     ),
@@ -406,7 +407,7 @@ const program = Effect.gen(function* () {
         const prompt = yield* Schema.decodeUnknownEffect(Schema.String)(text).pipe(
           Effect.mapError(() => new DesktopError({ message: "Invalid prompt" })),
         );
-        if (!sendPrompt || !selected || quitting || switching)
+        if (!sendPrompt || !selected || quitting || switching || sending)
           return yield* new DesktopError({ message: "Choose a project first" });
         const id = yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.String))(
           submissionId,
@@ -422,7 +423,14 @@ const program = Effect.gen(function* () {
           });
         if (conversation?.status !== "idle")
           return yield* new DesktopError({ message: "Wait for the current reply." });
-        return yield* sendPrompt(selected, prompt, id);
+        sending = true;
+        return yield* sendPrompt(selected, prompt, id).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              sending = false;
+            }),
+          ),
+        );
       }),
     ),
   );
@@ -578,53 +586,6 @@ const program = Effect.gen(function* () {
         }),
       );
   });
-  // Rereads the selection after (re)connecting. Missing history starts a fresh session draft in
-  // the same project; unreadable history stops recovery without replacing the file.
-  const recover = Effect.fn(function* () {
-    const target = selected;
-    if (!target || !readSession)
-      return yield* new RecoveryFailure({ message: "Could not connect to Pi" });
-    const read = readSession;
-    const restored = yield* read(target).pipe(
-      Effect.catchTag("ReadSessionError", (error) =>
-        error.reason === "missing" && error.path !== target.projectPath
-          ? Effect.succeed(undefined)
-          : Effect.fail(
-              new RecoveryFailure({
-                message: error.code
-                  ? `Cannot read saved history (${error.code}): ${error.path}. Check file and folder permissions, then Restart. The file has not been replaced.`
-                  : error.message,
-              }),
-            ),
-      ),
-      Effect.mapError((error) =>
-        error._tag === "RecoveryFailure" ? error : new RecoveryFailure({ message: error.message }),
-      ),
-    );
-    // A session draft whose first turn never saved has nothing to restore either.
-    if (!restored || (used && restored.messageCount === 0)) {
-      selected = { projectPath: target.projectPath, sessionId: randomUUID() };
-      used = false;
-      const fresh = yield* read(selected).pipe(
-        Effect.mapError((error) => new RecoveryFailure({ message: error.message })),
-      );
-      show({
-        ...fresh,
-        error:
-          "Saved history is missing. Started a fresh conversation in the same project; no prompt was replayed.",
-      });
-      return;
-    }
-    show(
-      interrupted && !restored.error
-        ? {
-            ...restored,
-            error:
-              "The previous run was interrupted. Saved history was restored; send a prompt to continue.",
-          }
-        : restored,
-    );
-  });
   const startServer = Effect.fn(function* () {
     starting = true;
     connectionError = "";
@@ -689,6 +650,58 @@ const program = Effect.gen(function* () {
         const scope = yield* Scope.fork(connections, "sequential");
         connectionScope = scope;
         const initial = yield* Deferred.make<typeof Conversation.Type, DesktopError>();
+        // Rereads the selection after (re)connecting. Missing history starts a fresh session
+        // draft in the same project; unreadable history stops recovery without replacing it.
+        const recover = Effect.fn(function* () {
+          const target = selected;
+          const read = readSession;
+          if (!target || !read)
+            return yield* new RecoveryFailure({ message: "Could not connect to Pi" });
+          const restored = yield* read(target).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                if (
+                  error._tag === "ReadSessionError" &&
+                  error.reason === "missing" &&
+                  error.path !== target.projectPath
+                )
+                  return undefined;
+                // A busy server is retried on reconnect; other read failures stop recovery.
+                return yield* error._tag === "ReadSessionError" && error.reason !== "busy"
+                  ? new RecoveryFailure({
+                      message: error.code
+                        ? `Cannot read saved history (${error.code}): ${error.path}. Check file and folder permissions, then Restart. The file has not been replaced.`
+                        : error.message,
+                    })
+                  : new DesktopError({ message: error.message });
+              }),
+            ),
+          );
+          // A finished session draft whose first turn never saved has nothing to restore.
+          if (!restored || (used && restored.status === "idle" && restored.messageCount === 0)) {
+            const fresh = { projectPath: target.projectPath, sessionId: randomUUID() };
+            const draft = yield* read(fresh).pipe(
+              Effect.mapError((error) => new RecoveryFailure({ message: error.message })),
+            );
+            selected = fresh;
+            used = false;
+            show({
+              ...draft,
+              error:
+                "Saved history is missing. Started a fresh conversation in the same project; no prompt was replayed.",
+            });
+            return;
+          }
+          show(
+            interrupted && !restored.error && restored.status === "idle"
+              ? {
+                  ...restored,
+                  error:
+                    "The previous run was interrupted. Saved history was restored; send a prompt to continue.",
+                }
+              : restored,
+          );
+        });
         const connect = Effect.gen(function* () {
           const transport = Layer.effect(
             RpcClient.Protocol,
@@ -789,15 +802,29 @@ const program = Effect.gen(function* () {
             Effect.mapError(() => new DesktopError({ message: "Could not check the current run" })),
           );
           let synced = false;
+          // After a session draft's first run, record the file Pi saved it to, so later
+          // requests validate that exact history instead of finding it by ID.
+          const recordSaved = Effect.fn(function* () {
+            const draft = selected;
+            if (!draft || draft.sessionFile || !readSession) return;
+            const saved = yield* readSession(draft).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            );
+            if (!saved || saved.messageCount === 0 || selected !== draft) return;
+            selected = { ...draft, sessionFile: saved.sessionFile };
+            show({ ...saved, error: conversation?.error || saved.error });
+          });
           yield* client.Subscribe().pipe(
             Stream.runForEach((update) =>
               Effect.gen(function* () {
                 if (!synced) {
-                  // A run may have finished while disconnected; reread the selection first.
+                  // A run may have finished while disconnected; the read replaces the initial
+                  // run state, which may only be a placeholder while the run prepares.
                   synced = true;
                   connectionError = "";
                   yield* recover();
                   if (conversation) yield* Deferred.succeed(initial, conversation);
+                  return;
                 }
                 if (update._tag === "Idle") return;
                 if (update._tag === "Snapshot") {
@@ -814,6 +841,8 @@ const program = Effect.gen(function* () {
                 } else return;
                 if (window && !window.isDestroyed())
                   window.webContents.send("conversation", update);
+                if (update._tag === "StateChanged" && update.status === "idle")
+                  yield* recordSaved();
               }),
             ),
           );
