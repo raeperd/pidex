@@ -56,6 +56,12 @@
   let metadataError = $state("");
   // Switch failures show in the sidebar, which stays visible in the narrow layout.
   let projectError = $state("");
+  // Sorted by name so rows stay put when a switch reorders recent projects.
+  const sidebarProjects = $derived(
+    recentProjects.toSorted(
+      (a, b) => projectName(a).localeCompare(projectName(b)) || a.localeCompare(b),
+    ),
+  );
 
   // Switching is serialized with Send; the owning APIs also reject competing requests.
   const canNavigate = $derived(
@@ -80,6 +86,8 @@
       }
       connected = update !== null;
       if (update?._tag === "Snapshot") {
+        // A switch error belongs to the selection it was raised from.
+        if (conversation?.id !== update.conversation.id) projectError = "";
         conversation = update.conversation;
         crashed = false;
         if (requestedNewFrom && conversation.id !== requestedNewFrom) {
@@ -406,7 +414,7 @@
           </div>
           <!-- A stable order keeps rows from moving under the pointer after a switch. -->
           <div class="max-h-40 overflow-y-auto">
-            {#each recentProjects.toSorted() as projectPath (projectPath)}
+            {#each sidebarProjects as projectPath (projectPath)}
               {@const active = projectPath === conversation.projectPath}
               <button
                 class="mb-0.5 block w-full cursor-pointer truncate rounded-lg border-0 bg-transparent px-2 py-1.5 text-left font-sans text-[13px] text-foreground/90 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:text-foreground disabled:cursor-default disabled:opacity-40"

@@ -518,7 +518,9 @@ const program = Effect.gen(function* () {
         )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
         yield* idleSelection(target.sessionId);
         const folder = yield* pickFolder();
-        if (folder) yield* switchProject(folder, target.sessionId, target.draftId);
+        // Choosing the open project keeps its current session and composer text.
+        if (folder && folder !== selected?.projectPath)
+          yield* switchProject(folder, target.sessionId, target.draftId);
       }).pipe(
         Effect.match({
           onSuccess: () => ({ error: "" }),
