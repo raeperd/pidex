@@ -146,38 +146,82 @@ const program = Effect.gen(function* () {
         catch: () => new OpenError(),
       });
     });
+    // Saves pending Pi settings, reports persistence errors, and frees the session's resources.
+    const release = Effect.fn(function* (session: AgentSession) {
+      yield* Effect.promise(() => session.settingsManager.flush());
+      if (session.settingsManager.drainErrors().length > 0)
+        yield* Effect.logError("Could not save Pi settings");
+      yield* Effect.try(() => session.dispose()).pipe(
+        Effect.catch(() => Effect.logError("Could not release a Pi session")),
+      );
+    });
     // Saved Pi history contains several message variants and tool outcomes.
     // oxlint-disable-next-line complexity
     const describe = Effect.fn(function* (target: typeof selected) {
+      const checkSetup = Effect.fn(function* (view: AgentSession) {
+        const provider = view.settingsManager.getDefaultProvider();
+        const modelId = view.settingsManager.getDefaultModel();
+        if (provider && modelId && !view.modelRuntime.getModel(provider, modelId)) {
+          return yield* new SetupError({
+            reason: "model",
+            message:
+              "Pi's default model could not be resolved. Open Pi in this project, use /model to select an available model and save it as the default, then restart Pidex. Check settings.json and models.json if you use a custom model.",
+          });
+        }
+        const authenticationError = new SetupError({
+          reason: "authentication",
+          message:
+            "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
+        });
+        const candidateModel = view.model;
+        if (!candidateModel) return yield* authenticationError;
+        const auth = yield* Effect.tryPromise({
+          try: () => view.modelRuntime.getAuth(candidateModel),
+          catch: () => authenticationError,
+        });
+        // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
+        if (!auth) return yield* authenticationError;
+        return null;
+      });
       // Pi's session setup records model entries; a throwaway copy keeps reads out of history.
       const header = target.manager.getHeader();
-      const view = yield* openSession({
-        cwd: target.cwd,
-        manager: SessionManager.inMemory(
-          target.cwd,
-          undefined,
-          header ? [header, ...target.manager.getEntries()] : undefined,
-        ),
-      });
-      const setupError = yield* checkSetup(view).pipe(
-        Effect.catch((error) => Effect.succeed(error)),
-        Effect.ensuring(Effect.sync(() => view.dispose())),
+      const { setupError, model, modelName, messageCount } = yield* Effect.acquireUseRelease(
+        openSession({
+          cwd: target.cwd,
+          manager: SessionManager.inMemory(
+            target.cwd,
+            undefined,
+            header ? [header, ...target.manager.getEntries()] : undefined,
+          ),
+        }),
+        (view) =>
+          Effect.gen(function* () {
+            const failure = yield* checkSetup(view).pipe(
+              Effect.catch((error) => Effect.succeed(error)),
+            );
+            return {
+              setupError: failure,
+              // Pi substitutes a placeholder model when none resolves; it is not a model identity.
+              model:
+                view.model && view.modelRuntime.getModel(view.model.provider, view.model.id)
+                  ? { provider: view.model.provider, id: view.model.id }
+                  : null,
+              modelName: failure ? "Setup required" : (view.model?.name ?? "Setup required"),
+              messageCount: view.messages.length,
+            };
+          }),
+        release,
       );
-      // Pi substitutes a placeholder model when none resolves; it is not a model identity.
-      const model =
-        view.model && view.modelRuntime.getModel(view.model.provider, view.model.id)
-          ? { provider: view.model.provider, id: view.model.id }
-          : null;
       let restored: typeof Conversation.Type = {
         id: target.manager.getSessionId(),
         sessionFile: target.manager.getSessionFile() ?? target.cwd,
         projectPath: target.cwd,
-        modelName: setupError ? "Setup required" : (view.model?.name ?? "Setup required"),
+        modelName,
         model,
         setupError,
         status: "idle",
         runId: null,
-        messageCount: view.messages.length,
+        messageCount,
         entries: [],
         error: "",
       };
@@ -237,31 +281,6 @@ const program = Effect.gen(function* () {
         }
       }
       return restored;
-    });
-    const checkSetup = Effect.fn(function* (target: AgentSession) {
-      const provider = target.settingsManager.getDefaultProvider();
-      const modelId = target.settingsManager.getDefaultModel();
-      if (provider && modelId && !target.modelRuntime.getModel(provider, modelId)) {
-        return yield* new SetupError({
-          reason: "model",
-          message:
-            "Pi's default model could not be resolved. Open Pi in this project, use /model to select an available model and save it as the default, then restart Pidex. Check settings.json and models.json if you use a custom model.",
-        });
-      }
-      const authenticationError = new SetupError({
-        reason: "authentication",
-        message:
-          "Pi authentication is unavailable. Open Pi and use /login, or configure your provider's API key in the existing Pi setup, then restart Pidex.",
-      });
-      const candidateModel = target.model;
-      if (!candidateModel) return yield* authenticationError;
-      const auth = yield* Effect.tryPromise({
-        try: () => target.modelRuntime.getAuth(candidateModel),
-        catch: () => authenticationError,
-      });
-      // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
-      if (!auth) return yield* authenticationError;
-      return null;
     });
     if (!selected.manager.getSessionFile()) return yield* new StartupError();
     let state = yield* describe(selected).pipe(Effect.mapError(() => new StartupError()));
@@ -704,7 +723,84 @@ const program = Effect.gen(function* () {
         (session) =>
           Effect.gen(function* () {
             run.session = session;
-            const unsubscribe = session.subscribe(observe(run, session));
+            let messageId = "";
+            // Translates this run's Pi events into conversation updates.
+            const unsubscribe = session.subscribe(
+              // Pi emits several event variants.
+              // oxlint-disable-next-line complexity
+              (event: AgentSessionEvent) => {
+                if (event.type === "agent_start" || event.type === "compaction_start") {
+                  // Pi can start the pending turn after aborting preflight compaction.
+                  if (event.type === "agent_start" && state.status === "stopping")
+                    session.agent.abort();
+                  if (event.type === "compaction_start") {
+                    // Pi installs the compaction controller after notifying subscribers.
+                    queueMicrotask(() => {
+                      if (active === run && state.status === "stopping") session.abortCompaction();
+                    });
+                  }
+                  Effect.runSync(Deferred.succeed(run.started, undefined));
+                }
+                switch (event.type) {
+                  case "message_end":
+                    // Pi can remove failed replies while compacting or retrying.
+                    // Only a later completed assistant attempt replaces this outcome.
+                    if (event.message.role === "assistant")
+                      run.failed = event.message.stopReason === "error";
+                    return;
+                  case "compaction_end":
+                    if (!event.aborted && event.errorMessage) run.failed = true;
+                    return;
+                  case "message_start":
+                    if (event.message.role === "assistant") messageId = crypto.randomUUID();
+                    return;
+                  case "message_update":
+                    if (event.assistantMessageEvent.type !== "text_delta") return;
+                    publish({
+                      _tag: "TextDelta",
+                      id: messageId,
+                      delta: event.assistantMessageEvent.delta,
+                    });
+                    return;
+                  case "tool_execution_start":
+                    publish({
+                      _tag: "EntryUpserted",
+                      entry: {
+                        id: event.toolCallId,
+                        role: "tool",
+                        name: event.toolName,
+                        input: JSON.stringify(event.args, null, 2),
+                        result: "",
+                        status: "running",
+                      },
+                    });
+                    return;
+                  case "tool_execution_update":
+                  case "tool_execution_end": {
+                    const entry = state.entries.find((item) => item.id === event.toolCallId);
+                    if (entry?.role !== "tool") return;
+                    publish({
+                      _tag: "EntryUpserted",
+                      entry: {
+                        ...entry,
+                        result: JSON.stringify(
+                          event.type === "tool_execution_end" ? event.result : event.partialResult,
+                          null,
+                          2,
+                        ),
+                        status:
+                          event.type === "tool_execution_update"
+                            ? "running"
+                            : event.isError
+                              ? "failed"
+                              : "completed",
+                      },
+                    });
+                    return;
+                  }
+                }
+              },
+            );
             yield* Effect.tryPromise({
               try: () => session.prompt(text),
               catch: () =>
@@ -717,11 +813,7 @@ const program = Effect.gen(function* () {
               Effect.ensuring(Effect.sync(unsubscribe)),
             );
           }),
-        (session) =>
-          Effect.tryPromise(() => session.settingsManager.flush()).pipe(
-            Effect.catch(() => Effect.logError("Could not flush Pi settings after a run")),
-            Effect.ensuring(Effect.sync(() => session.dispose())),
-          ),
+        release,
       ).pipe(
         Effect.andThen(
           Effect.suspend(() =>
@@ -757,78 +849,6 @@ const program = Effect.gen(function* () {
         Effect.forkIn(scope),
       );
     });
-    // Translates one run's Pi events into conversation updates; Pi emits several event variants.
-    const observe =
-      (run: NonNullable<typeof active>, session: AgentSession) =>
-      // oxlint-disable-next-line complexity
-      (event: AgentSessionEvent) => {
-        if (event.type === "agent_start" || event.type === "compaction_start") {
-          // Pi can start the pending turn after aborting preflight compaction.
-          if (event.type === "agent_start" && state.status === "stopping") session.agent.abort();
-          if (event.type === "compaction_start") {
-            // Pi installs the compaction controller after notifying subscribers.
-            queueMicrotask(() => {
-              if (active === run && state.status === "stopping") session.abortCompaction();
-            });
-          }
-          Effect.runSync(Deferred.succeed(run.started, undefined));
-        }
-        switch (event.type) {
-          case "message_end":
-            // Pi can remove failed replies while compacting or retrying.
-            // Only a later completed assistant attempt replaces this outcome.
-            if (event.message.role === "assistant")
-              run.failed = event.message.stopReason === "error";
-            return;
-          case "compaction_end":
-            if (!event.aborted && event.errorMessage) run.failed = true;
-            return;
-          case "message_start":
-            if (event.message.role === "assistant") messageId = crypto.randomUUID();
-            return;
-          case "message_update":
-            if (event.assistantMessageEvent.type !== "text_delta") return;
-            publish({ _tag: "TextDelta", id: messageId, delta: event.assistantMessageEvent.delta });
-            return;
-          case "tool_execution_start":
-            publish({
-              _tag: "EntryUpserted",
-              entry: {
-                id: event.toolCallId,
-                role: "tool",
-                name: event.toolName,
-                input: JSON.stringify(event.args, null, 2),
-                result: "",
-                status: "running",
-              },
-            });
-            return;
-          case "tool_execution_update":
-          case "tool_execution_end": {
-            const entry = state.entries.find((item) => item.id === event.toolCallId);
-            if (entry?.role !== "tool") return;
-            publish({
-              _tag: "EntryUpserted",
-              entry: {
-                ...entry,
-                result: JSON.stringify(
-                  event.type === "tool_execution_end" ? event.result : event.partialResult,
-                  null,
-                  2,
-                ),
-                status:
-                  event.type === "tool_execution_update"
-                    ? "running"
-                    : event.isError
-                      ? "failed"
-                      : "completed",
-              },
-            });
-            return;
-          }
-        }
-      };
-    let messageId = "";
     const stop = Effect.fn(function* ({ runId }: { runId: string }) {
       const run = active;
       if (!run || run.id !== runId) return;
