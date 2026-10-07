@@ -132,15 +132,22 @@ const program = Effect.gen(function* () {
             appendSystemPrompt: [],
           });
           await resourceLoader.reload();
+          const modelRuntime = await ModelRuntime.create({ signal });
+          // An abandoned open must not touch the session history.
+          signal.throwIfAborted();
           const { session } = await createAgentSession({
             cwd: target.cwd,
             agentDir,
             resourceLoader,
             settingsManager: SettingsManager.create(target.cwd, agentDir),
-            modelRuntime: await ModelRuntime.create({ signal }),
+            modelRuntime,
             sessionManager: target.manager,
             tools: ["read", "bash", "edit", "write"],
           });
+          if (signal.aborted) {
+            session.dispose();
+            signal.throwIfAborted();
+          }
           return session;
         },
         catch: () => new OpenError(),
@@ -180,10 +187,15 @@ const program = Effect.gen(function* () {
         });
         const candidateModel = view.model;
         if (!candidateModel) return yield* authenticationError;
+        // A credential refresh can wait on a held lock; an unanswered check counts as missing.
         const auth = yield* Effect.tryPromise({
           try: () => view.modelRuntime.getAuth(candidateModel),
           catch: () => authenticationError,
-        });
+        }).pipe(
+          Effect.interruptible,
+          Effect.timeout("10 seconds"),
+          Effect.mapError(() => authenticationError),
+        );
         // Pi also resolves AWS credential chains and Vertex ADC without API keys or headers.
         if (!auth) return yield* authenticationError;
         return null;
