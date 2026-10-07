@@ -11,6 +11,14 @@ export const SessionLocator = Schema.Struct({
   sessionFile: ProjectPath,
 });
 
+// The session a request targets. A session draft has no file until its first saved reply;
+// the server then finds the file by session ID.
+export const SessionTarget = Schema.Struct({
+  projectPath: ProjectPath,
+  sessionId: SessionLocator.fields.sessionId,
+  sessionFile: Schema.optional(ProjectPath),
+});
+
 export class HistoryError extends Schema.TaggedError<HistoryError>()("HistoryError", {
   path: ProjectPath,
   message: Schema.String,
@@ -86,7 +94,10 @@ export const Conversation = Schema.Struct({
 });
 
 export const ConversationUpdate = Schema.Union([
+  // A run's conversation, sent when the run starts and to new subscribers during it.
   Schema.Struct({ _tag: Schema.Literal("Snapshot"), conversation: Conversation }),
+  // Sent to new subscribers when no run is active.
+  Schema.Struct({ _tag: Schema.Literal("Idle") }),
   Schema.Struct({
     _tag: Schema.Literal("EntryUpserted"),
     sessionId: Schema.optional(Schema.String),
@@ -121,15 +132,11 @@ export class StopError extends Schema.TaggedError<StopError>()("StopError", {
   message: Schema.String,
 }) {}
 
-export class NewSessionError extends Schema.TaggedError<NewSessionError>()("NewSessionError", {
-  message: Schema.String,
-}) {}
-
-export class ResumeError extends Schema.TaggedError<ResumeError>()("ResumeError", {
-  message: Schema.String,
-}) {}
-
-export class RecoveryError extends Schema.TaggedError<RecoveryError>()("RecoveryError", {
+export class ReadSessionError extends Schema.TaggedError<ReadSessionError>()("ReadSessionError", {
+  // missing: the project folder or session file does not exist; unavailable: it cannot be used.
+  reason: Schema.Literals(["missing", "unavailable"]),
+  path: ProjectPath,
+  code: Schema.optional(Schema.String),
   message: Schema.String,
 }) {}
 
@@ -139,42 +146,38 @@ export const ConversationApi = RpcGroup.make(
     success: SessionList,
     error: HistoryError,
   }),
+  Rpc.make("ReadSession", {
+    // `writable` also requires a session draft to be able to save its first reply.
+    payload: { ...SessionTarget.fields, writable: Schema.optional(Schema.Boolean) },
+    success: Conversation,
+    error: ReadSessionError,
+  }),
   Rpc.make("ListModels", {
-    payload: { sessionId: SessionLocator.fields.sessionId },
+    payload: { projectPath: ProjectPath, sessionId: SessionLocator.fields.sessionId },
     success: ModelList,
     error: ModelListError,
   }),
   Rpc.make("Subscribe", {
     success: ConversationUpdate,
-    error: Schema.Union([SubscribeError, RecoveryError]),
+    error: SubscribeError,
     stream: true,
   }),
   Rpc.make("Send", {
     payload: {
+      target: SessionTarget,
       text: Schema.String,
       submissionId: Schema.optional(Schema.String),
-      // The session the composer targeted; a replaced session rejects the prompt.
-      sessionId: Schema.optional(SessionLocator.fields.sessionId),
     },
     error: SendError,
   }),
   Rpc.make("Stop", { payload: { runId: Schema.String }, error: StopError }),
-  Rpc.make("NewSession", {
-    payload: { projectPath: ProjectPath, sessionId: SessionLocator.fields.sessionId },
-    success: Schema.Struct({ sessionFile: ProjectPath }),
-    error: NewSessionError,
-  }),
-  Rpc.make("ResumeSession", {
-    payload: SessionLocator.fields,
-    success: Conversation,
-    error: ResumeError,
-  }),
 );
 
 export function applyConversationUpdate(
   current: typeof Conversation.Type,
   update: typeof ConversationUpdate.Type,
 ): typeof Conversation.Type {
+  if (update._tag === "Idle") return current;
   if (update._tag !== "Snapshot" && update.sessionId && update.sessionId !== current.id)
     return current;
   switch (update._tag) {

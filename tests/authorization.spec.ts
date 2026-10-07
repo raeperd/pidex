@@ -7,11 +7,7 @@ import { mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promis
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  applyConversationUpdate,
-  Conversation,
-  ConversationUpdate,
-} from "../packages/api/index.js";
+import { Conversation, ConversationUpdate } from "../packages/api/index.js";
 
 // Playwright requires destructuring even when only testInfo is needed.
 // oxlint-disable-next-line no-empty-pattern
@@ -33,6 +29,8 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
   );
   const providerInputs: string[] = [];
   let providerRequests = 0;
+  // The selected session; every server request names its target.
+  let target: { projectPath: string; sessionId: string } | undefined;
   const provider = createServer(async (request, response) => {
     providerRequests++;
     let body = "";
@@ -151,9 +149,21 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
     const history = await readFile(historyPath);
     expect(history.toString()).toContain("Saved pear");
     const ui = await conversation.innerHTML();
+    const selected = await page.evaluate(() => window.desktop.chooseProject());
+    if (!selected) throw new Error("Expected the selected session");
+    target = { projectPath: selected.projectPath, sessionId: selected.id };
     const control = await connect(connection.authorization, "pidex://app", "Subscribe");
-    await expect.poll(() => control.state?.status).toBe("idle");
-    const before = JSON.stringify(control.state);
+    await expect
+      .poll(() => control.messages.some((message) => message._tag === "Chunk"))
+      .toBe(true);
+    // A server round trip that reads the selected session's saved state.
+    const read = async () => {
+      const reader = await connect(connection.authorization, "pidex://app", "ReadSession");
+      await expect.poll(() => reader.state !== undefined).toBe(true);
+      reader.socket.close();
+      return reader.state;
+    };
+    const before = JSON.stringify(await read());
     expect(before).toContain("Saved pear");
     for (const [name, authorization, origin] of [
       ["absent credential", undefined, "pidex://app"],
@@ -167,12 +177,9 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
           expect(rejected.opened).toBe(false);
           expect(rejected.messages).toEqual([]);
           expect(rejected.responseBytes).toBe(0);
-          // A fresh snapshot is a server round trip after rejection, not a timing sleep.
-          const checkpoint = await connect(connection.authorization, "pidex://app", "Subscribe");
-          await expect.poll(() => checkpoint.state !== undefined).toBe(true);
-          expect(JSON.stringify(checkpoint.state)).toBe(before);
-          checkpoint.socket.close();
-          expect(JSON.stringify(control.state)).toBe(before);
+          // A fresh read is a server round trip after rejection, not a timing sleep.
+          expect(JSON.stringify(await read())).toBe(before);
+          expect(control.messages.filter((message) => message._tag === "Chunk")).toHaveLength(1);
           expect(await conversation.innerHTML()).toBe(ui);
           expect(await readFile(historyPath)).toEqual(history);
           expect(providerRequests).toBe(1);
@@ -183,7 +190,7 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
       _tag: "Request",
       id: "2",
       tag: "Send",
-      payload: { text: "Reply hello" },
+      payload: { target, text: "Reply hello" },
       headers: [],
     });
     await expect
@@ -197,21 +204,21 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
       )
       .toBe(true);
     await expect
-      .poll(() =>
-        control.state?.entries.some(
-          (entry) => entry.role === "assistant" && entry.text === "hello",
-        ),
-      )
+      .poll(async () => {
+        const state = await read();
+        return (
+          state?.status === "idle" &&
+          state.entries.some((entry) => entry.role === "assistant" && entry.text === "hello")
+        );
+      })
       .toBe(true);
-    await expect.poll(() => control.state?.status).toBe("idle");
+    const after = await read();
     await expect(conversation.getByText("hello", { exact: true })).toBeVisible();
     await expect(conversation.getByRole("status")).toHaveText("Idle");
     expect(providerRequests).toBe(2);
     expect(providerInputs[1]).toContain("Reply hello");
     expect(
-      control.state?.entries.filter(
-        (entry) => entry.role === "user" && entry.text === "Reply hello",
-      ),
+      after?.entries.filter((entry) => entry.role === "user" && entry.text === "Reply hello"),
     ).toHaveLength(1);
     expect(await readFile(historyPath, "utf8")).toContain("Reply hello");
     const payloads = await observation.evaluate((value) => value.payloads());
@@ -258,7 +265,9 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
       _tag: Schema.String,
       requestId: Schema.optional(Schema.String),
       values: Schema.optional(Schema.Array(ConversationUpdate)),
-      exit: Schema.optional(Schema.Struct({ _tag: Schema.String })),
+      exit: Schema.optional(
+        Schema.Struct({ _tag: Schema.String, value: Schema.optional(Schema.Unknown) }),
+      ),
     });
     const socket = new NodeSocket.NodeWS.WebSocket(url, {
       headers: { ...(authorization ? { authorization } : {}), ...(origin ? { origin } : {}) },
@@ -293,10 +302,8 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
         for (const line of data.toString().trim().split("\n")) {
           const message = Schema.decodeUnknownSync(Message)(JSON.parse(line));
           result.messages.push(message);
-          for (const update of message.values ?? []) {
-            if (update._tag === "Snapshot") state = update.conversation;
-            else if (state) state = applyConversationUpdate(state, update);
-          }
+          if (method === "ReadSession" && message.exit?._tag === "Success")
+            state = Schema.decodeUnknownSync(Conversation)(message.exit.value);
           if (message._tag === "Chunk") result.send({ _tag: "Ack", requestId: message.requestId });
         }
       });
@@ -306,7 +313,12 @@ test("#140 rejects unauthorized Send and Subscribe before work or delivery", asy
           _tag: "Request",
           id: "1",
           tag: method,
-          payload: method === "Send" ? { text: "Reply hello" } : null,
+          payload:
+            method === "Send"
+              ? { target, text: "Reply hello" }
+              : method === "ReadSession"
+                ? target
+                : null,
           headers: [],
         });
         done();
