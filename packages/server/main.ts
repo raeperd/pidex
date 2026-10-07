@@ -117,7 +117,7 @@ const program = Effect.gen(function* () {
     // Each open rebuilds project-bound resources: context files, settings, models, and tools.
     const openSession = Effect.fn(function* (target: typeof selected) {
       return yield* Effect.tryPromise({
-        try: async () => {
+        try: async (signal) => {
           const resourceLoader = new DefaultResourceLoader({
             cwd: target.cwd,
             agentDir,
@@ -137,14 +137,19 @@ const program = Effect.gen(function* () {
             agentDir,
             resourceLoader,
             settingsManager: SettingsManager.create(target.cwd, agentDir),
-            modelRuntime: await ModelRuntime.create(),
+            modelRuntime: await ModelRuntime.create({ signal }),
             sessionManager: target.manager,
             tools: ["read", "bash", "edit", "write"],
           });
           return session;
         },
         catch: () => new OpenError(),
-      });
+      }).pipe(
+        // Pi's credential refresh can wait on a held lock; bound it even in uninterruptible RPCs.
+        Effect.interruptible,
+        Effect.timeout("10 seconds"),
+        Effect.mapError(() => new OpenError()),
+      );
     });
     // Saves pending Pi settings, reports persistence errors, and frees the session's resources.
     const release = Effect.fn(function* (session: AgentSession) {
