@@ -48,7 +48,6 @@
   let replacing = $state(false);
   let requestedNewFrom: string | undefined;
   let resumeTarget = $state.raw<typeof SessionLocator.Type>();
-  let resumeUncertain = $state(false);
   let recentProjects = $state.raw<string[]>([]);
   let metadataError = $state("");
 
@@ -89,7 +88,6 @@
           draft = "";
           pending = undefined;
           resumeTarget = undefined;
-          resumeUncertain = false;
           error = "";
         }
       } else if (update && conversation)
@@ -126,12 +124,6 @@
       if (failure) error = failure;
       else {
         crashed = false;
-        if (resumeTarget) {
-          resumeTarget = undefined;
-          resumeUncertain = false;
-          draft = "";
-          pending = undefined;
-        }
       }
     } catch {
       error = "Could not restart the backend. Try Restart again.";
@@ -225,7 +217,7 @@
     requestedNewFrom = selected.id;
     error = "";
     try {
-      await window.desktop.newSession(selected.projectPath, selected.id);
+      await window.desktop.newSession(selected.projectPath, selected.id, crypto.randomUUID());
       draft = "";
       pending = undefined;
       requestedNewFrom = undefined;
@@ -248,41 +240,23 @@
 
   async function resumeSession(locator: typeof SessionLocator.Type) {
     if (replacing || busy || sending) return "Wait for the current run to finish before resuming.";
-    if (
-      resumeTarget &&
-      (resumeTarget.projectPath !== locator.projectPath ||
-        resumeTarget.sessionId !== locator.sessionId ||
-        resumeTarget.sessionFile !== locator.sessionFile)
-    )
-      return "Resolve the pending resume before selecting another session.";
     replacing = true;
     resumeTarget = locator;
-    resumeUncertain = false;
     try {
       const result = await window.desktop.resumeSession(locator);
-      if (result.uncertain) {
-        resumeUncertain = Boolean(resumeTarget);
-        return resumeUncertain ? result.error : "";
-      }
-      if (result.error || !result.conversation) {
-        resumeTarget = undefined;
-        resumeUncertain = false;
+      if (result.error || !result.conversation)
         return result.error || "Could not resume the session.";
-      }
       conversation = result.conversation;
       draft = "";
       pending = undefined;
-      resumeTarget = undefined;
-      resumeUncertain = false;
       showSessions = false;
       await tick();
       editor?.focus();
       return "";
     } catch {
-      resumeTarget = undefined;
-      resumeUncertain = false;
       return "Could not resume the session. Check the connection, then Retry.";
     } finally {
+      resumeTarget = undefined;
       replacing = false;
     }
   }
@@ -361,7 +335,7 @@
               conversation.status !== "idle" ||
               replacing ||
               sending ||
-              (Boolean(resumeTarget) && !resumeUncertain)}
+              Boolean(resumeTarget)}
             onnew={newSession}
             onresume={resumeSession}
             oncurrent={async () => {
@@ -450,7 +424,7 @@
           <div class="max-h-[20dvh] overflow-auto [&:not(:empty)]:mb-3">
             {#if conversation.setupError}<p role="alert">{conversation.setupError.message}</p>{/if}
             {#if conversation.error}<p role="alert">{conversation.error}</p>{/if}
-            {#if crashed || conversation.status === "unavailable" || resumeUncertain}
+            {#if crashed || conversation.status === "unavailable"}
               {#if crashed}<p role="alert">
                   The backend stopped. Restart to recover saved history.
                 </p>{/if}

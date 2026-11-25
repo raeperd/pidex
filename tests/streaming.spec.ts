@@ -1,6 +1,7 @@
 import { _electron as electron, expect } from "@playwright/test";
 import { testHeadlessFlag } from "./support/headless.js";
-import { mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile, readdir, realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { execFileSync, fork } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
@@ -340,8 +341,12 @@ test("#130 streams Markdown and tools, rejects invalid sends, saves history, and
     expect(providerRequests).toBe(2);
     expect(await acknowledgement.evaluate((gate) => gate.connections())).toBe(1);
     const updates = await acknowledgement.evaluate((gate) => gate.updates());
+    // The server sends one initial run state; the transcript comes from reading the session.
+    expect(updates.wire.filter((message) => message.includes('"_tag":"Idle"'))).toHaveLength(1);
+    expect(updates.wire.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(0);
+    // One read when the project opens, and one when the draft's first reply is saved.
+    expect(updates.ipc.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(2);
     for (const messages of [updates.wire, updates.ipc]) {
-      expect(messages.filter((message) => message.includes('"_tag":"Snapshot"'))).toHaveLength(1);
       const deltas = messages.filter((message) => message.includes('"_tag":"TextDelta"'));
       expect(deltas).toHaveLength(14);
       expect(deltas[0]).toContain('"delta":"Writing "');
@@ -573,9 +578,8 @@ test.describe("#130 subscription limits", () => {
         }
       });
       const [rawReady] = await once(child, "message");
-      const ready = Schema.decodeUnknownSync(
-        Schema.Struct({ port: Schema.Number, sessionFile: Schema.String }),
-      )(rawReady);
+      const ready = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(rawReady);
+      const target = { projectPath: await realpath(temporary), sessionId: randomUUID() };
       const Message = Schema.Struct({
         _tag: Schema.String,
         requestId: Schema.optional(Schema.String),
@@ -632,7 +636,7 @@ test.describe("#130 subscription limits", () => {
         _tag: "Request",
         id: "2",
         tag: "Send",
-        payload: { text: "Stream a controlled response" },
+        payload: { target, text: "Stream a controlled response" },
         headers: [],
       });
       await fast.next(
@@ -640,6 +644,26 @@ test.describe("#130 subscription limits", () => {
           message.values?.some((value) => value._tag === "TextDelta" && value.delta === "start") ===
           true,
       );
+      if (scenario === "item budget") {
+        // The server owns the one-run rule: another session can be neither read nor run.
+        const other = { projectPath: target.projectPath, sessionId: randomUUID() };
+        fast.send({ _tag: "Request", id: "3", tag: "ReadSession", payload: other, headers: [] });
+        const read = await fast.next(
+          (message) => message._tag === "Exit" && message.requestId === "3",
+        );
+        expect(JSON.stringify(read.exit)).toContain('"reason":"busy"');
+        fast.send({
+          _tag: "Request",
+          id: "4",
+          tag: "Send",
+          payload: { target: other, text: "Competing prompt" },
+          headers: [],
+        });
+        const competing = await fast.next(
+          (message) => message._tag === "Exit" && message.requestId === "4",
+        );
+        expect(JSON.stringify(competing.exit)).toContain("Wait for the current reply");
+      }
       const part =
         scenario === "item budget"
           ? "x"
@@ -716,9 +740,13 @@ test.describe("#130 subscription limits", () => {
           );
       }
       await expect
-        .poll(async () =>
-          (await readFile(ready.sessionFile, "utf8").catch(() => "")).includes(expected),
-        )
+        .poll(async () => {
+          const files = await readdir(join(agentDir, "sessions"), { recursive: true });
+          const saved = files.find((file) => file.endsWith(`_${target.sessionId}.jsonl`));
+          return saved
+            ? (await readFile(join(agentDir, "sessions", saved), "utf8")).includes(expected)
+            : false;
+        })
         .toBe(true);
       expect(requests).toBe(1);
     });

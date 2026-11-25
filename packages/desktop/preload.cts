@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("desktop", {
-  newSession: (projectPath: string, sessionId: string) =>
-    ipcRenderer.invoke("new-session", { projectPath, sessionId }),
+  newSession: (projectPath: string, sessionId: string, draftId: string) =>
+    ipcRenderer.invoke("new-session", { projectPath, sessionId, draftId }),
   listSessions: (projectPath: string) => ipcRenderer.invoke("list-sessions", projectPath),
   listModels: (sessionId: string) => ipcRenderer.invoke("list-models", sessionId),
   resumeSession: (locator: unknown) => ipcRenderer.invoke("resume-session", locator),
@@ -16,8 +16,8 @@ contextBridge.exposeInMainWorld("desktop", {
   stop: (runId: string) => ipcRenderer.invoke("stop-run", runId),
   send: (text: string, submissionId?: string, sessionId?: string) =>
     ipcRenderer.invoke("send-prompt", text, submissionId, sessionId),
-  switchProject: (projectPath: string, sessionId: string) =>
-    ipcRenderer.invoke("switch-project", { projectPath, sessionId }),
+  switchProject: (projectPath: string, sessionId: string, draftId: string) =>
+    ipcRenderer.invoke("switch-project", { projectPath, sessionId, draftId }),
   subscribe: (onChange: (value: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown) => onChange(value);
     ipcRenderer.on("conversation", listener);

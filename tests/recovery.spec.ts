@@ -235,7 +235,8 @@ test("#135 clears the crash notice when Restart completes in a recreated window"
         const prototype = NodeSocket.NodeWS.WebSocket.prototype;
         const original = prototype.emit;
         prototype.emit = function (event: string | symbol, ...args: unknown[]) {
-          if (event === "message" && String(args[0]).includes('"Snapshot"')) {
+          // The first restored conversation: the recovery read of the selected session.
+          if (event === "message" && String(args[0]).includes('"entries"')) {
             prototype.emit = original;
             process
               .getBuiltinModule("events")
