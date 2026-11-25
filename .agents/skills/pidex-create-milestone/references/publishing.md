@@ -31,7 +31,7 @@ Use this workflow for requested GitHub milestone creation or updates. Prepare th
 
 4. Verify and report.
    - Fetch the milestone again and compare its full description with the prepared file; verify it begins with prose rather than a duplicate title heading, and that title, state, and due date changed only as intended.
-   - For migrations, verify publication before replacing old repository specs with short links to the milestone. Keep durable repository guidance in docs.
+   - For migrations, verify publication before removing old repository specs. Keep durable repository guidance in docs.
    - Report the verified milestone URL. Issue publication is a separate requested operation through [pidex-create-issues](../../pidex-create-issues/SKILL.md).
 
 References: [gh api](https://cli.github.com/manual/gh_api) for file-backed fields and pagination; [GitHub milestone API](https://docs.github.com/en/rest/issues/milestones) for create and update fields.
