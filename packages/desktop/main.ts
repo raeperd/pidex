@@ -272,9 +272,7 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({
             message: "Choose this project with the folder picker.",
           });
-        yield* idleSelection(target.sessionId);
-        yield* selectDraft({ projectPath: target.projectPath, sessionId: target.draftId });
-        yield* rememberProject(target.projectPath);
+        yield* switchProject(target.projectPath, target.sessionId, target.draftId);
       }).pipe(
         Effect.match({
           onSuccess: () => ({ error: "" }),
@@ -501,30 +499,68 @@ const program = Effect.gen(function* () {
           return yield* new DesktopError({ message: "Untrusted window" });
         }
         if (conversation) return conversation;
-        const activeWindow = window;
-        if (!activeWindow || choosing || quitting) return null;
-        choosing = true;
-        return yield* Effect.gen(function* () {
-          const selection = yield* Effect.tryPromise({
-            try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
-            catch: () => new DesktopError({ message: "Could not choose a project" }),
-          });
-          const cwd = selection.filePaths[0];
-          if (selection.canceled || !cwd) return null;
-          return yield* Effect.tryPromise({
-            try: () => realpath(cwd),
-            catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
-          }).pipe(Effect.flatMap(openProject));
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              choosing = false;
-            }),
-          ),
-        );
+        const folder = yield* pickFolder();
+        return folder ? yield* openProject(folder) : null;
       }),
     ),
   );
+  // Adds a project from the native folder picker and switches to a new session draft there.
+  ipcMain.handle("add-project", (event, value: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        if (!isTrustedWindow(event))
+          return yield* new DesktopError({ message: "Untrusted window" });
+        const target = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            sessionId: SessionLocator.fields.sessionId,
+            draftId: SessionLocator.fields.sessionId,
+          }),
+        )(value).pipe(Effect.mapError(() => new DesktopError({ message: "Invalid project" })));
+        yield* idleSelection(target.sessionId);
+        const folder = yield* pickFolder();
+        // Choosing the open project keeps its current session and composer text.
+        if (folder && folder !== selected?.projectPath)
+          yield* switchProject(folder, target.sessionId, target.draftId);
+      }).pipe(
+        Effect.match({
+          onSuccess: () => ({ error: "" }),
+          onFailure: (error) => ({ error: error.message }),
+        }),
+      ),
+    ),
+  );
+  const switchProject = Effect.fn(function* (
+    projectPath: string,
+    sessionId: string,
+    draftId: string,
+  ) {
+    yield* idleSelection(sessionId);
+    yield* selectDraft({ projectPath, sessionId: draftId });
+    yield* rememberProject(projectPath);
+  });
+  const pickFolder = Effect.fn(function* () {
+    const activeWindow = window;
+    if (!activeWindow || choosing || quitting) return null;
+    choosing = true;
+    return yield* Effect.gen(function* () {
+      const selection = yield* Effect.tryPromise({
+        try: () => dialog.showOpenDialog(activeWindow, { properties: ["openDirectory"] }),
+        catch: () => new DesktopError({ message: "Could not choose a project" }),
+      });
+      const cwd = selection.filePaths[0];
+      if (selection.canceled || !cwd) return null;
+      return yield* Effect.tryPromise({
+        try: () => realpath(cwd),
+        catch: () => new DesktopError({ message: "Could not resolve the project directory" }),
+      });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          choosing = false;
+        }),
+      ),
+    );
+  });
   ipcMain.handle("restart-backend", (event) =>
     Effect.runPromise(
       Effect.gen(function* () {

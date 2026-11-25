@@ -19,6 +19,7 @@ declare global {
         error: string;
       }>;
       chooseProject: () => Promise<typeof Conversation.Type | null>;
+      addProject: (sessionId: string, draftId: string) => Promise<{ error: string }>;
       recentProjects: () => Promise<{ projects: string[]; error: string }>;
       openProject: (projectPath: string) => Promise<{
         conversation: typeof Conversation.Type | null;
