@@ -131,6 +131,31 @@ test("#195 switches idle work to another project with its instructions, working 
   await page.screenshot({ path: info.outputPath("switched-back.png") });
 });
 
+test("#195 opens the selected session for each run with current context files", async ({
+  lifecycle,
+}) => {
+  const instructions = join(lifecycle.project, "AGENTS.md");
+  await writeFile(instructions, "Instructions before the first run.");
+  const { page } = await lifecycle.launch();
+  const prompt = page.getByRole("textbox", { name: "Prompt" });
+  await prompt.fill("First prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requestBodies.length).toBe(1);
+  expect(lifecycle.requestBodies[0]).toContain("Instructions before the first run.");
+  lifecycle.complete("First reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+
+  await writeFile(instructions, "Instructions edited between runs.");
+  await prompt.fill("Second prompt");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => lifecycle.requestBodies.length).toBe(2);
+  expect(lifecycle.requestBodies[1]).toContain("Instructions edited between runs.");
+  expect(lifecycle.requestBodies[1]).toContain("First reply");
+  lifecycle.complete("Second reply");
+  await expect(page.getByRole("status")).toHaveText("Idle");
+  expect(await lifecycle.history()).toHaveLength(1);
+});
+
 test("#195 rejects switching, New session, Resume session, and stale or competing sends while running or stopping", async ({
   lifecycle,
 }) => {

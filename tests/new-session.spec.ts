@@ -163,17 +163,18 @@ test("#192 serializes simultaneous New session and Send against one selected ses
     await expect(page.getByRole("status")).toHaveText("Idle");
     expect(await lifecycle.history()).toHaveLength(1);
   } else {
+    // The new session's snapshot can arrive just after New session resolves.
     const current = await page.evaluate(
-      () =>
+      (previous) =>
         new Promise<{ id: string; entryCount: number }>((resolve) => {
           const unsubscribe = window.desktop.subscribe((value) => {
-            if (value?._tag !== "Snapshot") return;
+            if (value?._tag !== "Snapshot" || value.conversation.id === previous) return;
             unsubscribe();
             resolve({ id: value.conversation.id, entryCount: value.conversation.entries.length });
           });
         }),
+      selected.id,
     );
-    expect(current.id).not.toBe(selected.id);
     expect(current.entryCount).toBe(0);
     expect(lifecycle.requests).toHaveLength(0);
   }

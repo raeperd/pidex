@@ -9,8 +9,7 @@ Pi terminology is authoritative for agent execution and persistence. Pidex adds 
 | Session                 | A Pidex work context backed by one native Pi session, with supporting UI metadata and resources.                                       | One-to-one with a Pi session; Pidex metadata stays separate from Pi history.                      |
 | Pi session              | The native conversation identity and history backing a Pidex session.                                                                  | `sessionId`, `SessionManager`                                                                     |
 | Session file            | Pi-owned JSONL history. A new session can exist before its file is written.                                                            | `sessionFile`                                                                                     |
-| Active session          | The live session handling prompts, messages, model state, and events.                                                                  | `AgentSession`                                                                                    |
-| Session runtime         | The owner that replaces the active session and rebuilds services tied to the working directory.                                        | `AgentSessionRuntime`                                                                             |
+| Active session          | The live session a run opens for its target to handle prompts, model state, and events; disposed when the run ends.                    | `AgentSession`                                                                                    |
 | Prompt                  | User input submitted to the active session.                                                                                            | `session.prompt(...)`                                                                             |
 | Run                     | Pidex's execution of one accepted prompt through completion, failure, or cancellation, including retries and any turns it requires.    | The accepted `prompt()` execution, rather than a single low-level `agent_start`/`agent_end` pair. |
 | Turn                    | One model response and its tool calls. A run may contain multiple turns.                                                               | `turn_start`, `turn_end`                                                                          |
@@ -34,7 +33,7 @@ Pi terminology is authoritative for agent execution and persistence. Pidex adds 
 
 ## Actions and lifecycle
 
-- **New session** creates a fresh active session through the session runtime. **Resume session** selects saved history and replaces the active session through the same owner. Neither action sends a prompt.
+- **New session** selects a new session draft; **Resume session** selects saved history. Neither action sends a prompt or keeps a live session open; the next run opens the selected session.
 - **Send** accepts a prompt and starts a run. Acceptance is distinct from completion; composer text clears only after confirmed acceptance.
 - **Stop** cancels the active run and waits for cancellation. It preserves the session and does not undo tool changes.
 - A Pi turn ending does not finish a Pidex run. A low-level `agent_end` can also precede automatic retries or continuation; run completion must account for the full accepted prompt execution.
